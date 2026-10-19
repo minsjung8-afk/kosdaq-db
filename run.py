@@ -29,7 +29,7 @@ def corp_pairs(con, limit=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "biz", "price", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "price", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -50,6 +50,9 @@ def main():
     if a.job in ("fin", "all"):
         import financials
         financials.run(ccs, years, interim=not a.no_interim)
+    if a.job == "kpi":
+        import financials
+        print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")
     if a.job in ("biz", "all"):
         import business
         business.run(ccs, a.years[-1] if a.years else a.year - 1)   # 최신 사업보고서 = 직전 연도

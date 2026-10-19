@@ -100,6 +100,12 @@ CREATE TABLE IF NOT EXISTS fin_kpi (
     debt_ratio    REAL,                    -- 부채비율 %
     op_margin     REAL,
     net_borrow_ratio REAL,                 -- 순차입금/자기자본 %
+    net_borrowings REAL,                   -- 순차입금 = 총차입금 - 현금성자산
+    da            REAL,                    -- 감가상각비+무형자산상각비(+사용권자산상각비), CF 간접법 조정항목
+    ebitda        REAL,                    -- 영업이익 + da
+    int_exp       REAL,                    -- 이자비용(금융비용)
+    interest_cover REAL,                   -- EBITDA/이자비용 (배)
+    borrow_dep    REAL,                    -- 차입금의존도 = 총차입금/총자산 %
     PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div)
 );
 

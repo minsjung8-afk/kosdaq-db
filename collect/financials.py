@@ -13,6 +13,10 @@ KPI_MAP = {
     "equity":       (["ifrs-full_Equity"], ["자본총계"]),
     "cash":         (["ifrs-full_CashAndCashEquivalents"], ["현금및현금성자산"]),
     "cfo":          (["ifrs-full_CashFlowsFromUsedInOperatingActivities"], ["영업활동현금흐름", "영업활동으로 인한 현금흐름"]),
+    "dep":          (["ifrs-full_DepreciationExpense", "ifrs-full_AdjustmentsForDepreciationExpense"], ["감가상각비", "유형자산감가상각비", "감가상각"]),
+    "amort":        (["ifrs-full_AmortisationExpense", "ifrs-full_AdjustmentsForAmortisationExpense"], ["무형자산상각비", "무형자산상각"]),
+    "rou_dep":      ([], ["사용권자산상각비", "사용권자산감가상각비"]),
+    "int_exp":      (["ifrs-full_InterestExpense", "ifrs-full_FinanceCosts"], ["이자비용", "금융비용", "금융원가"]),
 }
 BORROW_KEYS = ["단기차입금", "장기차입금", "유동성장기부채", "유동성장기차입금", "사채", "전환사채", "신주인수권부사채",
                "리스부채", "유동리스부채", "비유동리스부채", "장기사채"]
@@ -57,8 +61,12 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k = {}
         for key, (ids, names) in KPI_MAP.items():
             sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash") else \
-                 ("CF",) if key == "cfo" else ("IS", "CIS")
+                 ("CF",) if key in ("cfo", "dep", "amort", "rou_dep") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
+        # 상각비가 CF에 없으면 IS(비용 성격별 분류)에서 재시도
+        for key in ("dep", "amort", "rou_dep"):
+            if k.get(key) is None:
+                k[key] = _pick(rows, KPI_MAP[key][0], KPI_MAP[key][1], ("IS", "CIS"))
         # 차입금 근사: BS 계정명 키워드 합(중복 방지: 정확 일치만)
         bor = 0.0
         hit = False
@@ -73,11 +81,22 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k["op_margin"] = round(k["op_income"] / rev * 100, 1) if k.get("op_income") is not None and rev else None
         k["net_borrow_ratio"] = round((k["borrowings"] - (k.get("cash") or 0)) / eq * 100, 1) \
             if k.get("borrowings") is not None and eq else None
-        con.execute("""INSERT OR REPLACE INTO fin_kpi VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        k["net_borrowings"] = (k["borrowings"] - (k.get("cash") or 0)) if k.get("borrowings") is not None else None
+        da = [abs(x) for x in (k.get("dep"), k.get("amort"), k.get("rou_dep")) if x is not None]
+        k["da"] = sum(da) if da else None
+        k["ebitda"] = (k["op_income"] + k["da"]) if k.get("op_income") is not None and k["da"] is not None else None
+        ie = abs(k["int_exp"]) if k.get("int_exp") else None
+        k["interest_cover"] = round(k["ebitda"] / ie, 1) if k.get("ebitda") is not None and ie else None   # EBITDA/이자비용
+        k["borrow_dep"] = round(k["borrowings"] / k["total_assets"] * 100, 1) \
+            if k.get("borrowings") is not None and k.get("total_assets") else None
+        con.execute("""INSERT OR REPLACE INTO fin_kpi (corp_code, bsns_year, reprt_code, fs_div, revenue, op_income, net_income,
+            total_assets, total_liab, equity, cash, borrowings, cfo, debt_ratio, op_margin, net_borrow_ratio,
+            net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
-                     k.get("op_margin"), k.get("net_borrow_ratio")))
+                     k.get("op_margin"), k.get("net_borrow_ratio"), k.get("net_borrowings"), k.get("da"),
+                     k.get("ebitda"), ie, k.get("interest_cover"), k.get("borrow_dep")))
     con.commit()
 
 
@@ -114,6 +133,14 @@ def fetch_latest_interim(con, cc, plan):
                 log(con, cc, f"fin_{y-1}_{rc}", "fail", e)
             return y, rc
     return None
+
+
+def rebuild_kpi_all(con):
+    """fin_raw에서 fin_kpi 전부 재계산 (DART 호출 없음). KPI 정의 변경 시 사용"""
+    keys = con.execute("SELECT DISTINCT corp_code, bsns_year, reprt_code FROM fin_raw").fetchall()
+    for r in keys:
+        build_kpi(con, r["corp_code"], r["bsns_year"], r["reprt_code"])
+    return len(keys)
 
 
 def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):

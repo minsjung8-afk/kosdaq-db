@@ -76,7 +76,7 @@ def build():
         shutil.rmtree(SITE)
     (SITE / "data" / "c").mkdir(parents=True)
     shutil.copy(TEMPLATE, SITE / "index.html")
-    (SITE / "_headers").write_text("/data/*\n  Cache-Control: public, max-age=3600\n", encoding="utf-8")
+    (SITE / "_headers").write_text("/*\n  Cache-Control: no-cache\n", encoding="utf-8")   # 매 요청 ETag 재검증 → 배포 즉시 반영
 
     index = []
     for c in q(con, "SELECT * FROM company ORDER BY corp_name"):

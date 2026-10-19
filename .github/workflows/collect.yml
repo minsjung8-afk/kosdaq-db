@@ -10,7 +10,7 @@ on:
         description: "run.py job"
         default: "price"
         type: choice
-        options: [init, fin, biz, price, summarize, site, all]
+        options: [init, fin, kpi, biz, price, summarize, site, all]
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50)"
         default: ""
