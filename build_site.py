@@ -4,6 +4,7 @@
   site/data/c/{stock_code}.json  기업별 상세
 """
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -42,7 +43,15 @@ def _shareholders(con, cc):
         total = {"co": t["trmend_posesn_stock_co"], "rt": t["trmend_posesn_stock_qota_rt"]}
     else:
         total = {"co": sum(r["trmend_posesn_stock_co"] or 0 for r in body), "rt": round(sum(r["trmend_posesn_stock_qota_rt"] or 0 for r in body), 2)}
-    return {"year": year, "top": body[:5], "n": len(body), "total": total}
+    # 외부 5% 이상 주주 합류 (이름 정규화로 중복 제거), 지분율 순 상위 5
+    norm = lambda x: re.sub(r"\s|\(주\)|주식회사|㈜", "", x or "")
+    merged = [{"nm": r["nm"], "relate": r["relate"] or "특수관계인", "co": r["trmend_posesn_stock_co"], "rt": r["trmend_posesn_stock_qota_rt"], "ins": True} for r in body]
+    seen = {norm(r["nm"]) for r in body}
+    for r in q(con, "SELECT nm, stock_co, rate FROM major_holder WHERE corp_code=? AND bsns_year=?", cc, year):
+        if norm(r["nm"]) not in seen:
+            merged.append({"nm": r["nm"], "relate": "외부(5%↑)", "co": r["stock_co"], "rt": r["rate"], "ins": False})
+    merged.sort(key=lambda r: r["rt"] or 0, reverse=True)
+    return {"year": year, "top": merged[:5], "n": len(body), "total": total}
 
 
 def company_detail(con, c):

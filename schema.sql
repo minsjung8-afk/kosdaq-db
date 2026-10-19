@@ -50,6 +50,12 @@ CREATE TABLE IF NOT EXISTS shareholder (
     PRIMARY KEY (corp_code, bsns_year, nm, stock_knd)
 );
 
+-- 5% 이상 주주(사업보고서 원문 '주식의 분포' 표)
+CREATE TABLE IF NOT EXISTS major_holder (
+    corp_code TEXT, bsns_year TEXT, nm TEXT, stock_co REAL, rate REAL,
+    PRIMARY KEY (corp_code, bsns_year, nm)
+);
+
 -- 소액주주 현황(사업보고서)
 CREATE TABLE IF NOT EXISTS minor_shareholder (
     corp_code     TEXT,

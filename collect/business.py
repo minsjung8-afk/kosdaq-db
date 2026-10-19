@@ -82,6 +82,50 @@ def extract_rating_section(xml_text: str):
     return None
 
 
+_NUM = re.compile(r"^[\d,]+$")
+_PCT = re.compile(r"^\d{1,3}(\.\d+)?\s*%?$")
+
+
+def extract_major_holders(xml_text: str):
+    """'VII. 주주에 관한 사항' → '주식의 분포'의 5% 이상 주주 표 → [(주주명, 주식수, 지분율)]"""
+    for s1 in re.findall(r"<SECTION-1[^>]*>(.*?)</SECTION-1>", xml_text, flags=re.S | re.I):
+        m = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", s1, flags=re.S | re.I)
+        if not m or "주주에관한사항" not in _strip(m.group(1)).replace(" ", ""):
+            continue
+        for s2 in re.findall(r"<SECTION-2[^>]*>(.*?)</SECTION-2>", s1, flags=re.S | re.I):
+            m2 = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", s2, flags=re.S | re.I)
+            if not m2 or "분포" not in _strip(m2.group(1)):
+                continue
+            out = []
+            for tbl in re.findall(r"<TABLE[^>]*>(.*?)</TABLE>", s2, flags=re.S | re.I):
+                flat = _strip(tbl)
+                if "5%" not in flat.replace(" ", "") and "주요주주" not in flat:
+                    continue
+                for tr in re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I):
+                    cells = [_strip(c).replace("\n", " ").strip() for c in re.findall(r"<T[DH][^>]*>(.*?)</T[DH]>", tr, flags=re.S | re.I)]
+                    cells = [c for c in cells if c and c != "-"]
+                    if len(cells) < 3:
+                        continue
+                    nums = [c for c in cells if _NUM.match(c.replace(" ", ""))]
+                    pcts = [c for c in cells if _PCT.match(c.replace(" ", "")) and not _NUM.match(c.replace(" ", ""))]
+                    names = [c for c in cells if not _NUM.match(c.replace(" ", "")) and not _PCT.match(c.replace(" ", ""))
+                             and c not in ("5%이상주주", "5% 이상 주주", "우리사주조합", "구분", "주주명", "소유주식수", "지분율", "비고")]
+                    if not names or not pcts:
+                        continue
+                    nm = names[-1]
+                    if "우리사주" in nm or nm in ("계", "합계"):
+                        continue
+                    try:
+                        rate = float(pcts[-1].replace("%", "").strip())
+                        cnt = float(nums[-1].replace(",", "")) if nums else None
+                    except ValueError:
+                        continue
+                    out.append((nm, cnt, rate))
+            if out:
+                return out
+    return []
+
+
 def fetch_document_xml(rcept_no: str) -> str:
     raw = dart_get_binary("document", rcept_no=rcept_no)
     z = zipfile.ZipFile(io.BytesIO(raw))
@@ -104,6 +148,8 @@ def fetch_business(con, corp_code, bsns_year):
     xml_text = fetch_document_xml(rcept_no)
     full, overview = extract_business_section(xml_text)
     rating_text = extract_rating_section(xml_text)
+    for nm, cnt, rate in extract_major_holders(xml_text):
+        con.execute("INSERT OR REPLACE INTO major_holder VALUES (?,?,?,?,?)", (corp_code, bsns_year, nm, cnt, rate))
     if not full:
         log(con, corp_code, f"biz_{bsns_year}", "fail", "사업의 내용 섹션 미검출")
         return False
