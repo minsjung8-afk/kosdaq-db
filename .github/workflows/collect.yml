@@ -12,7 +12,7 @@ on:
         description: "run.py job"
         default: "price"
         type: choice
-        options: [init, fin, kpi, biz, price, rating, news, summarize, site, all]
+        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all]
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only)"
         default: ""

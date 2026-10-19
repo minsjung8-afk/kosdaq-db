@@ -262,3 +262,19 @@ CREATE TABLE IF NOT EXISTS fetch_log (
 
 CREATE INDEX IF NOT EXISTS idx_price_stock ON price_daily(stock_code, dt DESC);
 CREATE INDEX IF NOT EXISTS idx_event_corp ON disclosure_event(corp_code, rcept_dt DESC);
+
+-- 기발행 메자닌: 발행결정 공시(주요사항보고서 API, 최근 3년)
+CREATE TABLE IF NOT EXISTS mezz_issue (
+    corp_code TEXT, rcept_no TEXT, kind TEXT,          -- CB / BW / EB / 종류주식
+    tm TEXT, bd_knd TEXT, face_amt REAL, intr_ex REAL, intr_sf REAL, mtd TEXT, method TEXT,
+    cv_prc REAL, cv_rt REAL, cv_bgd TEXT, cv_edd TEXT, lw_prc REAL,   -- 전환(행사·교환)가·비율·청구기간·최저조정가
+    stock_cnt REAL, stock_vs REAL, stock_knd TEXT, pymd TEXT, bddd TEXT, purpose TEXT, fetched_at TEXT,
+    put_dt TEXT, put_txt TEXT, call_txt TEXT,          -- 조기상환청구권(풋) 최초 가능일·조건, 매도청구권(콜) 요약 (공시 본문 파싱)
+    PRIMARY KEY (corp_code, rcept_no, kind)
+);
+-- 기발행 메자닌: 미상환 현황(최신 정기보고서 '자본금 변동사항' 표)
+CREATE TABLE IF NOT EXISTS mezz_outstanding (
+    corp_code TEXT, rcept_no TEXT, report_nm TEXT, kind TEXT, name TEXT, isu_dd TEXT, exprd_dd TEXT,
+    face_amt REAL, cv_rt REAL, cv_prc REAL, remndr_amt REAL, remndr_stock REAL, period TEXT, fetched_at TEXT
+);
+CREATE TABLE IF NOT EXISTS mezz_checked (corp_code TEXT, rcept_no TEXT, report_nm TEXT, at TEXT, PRIMARY KEY (corp_code, rcept_no));

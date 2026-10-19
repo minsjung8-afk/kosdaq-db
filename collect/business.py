@@ -244,7 +244,7 @@ def run(corp_codes, bsns_year, event_from="20240101", event_to="20991231"):
     con = connect()
     for cc in corp_codes:
         for fn, name in ((fetch_business, "biz"), (fetch_audit_opinion, "audit"), (fetch_shareholders, "shr"), (fetch_minor_shareholders, "minor"),
-                         (fetch_conv_bonds, "cbbw"), (fetch_other_investments, "invest")):
+                         (fetch_other_investments, "invest")):          # CB·BW는 mezz.py (DART 정기보고서 API에 CB/BW 없음 — cndlCapl*은 조건부자본증권)
             try:
                 fn(con, cc, str(bsns_year))
             except Exception as e:  # noqa

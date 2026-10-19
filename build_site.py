@@ -176,18 +176,22 @@ def company_detail(con, c):
                              FROM report_meta m LEFT JOIN report_analysis a ON a.report_id=m.id
                              WHERE m.stock_code=? ORDER BY m.pub_dt DESC LIMIT 12""", sc),
         "forecast_vs_actual": _fva(con, sc),
-        "conv_bonds": q(con, "SELECT * FROM conv_bond WHERE corp_code=? AND bsns_year=(SELECT MAX(bsns_year) FROM conv_bond WHERE corp_code=?) ORDER BY exprd_dd", cc, cc),
+        "conv_bonds": [],
+        "mezz_out": q(con, "SELECT * FROM mezz_outstanding WHERE corp_code=? ORDER BY kind, exprd_dd", cc),
+        "mezz_issue": q(con, "SELECT * FROM mezz_issue WHERE corp_code=? ORDER BY COALESCE(bddd, pymd, rcept_no) DESC", cc),
         "news": q(con, "SELECT dt, title, source, url FROM news WHERE corp_code=? ORDER BY dt DESC LIMIT 60", cc),
         "peers": _peers(con, c, ps[0] if ps else None),
         "other_invest": q(con, "SELECT * FROM other_invest WHERE corp_code=? AND bsns_year=(SELECT MAX(bsns_year) FROM other_invest WHERE corp_code=?) ORDER BY trmend_book_amt DESC LIMIT 8", cc, cc),
     }
     d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], d["ratings"])
-    cb_tot = sum(r["remndr_amt"] or 0 for r in d["conv_bonds"])
+    cb_tot = sum(r["remndr_amt"] or 0 for r in d["mezz_out"])
     ps0 = d["price_summary"] or {}
     if cb_tot and ps0.get("mcap") and cb_tot > ps0["mcap"] * 0.2:
         d["flags"].append(("CB·BW 잔액 > 시총 20%", "amber", f"잔액 {cb_tot/1e8:,.0f}억 / 시총 {ps0['mcap']/1e8:,.0f}억"))
-    if ps0.get("close") and any((r["cnvrs_prc"] or 0) > ps0["close"] * 1.5 and (r["remndr_amt"] or 0) > 0 for r in d["conv_bonds"]):
-        d["flags"].append(("전환가 > 주가×1.5 CB 보유", "amber", "전환 유인 낮음 → 상환·리픽싱 부담"))
+    if ps0.get("close") and any((r["cv_prc"] or 0) > ps0["close"] * 1.5 and (r["remndr_amt"] or 0) > 0 for r in d["mezz_out"]):
+        d["flags"].append(("전환가 > 주가×1.5 메자닌 보유", "amber", "전환 유인 낮음 → 조기상환(풋)·리픽싱 부담"))
+    if ps0.get("close") and any((r["lw_prc"] or 0) and r["lw_prc"] < ps0["close"] * 0.8 and r["kind"] in ("CB", "BW") for r in d["mezz_issue"]):
+        d["flags"].append(("리픽싱 최저가 < 주가×0.8", "amber", "하향 리픽싱 여지 → 희석 가능"))
     ind = (c.get("induty_code") or "")[:2]
     st = IND_STATS.get((c.get("market"), ind))
     rows = kpi.get("CFS") or kpi.get("OFS") or []

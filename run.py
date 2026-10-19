@@ -2,6 +2,7 @@
   python run.py init --limit 5            # 상장사 목록·개황 (샘플 5개, --market KOSPI 등으로 시장 지정)
   python run.py init --market KOSPI KONEX --new-only   # 기존 종목 제외하고 추가
   python run.py fin --new-only            # 재무 미수집 회사만
+  python run.py mezz --new-only           # 기발행 메자닌(CB·BW·EB·종류주식) 발행결정 + 미상환 현황
   python run.py fin --years 2023 2024 2025
   python run.py biz --year 2025
   python run.py price --year 2025
@@ -32,7 +33,7 @@ def corp_pairs(con, limit=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -50,8 +51,8 @@ def main():
             listing.run(limit=a.limit, market=m, skip_existing=a.new_only)
     con = connect()
     pairs = corp_pairs(con, a.limit)
-    if a.new_only and a.job in ("fin", "biz", "rating", "news"):
-        tbl = {"fin": "fin_kpi", "biz": "business", "rating": "credit_rating", "news": "news"}[a.job]
+    if a.new_only and a.job in ("fin", "biz", "rating", "news"):   # mezz는 모듈 내부에서 처리
+        tbl = {"fin": "fin_kpi", "biz": "business", "rating": "credit_rating", "news": "news"}.get(a.job)
         done = {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
         pairs = [p for p in pairs if p[0] not in done]
         print(f"[{a.job}] --new-only: 미수집 {len(pairs)}사", flush=True)
@@ -68,6 +69,9 @@ def main():
     if a.job in ("biz", "all"):
         import business
         business.run(ccs, a.years[-1] if a.years else a.year - 1)   # 최신 사업보고서 = 직전 연도
+    if a.job in ("mezz", "all"):
+        import mezz
+        mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
     if a.job in ("price", "all"):
         import prices
         prices.run(pairs, a.year, markets=a.market)
