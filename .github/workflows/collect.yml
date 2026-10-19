@@ -14,6 +14,9 @@ on:
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50)"
         default: ""
+      restore_run:
+        description: "이전 실행의 DB 아티팩트로 복원 (run id, 선택)"
+        default: ""
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -23,6 +26,14 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt
+      - name: restore db
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          if [ -n "${{ github.event.inputs.restore_run }}" ]; then
+            gh run download ${{ github.event.inputs.restore_run }} -n kosdaq-db -D . && echo "아티팩트에서 복원"
+          fi
+          if [ ! -f kosdaq.db ] && [ -f kosdaq.db.gz ]; then gunzip -kf kosdaq.db.gz; fi
+          ls -la kosdaq.db* || true
       - name: collect
         env:
           PYTHONUNBUFFERED: "1"
@@ -49,7 +60,10 @@ jobs:
       - name: commit db
         run: |
           git config user.name "kosdaq-bot"; git config user.email "bot@users.noreply.github.com"
-          git add kosdaq.db && git commit -m "data: $(date -u +%F)" || echo "no change"
+          python -c "import sqlite3;c=sqlite3.connect('kosdaq.db');c.execute('VACUUM');c.close()"
+          gzip -9 -c kosdaq.db > kosdaq.db.gz && ls -la kosdaq.db.gz
+          git rm --cached -q kosdaq.db 2>/dev/null || true
+          git add kosdaq.db.gz .gitignore && git commit -m "data: $(date -u +%F)" || echo "no change"
           git pull --rebase -X theirs || true      # 실행 중 코드 푸시가 있어도 DB 커밋 유지
           git push
       - name: ensure pages project
