@@ -105,7 +105,7 @@ IND_STATS = {}
 
 
 def _peers(con, c, ps):
-    """같은 KSIC 중분류 코스닥사 중 시총이 가장 가까운 3곳 (최근 연간 KPI 비교)"""
+    """같은 시장·KSIC 중분류 내 시총이 가장 가까운 3곳 (최근 연간 KPI 비교)"""
     ind = (c.get("induty_code") or "")[:2]
     if not ind:
         return []
@@ -114,7 +114,7 @@ def _peers(con, c, ps):
                      LEFT JOIN fin_kpi k ON k.corp_code=c.corp_code AND k.reprt_code='11011'
                        AND k.fs_div=(SELECT CASE WHEN EXISTS(SELECT 1 FROM fin_kpi x WHERE x.corp_code=c.corp_code AND x.fs_div='CFS' AND x.reprt_code='11011') THEN 'CFS' ELSE 'OFS' END)
                        AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi y WHERE y.corp_code=c.corp_code AND y.reprt_code='11011')
-                     WHERE substr(c.induty_code,1,2)=? AND c.corp_code!=? AND k.revenue IS NOT NULL""", ind, c["corp_code"])
+                     WHERE substr(c.induty_code,1,2)=? AND c.market=? AND c.corp_code!=? AND k.revenue IS NOT NULL""", ind, c.get("market"), c["corp_code"])
     me = (ps or {}).get("mcap")
     if me:
         rows.sort(key=lambda r: abs((r["mcap"] or 0) - me))
@@ -149,7 +149,8 @@ def company_detail(con, c):
             rows.append({**L, "label": plabel(L["bsns_year"], L["reprt_code"]), "kind": "interim"})
         if rows:
             kpi[fs] = [{k: v for k, v in r.items() if k not in ("corp_code", "fs_div")} for r in rows]
-    prices = q(con, "SELECT dt, open, high, low, close, volume FROM price_daily WHERE stock_code=? AND dt >= date('now','-3 years') ORDER BY dt", sc)
+    from prices import adjusted_rows  # noqa  수정주가(분할·병합 반영)
+    prices = adjusted_rows(con, sc, since=con.execute("SELECT date('now','-3 years')").fetchone()[0])
     ps = q(con, "SELECT * FROM price_summary WHERE stock_code=? ORDER BY asof DESC LIMIT 1", sc)
     d = {
         "company": c,
@@ -188,12 +189,12 @@ def company_detail(con, c):
     if ps0.get("close") and any((r["cnvrs_prc"] or 0) > ps0["close"] * 1.5 and (r["remndr_amt"] or 0) > 0 for r in d["conv_bonds"]):
         d["flags"].append(("전환가 > 주가×1.5 CB 보유", "amber", "전환 유인 낮음 → 상환·리픽싱 부담"))
     ind = (c.get("induty_code") or "")[:2]
-    st = IND_STATS.get(ind)
+    st = IND_STATS.get((c.get("market"), ind))
     rows = kpi.get("CFS") or kpi.get("OFS") or []
     ann = [r for r in rows if r.get("kind") == "annual"]
     if st and ann:
         last = ann[-1]
-        d["industry_pos"] = {"ind": ind, "name": c.get("sector_krx"), "n": len(st["debt_ratio"]),
+        d["industry_pos"] = {"ind": ind, "name": c.get("sector_krx"), "n": len(st["debt_ratio"]), "market": c.get("market"),
                              "debt_ratio": _pctile(st["debt_ratio"], last.get("debt_ratio")),
                              "op_margin": _pctile(st["op_margin"], last.get("op_margin")),
                              "cur_ratio": _pctile(st["cur_ratio"], last.get("cur_ratio")),
@@ -203,8 +204,8 @@ def company_detail(con, c):
 
 
 def _industry_stats(con):
-    """KSIC 중분류(induty_code 앞 2자리)별 최근 연간 지표 분포 → 백분위 계산용 정렬 리스트"""
-    rows = q(con, """SELECT c.corp_code, substr(c.induty_code,1,2) AS ind, k.debt_ratio, k.op_margin, k.cur_ratio, k.borrow_dep
+    """(시장, KSIC 중분류)별 최근 연간 지표 분포 → 백분위 계산용 정렬 리스트"""
+    rows = q(con, """SELECT c.corp_code, c.market, substr(c.induty_code,1,2) AS ind, k.debt_ratio, k.op_margin, k.cur_ratio, k.borrow_dep
                      FROM company c JOIN fin_kpi k ON k.corp_code=c.corp_code AND k.reprt_code='11011'
                      AND k.fs_div=(SELECT CASE WHEN EXISTS(SELECT 1 FROM fin_kpi x WHERE x.corp_code=c.corp_code AND x.fs_div='CFS' AND x.reprt_code='11011') THEN 'CFS' ELSE 'OFS' END)
                      AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi y WHERE y.corp_code=c.corp_code AND y.reprt_code='11011')""")
@@ -212,7 +213,7 @@ def _industry_stats(con):
     code2stock = {r["corp_code"]: r["stock_code"] for r in q(con, "SELECT corp_code, stock_code FROM company")}
     stats = {}
     for r in rows:
-        d = stats.setdefault(r["ind"], {"debt_ratio": [], "op_margin": [], "cur_ratio": [], "borrow_dep": [], "mcap": []})
+        d = stats.setdefault((r["market"], r["ind"]), {"debt_ratio": [], "op_margin": [], "cur_ratio": [], "borrow_dep": [], "mcap": []})
         for k in ("debt_ratio", "op_margin", "cur_ratio", "borrow_dep"):
             if r[k] is not None:
                 d[k].append(r[k])
@@ -295,6 +296,7 @@ def build():
         shutil.rmtree(SITE)
     (SITE / "data" / "c").mkdir(parents=True)
     shutil.copy(TEMPLATE, SITE / "index.html")
+    shutil.copytree(TEMPLATE.parent / "lib", SITE / "lib")          # 차트 라이브러리(Lightweight Charts, Apache-2.0)
     (SITE / "_headers").write_text("/*\n  Cache-Control: no-cache\n", encoding="utf-8")   # 매 요청 ETag 재검증 → 배포 즉시 반영
 
     global IND_STATS

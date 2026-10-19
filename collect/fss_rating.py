@@ -5,6 +5,7 @@
 """
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from urllib.parse import urlencode
 
@@ -15,6 +16,8 @@ from common import UA, connect, log, now
 
 URL = "https://www.fss.or.kr/fss/job/creditRatingReport/list.do"
 PAUSE = 0.7
+WORKERS = 3          # FSS 응답이 회사당 4~5초라 3개 동시 조회(총 1시간 내). 과도한 부하 방지 위해 3 유지
+RESUME_DAYS = 10     # 최근 N일 내 성공 로그가 있는 회사는 건너뜀(중단된 실행 이어하기)
 LONG_TYPES = ("기업신용평가", "회사채", "무보증사채", "공모사채", "사모사채", "신주인수권부사채", "전환사채")   # 장기등급 성격
 
 
@@ -59,9 +62,9 @@ def parse(html: str):
     return out, (int(m.group(1)) if m else len(out))
 
 
-def collect_company(con, c, years=3):
+def fetch_company_rows(c, years=3):
+    """네트워크만: 회사 1곳의 공시 행 전부(페이지 순회). 스레드에서 호출."""
     name = search_name(c)
-    key = norm(name)
     rows, total = [], 0
     page = 1
     while True:
@@ -71,6 +74,11 @@ def collect_company(con, c, years=3):
             break
         page += 1
         time.sleep(PAUSE)
+    return rows
+
+
+def store_rows(con, c, rows):
+    key = norm(search_name(c))
     n = 0
     for r in rows:
         if norm(r["target"]) != key and key not in norm(r["target"]):
@@ -83,23 +91,34 @@ def collect_company(con, c, years=3):
     return n
 
 
-def run(corp_codes=None, years=3):
+def collect_company(con, c, years=3):
+    return store_rows(con, c, fetch_company_rows(c, years))
+
+
+def run(corp_codes=None, years=3, resume=True):
     con = connect()
     q = "SELECT corp_code, corp_name, corp_name_full FROM company ORDER BY corp_name"
     cs = [dict(r) for r in con.execute(q)]
     if corp_codes:
         cs = [c for c in cs if c["corp_code"] in corp_codes]
+    if resume:
+        done = {r[0] for r in con.execute("SELECT corp_code FROM fetch_log WHERE job='rating' AND status='ok' AND at >= date('now', ?)", (f"-{RESUME_DAYS} days",))}
+        if done:
+            cs = [c for c in cs if c["corp_code"] not in done]
+            print(f"[rating] 최근 {RESUME_DAYS}일 내 완료 {len(done)}사 제외 → {len(cs)}사", flush=True)
     hit = 0
-    for i, c in enumerate(cs, 1):
-        try:
-            n = collect_company(con, c, years)
-            if n:
-                hit += 1
-        except Exception as e:  # noqa
-            log(con, c["corp_code"], "rating", "fail", e)
-        if i % 100 == 0:
-            print(f"[rating] {i}/{len(cs)}, 등급 보유 {hit}", flush=True)
-        time.sleep(PAUSE)
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futs = [(c, ex.submit(fetch_company_rows, c, years)) for c in cs]   # 네트워크는 병렬, DB 쓰기는 순차
+        for i, (c, f) in enumerate(futs, 1):
+            try:
+                n = store_rows(con, c, f.result())
+                log(con, c["corp_code"], "rating", "ok", n)
+                if n:
+                    hit += 1
+            except Exception as e:  # noqa
+                log(con, c["corp_code"], "rating", "fail", e)
+            if i % 100 == 0:
+                print(f"[rating] {i}/{len(cs)}, 등급 보유 {hit}", flush=True)
     log(con, "-", "rating", "ok", f"{len(cs)} checked / {hit} rated")
     return con
 

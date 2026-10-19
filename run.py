@@ -1,5 +1,7 @@
 """실행 진입점.
-  python run.py init --limit 5            # 코스닥 목록·개황 (샘플 5개)
+  python run.py init --limit 5            # 상장사 목록·개황 (샘플 5개, --market KOSPI 등으로 시장 지정)
+  python run.py init --market KOSPI KONEX --new-only   # 기존 종목 제외하고 추가
+  python run.py fin --new-only            # 재무 미수집 회사만
   python run.py fin --years 2023 2024 2025
   python run.py biz --year 2025
   python run.py price --year 2025
@@ -38,13 +40,21 @@ def main():
     ap.add_argument("--max-pages", type=int)
     ap.add_argument("--no-pdf", action="store_true")
     ap.add_argument("--no-interim", action="store_true", help="fin: 분기보고서 생략")
+    ap.add_argument("--market", nargs="*", default=["KOSDAQ", "KOSPI", "KONEX"], help="init/price 대상 시장")
+    ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
 
     if a.job in ("init", "all"):
         import listing
-        listing.run(limit=a.limit)
+        for m in a.market:
+            listing.run(limit=a.limit, market=m, skip_existing=a.new_only)
     con = connect()
     pairs = corp_pairs(con, a.limit)
+    if a.new_only and a.job in ("fin", "biz", "rating", "news"):
+        tbl = {"fin": "fin_kpi", "biz": "business", "rating": "credit_rating", "news": "news"}[a.job]
+        done = {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
+        pairs = [p for p in pairs if p[0] not in done]
+        print(f"[{a.job}] --new-only: 미수집 {len(pairs)}사", flush=True)
     ccs = [p[0] for p in pairs]
     years = a.years or [a.year - 2, a.year - 1]        # 연간 2개년 (올해분은 분기로)
 
@@ -60,17 +70,17 @@ def main():
         business.run(ccs, a.years[-1] if a.years else a.year - 1)   # 최신 사업보고서 = 직전 연도
     if a.job in ("price", "all"):
         import prices
-        prices.run(pairs, a.year)
+        prices.run(pairs, a.year, markets=a.market)
     if a.job in ("summarize", "all"):
         import summarize
         summarize.run_rating(set(ccs) if a.limit else None)                  # 등급 보유사: 신용평가서 기반 요약(우선)
         summarize.run(ccs, a.years[-1] if a.years else a.year - 1)           # 나머지: 사업보고서 기반
     if a.job in ("rating", "all"):
         import fss_rating
-        fss_rating.run(set(ccs) if a.limit else None)
+        fss_rating.run(set(ccs) if (a.limit or a.new_only) else None)
     if a.job in ("news", "all"):
         import news
-        news.run(set(ccs) if a.limit else None)
+        news.run(set(ccs) if (a.limit or a.new_only) else None)
     if a.job == "kind":
         import kind_ir
         kind_ir.run()

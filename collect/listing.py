@@ -1,4 +1,4 @@
-"""코스닥 상장사 목록(KRX API) + DART corp_code 매핑 + 기업개황(company)"""
+"""상장사(코스닥·코스피·코넥스) 목록(KRX API) + DART corp_code 매핑 + 기업개황(company)"""
 import io
 import zipfile
 import xml.etree.ElementTree as ET
@@ -43,11 +43,13 @@ def upsert_company(con, corp_code, stock_code, base, js=None):
 CORP_CLS = {"KOSDAQ": "K", "KOSPI": "Y", "KONEX": "N"}
 
 
-def run(limit=None, market="KOSDAQ"):
+def run(limit=None, market="KOSDAQ", skip_existing=False):
     """1) KRX 종목기본정보로 시장 목록 확보 → DART 개황 보강.
-       2) KRX 실패(미승인 등) 시 DART만으로: corpCode 전체 상장사 → company.corp_cls로 시장 필터."""
+       2) KRX 실패(미승인 등) 시 DART만으로: corpCode 전체 상장사 → company.corp_cls로 시장 필터.
+       skip_existing: 이미 company에 있는 종목은 DART 개황 호출 생략(신규 상장분만)."""
     con = connect()
     codes = dart_corp_codes()
+    existing = {r[0] for r in con.execute("SELECT stock_code FROM company")} if skip_existing else set()
     try:
         rows = base_info(market)
         rows.sort(key=lambda r: r["corp_name"])
@@ -60,11 +62,13 @@ def run(limit=None, market="KOSDAQ"):
     if limit:
         rows = rows[:limit] if krx_ok else rows  # DART 경로는 전체를 훑어야 코스닥만 걸러짐
     n = 0
-    print(f"[init] 대상 {len(rows)}개 (KRX {'ok' if krx_ok else 'fail→DART'})", flush=True)
+    print(f"[init] {market} 대상 {len(rows)}개 (KRX {'ok' if krx_ok else 'fail→DART'})", flush=True)
     for i, r in enumerate(rows, 1):
         if i % 100 == 0:
             print(f"[init] {i}/{len(rows)} 처리, 적재 {n}", flush=True)
         cc = codes.get(r["stock_code"])
+        if r["stock_code"] in existing:
+            continue
         if not cc:
             log(con, r["stock_code"], "listing", "skip", "DART corp_code 없음")
             continue

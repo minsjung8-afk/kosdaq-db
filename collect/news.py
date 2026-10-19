@@ -16,6 +16,7 @@ from common import UA, connect, log, now
 RSS = "https://news.google.com/rss/search?q={q}&hl=ko&gl=KR&ceid=KR:ko"
 PAUSE = 1.2
 KEEP_DAYS = 90
+RESUME_DAYS = 3      # 최근 N일 내 성공한 회사는 건너뜀(중단된 실행 이어하기)
 
 
 def _norm(s):
@@ -68,10 +69,16 @@ def run(corp_codes=None):
     cs = [dict(r) for r in con.execute("SELECT corp_code, corp_name FROM company ORDER BY corp_name")]
     if corp_codes:
         cs = [c for c in cs if c["corp_code"] in corp_codes]
+    done = {r[0] for r in con.execute("SELECT corp_code FROM fetch_log WHERE job='news' AND status='ok' AND at >= date('now', ?)", (f"-{RESUME_DAYS} days",))}
+    if done:
+        cs = [c for c in cs if c["corp_code"] not in done]
+        print(f"[news] 최근 {RESUME_DAYS}일 내 완료 {len(done)}사 제외 → {len(cs)}사", flush=True)
     tot = 0
     for i, c in enumerate(cs, 1):
         try:
-            tot += collect_company(con, c)
+            n = collect_company(con, c)
+            tot += n
+            log(con, c["corp_code"], "news", "ok", n)
         except Exception as e:  # noqa
             log(con, c["corp_code"], "news", "fail", e)
         if i % 100 == 0:

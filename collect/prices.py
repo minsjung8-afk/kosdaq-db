@@ -7,9 +7,18 @@ from common import connect, log
 from krx import daily_all, trading_days
 
 
+def _ensure_fetched_table(con):
+    """시장별 적재 완료 일자. 기존(코스닥 단일 시장) 데이터는 KOSDAQ로 간주해 1회 시드."""
+    con.execute("CREATE TABLE IF NOT EXISTS _price_fetched (market TEXT, dt TEXT, PRIMARY KEY(market, dt))")
+    if not con.execute("SELECT 1 FROM _price_fetched LIMIT 1").fetchone():
+        con.execute("INSERT OR IGNORE INTO _price_fetched SELECT 'KOSDAQ', dt FROM price_daily GROUP BY dt")
+        con.commit()
+
+
 def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=None):
-    """start~end 거래일마다 전종목 1호출. 이미 적재된 날짜는 건너뜀. 반환: 호출 수"""
-    have = {r[0] for r in con.execute("SELECT DISTINCT dt FROM price_daily")}
+    """start~end 거래일마다 해당 시장 전종목 1호출. 이미 적재된 (시장, 날짜)는 건너뜀. 반환: 호출 수"""
+    _ensure_fetched_table(con)
+    have = {r[0] for r in con.execute("SELECT dt FROM _price_fetched WHERE market=?", (market,))}
     n = 0
     for d in trading_days(start, end):
         iso = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
@@ -17,7 +26,9 @@ def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=
             continue
         rows = daily_all(market, d)
         n += 1
+        con.execute("INSERT OR IGNORE INTO _price_fetched VALUES (?,?)", (market, iso))
         if not rows:
+            con.commit()
             continue  # 휴장일
         if only_codes:
             rows = [r for r in rows if r["stock_code"] in only_codes]
@@ -31,9 +42,45 @@ def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=
     return n
 
 
-def build_summary(con, stock_code, shares_out=None, asof=None):
+def split_factors(con, stock_code):
+    """액면분할·병합 감지: 상장주식수가 하루 사이 2% 이상 바뀌고 주가가 그 역수만큼 움직인 날.
+    반환 [(dt, ratio)] — dt 이전 가격은 ratio로 나누고 거래량은 곱한다(수정주가)."""
+    try:
+        sh = con.execute("SELECT dt, shares FROM _krx_latest WHERE stock_code=? AND shares>0 ORDER BY dt", (stock_code,)).fetchall()
+    except Exception:  # noqa  _krx_latest 없음
+        return []
+    if len(sh) < 2:
+        return []
+    px = {r[0]: r[1] for r in con.execute("SELECT dt, close FROM price_daily WHERE stock_code=? AND close>0", (stock_code,))}
+    out = []
+    for i in range(1, len(sh)):
+        d0, s0 = sh[i - 1]
+        d1, s1 = sh[i]
+        r = s1 / s0
+        if abs(r - 1) < 0.02 or d0 not in px or d1 not in px:
+            continue
+        pr = px[d0] / px[d1]                     # 분할이면 주가도 r배 하락
+        if abs(pr / r - 1) < 0.25:
+            out.append((d1, r))
+    return out
+
+
+def adjusted_rows(con, stock_code, since=None):
+    """수정주가 적용 일봉. since: 'YYYY-MM-DD' 이상만."""
     rows = [dict(r) for r in con.execute(
-        "SELECT dt, close, volume FROM price_daily WHERE stock_code=? ORDER BY dt", (stock_code,))]
+        "SELECT dt, open, high, low, close, volume FROM price_daily WHERE stock_code=? ORDER BY dt", (stock_code,))]
+    for dt, r in split_factors(con, stock_code):
+        for x in rows:
+            if x["dt"] < dt:
+                for k in ("open", "high", "low", "close"):
+                    if x[k] is not None:
+                        x[k] = round(x[k] / r, 2)
+                x["volume"] = int((x["volume"] or 0) * r)
+    return [x for x in rows if not since or x["dt"] >= since]
+
+
+def build_summary(con, stock_code, shares_out=None, asof=None):
+    rows = adjusted_rows(con, stock_code)
     if not rows:
         return None
     asof = asof or rows[-1]["dt"]
@@ -76,16 +123,21 @@ def build_summary(con, stock_code, shares_out=None, asof=None):
     return asof
 
 
-def run(pairs, bsns_year=None, start=None, market="KOSDAQ"):
-    """pairs: [(corp_code, stock_code)]. 시세는 전종목으로 받되 요약은 pairs만."""
+def run(pairs, bsns_year=None, start=None, markets=None):
+    """pairs: [(corp_code, stock_code)]. 시세는 시장별 전종목으로 받되 요약은 pairs만.
+    markets: None이면 company 테이블에 있는 시장 전부."""
     con = connect()
     start = start or (date.today() - timedelta(days=3 * 365 + 10)).isoformat()   # 3년치(3년 수익률용)
     con.execute("CREATE TABLE IF NOT EXISTS _krx_latest (stock_code TEXT, dt TEXT, shares REAL, mcap REAL, PRIMARY KEY(stock_code, dt))")
-    try:
-        n = fetch_prices_range(con, date.fromisoformat(start), date.today(), market)
-        log(con, "-", "price_fetch", "ok", f"{n} calls")
-    except Exception as e:  # noqa
-        log(con, "-", "price_fetch", "fail", e)
+    markets = markets or [r[0] for r in con.execute("SELECT DISTINCT market FROM company WHERE market IS NOT NULL")] or ["KOSDAQ"]
+    for market in markets:
+        try:
+            n = fetch_prices_range(con, date.fromisoformat(start), date.today(), market)
+            log(con, "-", "price_fetch", "ok", f"{market} {n} calls")
+            print(f"[price] {market} {n} calls", flush=True)
+        except Exception as e:  # noqa
+            log(con, "-", "price_fetch", "fail", f"{market}: {e}")
+            print(f"[price] {market} 실패: {e}", flush=True)
     for cc, sc in pairs:
         try:
             build_summary(con, sc)

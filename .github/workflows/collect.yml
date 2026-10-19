@@ -14,7 +14,7 @@ on:
         type: choice
         options: [init, fin, kpi, biz, price, rating, news, summarize, site, all]
       args:
-        description: "추가 인자 (예: --years 2024 2025 / --limit 50)"
+        description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only)"
         default: ""
       restore_run:
         description: "이전 실행의 DB 아티팩트로 복원 (run id, 선택)"
