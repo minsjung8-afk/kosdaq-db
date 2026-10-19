@@ -31,11 +31,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("job", choices=["init", "fin", "biz", "price", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
     ap.add_argument("--limit", type=int)
-    ap.add_argument("--year", type=int, default=2025)
+    ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
     ap.add_argument("--period", default="m1", help="hk: d7/m1/m6/y1")
     ap.add_argument("--max-pages", type=int)
     ap.add_argument("--no-pdf", action="store_true")
+    ap.add_argument("--no-interim", action="store_true", help="fin: 분기보고서 생략")
     a = ap.parse_args()
 
     if a.job in ("init", "all"):
@@ -44,20 +45,20 @@ def main():
     con = connect()
     pairs = corp_pairs(con, a.limit)
     ccs = [p[0] for p in pairs]
-    years = a.years or [a.year - 2, a.year - 1, a.year]
+    years = a.years or [a.year - 2, a.year - 1]        # 연간: 직직전·직전 연도 (올해분은 분기로)
 
     if a.job in ("fin", "all"):
         import financials
-        financials.run(ccs, years)
+        financials.run(ccs, years, interim=not a.no_interim)
     if a.job in ("biz", "all"):
         import business
-        business.run(ccs, a.year)
+        business.run(ccs, a.years[-1] if a.years else a.year - 1)   # 최신 사업보고서 = 직전 연도
     if a.job in ("price", "all"):
         import prices
         prices.run(pairs, a.year)
     if a.job in ("summarize", "all"):
         import summarize
-        summarize.run(ccs, a.year)
+        summarize.run(ccs, a.years[-1] if a.years else a.year - 1)
     if a.job == "kind":
         import kind_ir
         kind_ir.run()

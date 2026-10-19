@@ -32,10 +32,22 @@ def company_detail(con, c):
     biz = q(con, "SELECT bsns_year, rcept_no, overview_text, summary_json, summary_md FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc)
     b = biz[0] if biz else {}
     kpi = {}
+    RC = {"11013": "1Q", "11012": "반기", "11014": "3Q"}
     for fs in ("CFS", "OFS"):
-        rows = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' ORDER BY bsns_year", cc, fs)
+        ann = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' ORDER BY bsns_year DESC LIMIT 2", cc, fs)
+        ann = sorted(ann, key=lambda r: r["bsns_year"])
+        latest = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code!='11011' ORDER BY bsns_year DESC, reprt_code DESC LIMIT 1", cc, fs)
+        rows = []
+        for r in ann:
+            rows.append({**r, "label": r["bsns_year"], "kind": "annual"})
+        if latest:
+            L = latest[0]
+            prev = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code=? AND bsns_year=?", cc, fs, L["reprt_code"], str(int(L["bsns_year"]) - 1))
+            if prev:
+                rows.append({**prev[0], "label": f"{prev[0]['bsns_year']}.{RC.get(L['reprt_code'], L['reprt_code'])}", "kind": "prev_interim"})
+            rows.append({**L, "label": f"{L['bsns_year']}.{RC.get(L['reprt_code'], L['reprt_code'])}", "kind": "interim"})
         if rows:
-            kpi[fs] = [{k: v for k, v in r.items() if k not in ("corp_code", "reprt_code", "fs_div")} for r in rows]
+            kpi[fs] = [{k: v for k, v in r.items() if k not in ("corp_code", "fs_div")} for r in rows]
     prices = q(con, "SELECT dt, close, volume FROM price_daily WHERE stock_code=? AND dt >= date('now','-1 year') ORDER BY dt", sc)
     ps = q(con, "SELECT * FROM price_summary WHERE stock_code=? ORDER BY asof DESC LIMIT 1", sc)
     return {
@@ -70,7 +82,8 @@ def build():
     for c in q(con, "SELECT * FROM company ORDER BY corp_name"):
         d = company_detail(con, c)
         (SITE / "data" / "c" / f"{c['stock_code']}.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-        k = (d["kpi"].get("CFS") or d["kpi"].get("OFS") or [{}])[-1]
+        _rows = d["kpi"].get("CFS") or d["kpi"].get("OFS") or [{}]
+        k = next((r for r in reversed(_rows) if r.get("kind") == "annual"), _rows[-1])   # 검색 인덱스는 최근 연간 기준
         ps = d["price_summary"] or {}
         ao = d["audit"][0] if d["audit"] else {}
         index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"],

@@ -81,14 +81,61 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
     con.commit()
 
 
-def run(corp_codes, years, reprt_code="11011"):
-    con = connect()
-    for cc in corp_codes:
-        for y in years:
+from datetime import date
+
+
+def latest_interim_plan(today: date | None = None):
+    """오늘 기준으로 '최근 분기' 후보 (bsns_year, reprt_code) 를 최신순으로. 제출마감 기준:
+    1Q 5/15, 반기 8/14, 3Q 11/14, 사업보고서 3/31(전년도)."""
+    d = today or date.today()
+    y = d.year
+    cands = []
+    if d >= date(y, 11, 15):
+        cands += [(y, "11014"), (y, "11012"), (y, "11013")]
+    elif d >= date(y, 8, 15):
+        cands += [(y, "11012"), (y, "11013")]
+    elif d >= date(y, 5, 16):
+        cands += [(y, "11013")]
+    cands += [(y - 1, "11014"), (y - 1, "11012"), (y - 1, "11013")]   # 전년도 분기(연도 초반 대비)
+    return cands
+
+
+def fetch_latest_interim(con, cc, plan):
+    """plan 순서로 시도해 처음 데이터가 있는 분기보고서 + 전년 동기 적재. 반환 (year, reprt_code) or None"""
+    for y, rc in plan:
+        n = fetch_fin_raw(con, cc, str(y), rc)
+        if n:
+            build_kpi(con, cc, str(y), rc)
             try:
-                n = fetch_fin_raw(con, cc, str(y), reprt_code)
-                build_kpi(con, cc, str(y), reprt_code)
+                n2 = fetch_fin_raw(con, cc, str(y - 1), rc)   # 전년 동기
+                if n2:
+                    build_kpi(con, cc, str(y - 1), rc)
+            except Exception as e:  # noqa
+                log(con, cc, f"fin_{y-1}_{rc}", "fail", e)
+            return y, rc
+    return None
+
+
+def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):
+    """years: 연간(사업보고서) 적재 연도. interim=True면 최근 분기 + 전년 동기 추가.
+    오늘 기준 기본: 직전·직직전 연도 연간 + 최근분기·전년동기 = 회사당 (2+2)×2(연결/별도) = 8호출"""
+    con = connect()
+    if annual_years is None:
+        annual_years = years
+    plan = latest_interim_plan()
+    for cc in corp_codes:
+        for y in annual_years:
+            try:
+                n = fetch_fin_raw(con, cc, str(y), "11011")
+                if n:
+                    build_kpi(con, cc, str(y), "11011")
                 log(con, cc, f"fin_{y}", "ok" if n else "empty", f"{n} rows")
             except Exception as e:  # noqa
                 log(con, cc, f"fin_{y}", "fail", e)
+        if interim:
+            try:
+                r = fetch_latest_interim(con, cc, plan)
+                log(con, cc, "fin_interim", "ok" if r else "empty", str(r))
+            except Exception as e:  # noqa
+                log(con, cc, "fin_interim", "fail", e)
     return con

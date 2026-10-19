@@ -1,7 +1,9 @@
 name: collect-and-deploy
 on:
   schedule:
-    - cron: "0 21 * * 5"       # 매주 토요일 06:00 KST
+    - cron: "0 22 * * 0-4"     # 평일 07:00 KST: 시세
+    - cron: "30 20 1 * *"      # 매월 1일 05:30 KST: 재무(연간+최근분기)
+    - cron: "0 20 5 4 *"       # 4/5 05:00 KST: 사업내용·감사의견·주주 (사업보고서)
   workflow_dispatch:
     inputs:
       job:
@@ -27,7 +29,17 @@ jobs:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }}
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            case "${{ github.event.schedule }}" in
+              "30 20 1 * *") JOB=fin ;;
+              "0 20 5 4 *")  JOB=biz ;;
+              *)             JOB=price ;;
+            esac
+            python run.py $JOB
+          else
+            python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }}
+          fi
       - name: build site
         run: python run.py site
       - name: commit db

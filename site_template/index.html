@@ -97,12 +97,12 @@ async function open(code){
   cur=code; location.hash=code; document.querySelectorAll('.row').forEach(r=>r.classList.toggle('on',r.dataset.c===code));
   const d=await fetch(`data/c/${code}.json`).then(r=>r.json()).catch(()=>null);
   if(!d){$('#main').innerHTML='<div class="empty">상세 데이터가 없습니다.</div>';return}
-  const c=d.company, ps=d.price_summary||{}, kp=d.kpi.CFS||d.kpi.OFS||[], last=kp[kp.length-1]||{}, ao=d.audit[0];
+  const c=d.company, ps=d.price_summary||{}, kp=d.kpi.CFS||d.kpi.OFS||[], last=[...kp].reverse().find(r=>r.kind==='annual')||kp[kp.length-1]||{}, ao=d.audit[0];
   const opClass=o=>!o?'':o==='적정'?'good':/한정/.test(o)?'warn':'bad';
   let h=`<h2>${esc(c.corp_name)}</h2><div class="sub-title">${c.stock_code} · ${esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
   h+=`<div class="tiles">
     <div class="tile"><div class="k">시가총액</div><div class="v">${억(ps.mcap)}<small>억</small></div><div class="d">${ps.asof||''}</div></div>
-    <div class="tile"><div class="k">매출액 (${last.bsns_year||'-'}, ${d.kpi.CFS?'연결':'별도'})</div><div class="v">${억(last.revenue)}<small>억</small></div><div class="d">영업이익 ${억(last.op_income)}억</div></div>
+    <div class="tile"><div class="k">매출액 (${last.label||last.bsns_year||'-'}, ${d.kpi.CFS?'연결':'별도'})</div><div class="v">${억(last.revenue)}<small>억</small></div><div class="d">영업이익 ${억(last.op_income)}억</div></div>
     <div class="tile"><div class="k">부채비율</div><div class="v">${pct(last.debt_ratio)}</div><div class="d">순차입금/자본 ${pct(last.net_borrow_ratio)}</div></div>
     <div class="tile"><div class="k">감사의견 ${ao?ao.bsns_year:''}</div><div class="v"><span class="pill ${opClass(ao&&ao.adt_opinion)}">${esc(ao?ao.adt_opinion:'-')}</span></div><div class="d">${esc(ao?ao.adtor:'')}</div></div>
     <div class="tile"><div class="k">1Y 수익률 / 60일 변동성</div><div class="v ${ps.chg_1y<0?'neg':''}">${pct(ps.chg_1y)}</div><div class="d">변동성 ${pct(ps.vol_60d)} · 거래대금 ${억(ps.avg_value_3m)}억/일</div></div>
@@ -135,7 +135,7 @@ async function open(code){
   h+=`<section><h3>3. 재무현황 (억원, %)</h3>`;
   for(const [fs,label] of [['CFS','연결'],['OFS','별도']]){const rows=d.kpi[fs];if(!rows)continue;
     const cols=[['매출액','revenue',억],['영업이익','op_income',억],['당기순이익','net_income',억],['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억],['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['영업활동CF','cfo',억],['부채비율','debt_ratio',pct],['영업이익률','op_margin',pct],['순차입금/자본','net_borrow_ratio',pct]];
-    h+=`<div class="src" style="margin:6px 0 4px">${label}</div><div class="twrap"><table><tr><th>항목</th>${rows.map(r=>`<th class="n">${r.bsns_year}</th>`).join('')}</tr>${cols.map(([n,k,f])=>`<tr><td>${n}</td>${rows.map(r=>`<td class="n ${r[k]<0?'neg':''}">${f(r[k])}</td>`).join('')}</tr>`).join('')}</table></div>`;}
+    h+=`<div class="src" style="margin:6px 0 4px">${label} · 연간 2개년 + 최근분기(누적)·전년동기</div><div class="twrap"><table><tr><th>항목</th>${rows.map(r=>`<th class="n" ${r.kind==='interim'?'style="border-bottom:2px solid var(--accent)"':''}>${r.label||r.bsns_year}</th>`).join('')}</tr>${cols.map(([n,k,f])=>`<tr><td>${n}</td>${rows.map(r=>`<td class="n ${r[k]<0?'neg':''}">${f(r[k])}</td>`).join('')}</tr>`).join('')}</table></div>`;}
   if(!d.kpi.CFS&&!d.kpi.OFS) h+=`<div class="src">재무 미수집</div>`;
   h+=`</section>`;
   // 4 주가
