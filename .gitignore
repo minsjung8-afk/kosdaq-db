@@ -1,0 +1,8 @@
+config.json
+reports/
+site/
+profiles/
+__pycache__/
+*.db-wal
+*.db-shm
+test_smoke.db*

@@ -1,0 +1,37 @@
+name: collect-and-deploy
+on:
+  schedule:
+    - cron: "0 21 * * 5"       # 매주 토요일 06:00 KST
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "run.py job (fin/biz/price/all...)"
+        default: "price"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - name: collect
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python run.py ${{ github.event.inputs.job || 'price' }}
+      - name: build site
+        run: python run.py site
+      - name: commit db
+        run: |
+          git config user.name "kosdaq-bot"; git config user.email "bot@users.noreply.github.com"
+          git add kosdaq.db && git commit -m "data: $(date -u +%F)" || echo "no change"
+          git push
+      - name: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name kosdaq-db

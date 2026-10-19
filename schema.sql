@@ -1,0 +1,177 @@
+-- 코스닥 상장사 심사참고 DB (SQLite)
+-- 원칙: 원천(raw) 테이블은 출처 그대로, 파생(kpi/summary) 테이블은 재계산 가능하게 분리
+
+
+-- 1. 개요 ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS company (
+    corp_code     TEXT PRIMARY KEY,        -- DART 고유번호(8자리)
+    stock_code    TEXT UNIQUE,             -- 종목코드(6자리)
+    corp_name     TEXT NOT NULL,
+    market        TEXT,                    -- KOSDAQ / KOSPI / KONEX
+    sector_krx    TEXT,                    -- KRX 업종분류
+    induty_code   TEXT,                    -- DART 업종코드(KSIC)
+    ceo_nm        TEXT,
+    est_dt        TEXT,                    -- 설립일 YYYYMMDD
+    listed_dt     TEXT,                    -- 상장일
+    acc_mt        TEXT,                    -- 결산월
+    adres         TEXT,
+    hm_url        TEXT,
+    phn_no        TEXT,
+    jurir_no      TEXT,                    -- 법인등록번호
+    bizr_no       TEXT,                    -- 사업자등록번호
+    updated_at    TEXT
+);
+
+-- 감사의견(사업보고서 "회계감사인의 명칭 및 감사의견")
+CREATE TABLE IF NOT EXISTS audit_opinion (
+    corp_code     TEXT,
+    bsns_year     TEXT,
+    adtor         TEXT,                    -- 감사인
+    adt_opinion   TEXT,                    -- 적정/한정/부적정/의견거절
+    adt_reprt_spcmnt_matter TEXT,          -- 강조사항 등
+    emphs_matter  TEXT,
+    core_adt_matter TEXT,                  -- 핵심감사사항
+    PRIMARY KEY (corp_code, bsns_year)
+);
+
+-- 최대주주 및 특수관계인(사업보고서 기준)
+CREATE TABLE IF NOT EXISTS shareholder (
+    corp_code     TEXT,
+    bsns_year     TEXT,
+    nm            TEXT,
+    relate        TEXT,
+    stock_knd     TEXT,
+    bsis_posesn_stock_co  INTEGER,
+    trmend_posesn_stock_co INTEGER,
+    trmend_posesn_stock_qota_rt REAL,
+    PRIMARY KEY (corp_code, bsns_year, nm, stock_knd)
+);
+
+-- 2. 사업내용 -----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS business (
+    corp_code     TEXT,
+    bsns_year     TEXT,
+    rcept_no      TEXT,                    -- 사업보고서 접수번호
+    reprt_code    TEXT,                    -- 11011 사업 / 11012 반기 / 11013 1Q / 11014 3Q
+    overview_text TEXT,                    -- "1. 사업의 개요" 원문
+    full_text     TEXT,                    -- "II. 사업의 내용" 전체 원문
+    char_len      INTEGER,
+    summary_json  TEXT,                    -- LLM 정형요약(JSON) - 아래 summary 필드 참조
+    summary_md    TEXT,                    -- 심사용 서술 요약
+    summarized_at TEXT,
+    fetched_at    TEXT,
+    PRIMARY KEY (corp_code, bsns_year)
+);
+
+-- 3. 재무현황 -----------------------------------------------------------
+-- 원천: DART 단일회사 전체 재무제표(fnlttSinglAcntAll) long format
+CREATE TABLE IF NOT EXISTS fin_raw (
+    corp_code     TEXT,
+    bsns_year     TEXT,
+    reprt_code    TEXT,
+    fs_div        TEXT,                    -- CFS 연결 / OFS 별도
+    sj_div        TEXT,                    -- BS/IS/CIS/CF/SCE
+    account_id    TEXT,
+    account_nm    TEXT,
+    thstrm_amount REAL,                    -- 당기
+    frmtrm_amount REAL,                    -- 전기
+    bfefrmtrm_amount REAL,                 -- 전전기
+    ord           INTEGER,
+    PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm)
+);
+
+-- 파생: 심사용 핵심계정(연도별 1행). fin_raw에서 재계산
+CREATE TABLE IF NOT EXISTS fin_kpi (
+    corp_code     TEXT,
+    bsns_year     TEXT,
+    reprt_code    TEXT,
+    fs_div        TEXT,
+    revenue       REAL,
+    op_income     REAL,
+    net_income    REAL,
+    total_assets  REAL,
+    total_liab    REAL,
+    equity        REAL,
+    cash          REAL,
+    borrowings    REAL,                    -- 차입금(단기+장기+사채+리스) 근사
+    cfo           REAL,                    -- 영업활동현금흐름
+    debt_ratio    REAL,                    -- 부채비율 %
+    op_margin     REAL,
+    net_borrow_ratio REAL,                 -- 순차입금/자기자본 %
+    PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div)
+);
+
+-- 4. 주가추이 -----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS price_daily (
+    stock_code    TEXT,
+    dt            TEXT,                    -- YYYY-MM-DD
+    open REAL, high REAL, low REAL, close REAL, volume INTEGER,
+    PRIMARY KEY (stock_code, dt)
+);
+
+-- 파생: 담보가치 판단용 요약(기준일 1행)
+CREATE TABLE IF NOT EXISTS price_summary (
+    stock_code    TEXT,
+    asof          TEXT,
+    close         REAL,
+    shares_out    INTEGER,                 -- 발행주식수(DART stockTotqySttus)
+    mcap          REAL,                    -- 시가총액
+    high_52w REAL, low_52w REAL,
+    chg_1m REAL, chg_3m REAL, chg_1y REAL, -- 수익률 %
+    avg_vol_3m    REAL,                    -- 3개월 평균 거래량
+    avg_value_3m  REAL,                    -- 3개월 평균 거래대금(원) - 담보처분 유동성
+    vol_60d       REAL,                    -- 60일 변동성(연율 %)
+    PRIMARY KEY (stock_code, asof)
+);
+
+-- 5. 리포트·공시 메타 ------------------------------------------------------
+CREATE TABLE IF NOT EXISTS report_meta (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    stock_code    TEXT,
+    source        TEXT,                    -- HK(한경컨센서스) / KIND_IR / NAVER ...
+    source_id     TEXT,                    -- 출처 내 리포트 ID (HK: REPORT_IDX)
+    title         TEXT,
+    publisher     TEXT,                    -- 증권사
+    analyst       TEXT,
+    pub_dt        TEXT,                    -- YYYYMMDD
+    opinion       TEXT,                    -- Buy/Hold/Sell 등 출처 표기 그대로
+    old_opinion   TEXT,
+    target_price  REAL,
+    old_target_price REAL,
+    eps_json      TEXT,                    -- 출처 제공 EPS 전망 {"2025":..,"2026":..}
+    url           TEXT,                    -- 출처 페이지
+    pdf_url       TEXT,
+    local_path    TEXT,                    -- 개인 PC 보관 경로(사이트에는 미배포)
+    fetched_at    TEXT,
+    UNIQUE (source, source_id)
+);
+
+-- 리포트 LLM 분석 결과: 원문 저장 없이 정형 필드만
+CREATE TABLE IF NOT EXISTS report_analysis (
+    report_id     INTEGER PRIMARY KEY REFERENCES report_meta(id),
+    stock_code    TEXT,
+    forecast_json TEXT,                    -- [{"year":"2025","revenue":..,"op_income":..,"net_income":..}] 단위:원
+    valuation_json TEXT,                   -- {"method":"PER","multiple":..,"base_eps":..,"base_year":..}
+    points_json   TEXT,                    -- 투자포인트 [{"point":"..","evidence":".."}] 자체 재서술
+    risks_json    TEXT,                    -- 리스크 ["..."]
+    memo_md       TEXT,                    -- 심사용 3~6줄 메모(자체 서술)
+    pages         INTEGER,
+    analyzed_at   TEXT
+);
+
+-- 심사 관점 주요 공시 이벤트(DART 공시목록에서 키워드 필터)
+CREATE TABLE IF NOT EXISTS disclosure_event (
+    corp_code     TEXT,
+    rcept_no      TEXT PRIMARY KEY,
+    rcept_dt      TEXT,
+    report_nm     TEXT,
+    flag          TEXT                     -- 유상증자/CB/BW/감사의견/관리종목/최대주주변경/소송 등
+);
+
+-- 수집 로그
+CREATE TABLE IF NOT EXISTS fetch_log (
+    corp_code TEXT, job TEXT, status TEXT, msg TEXT, at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_stock ON price_daily(stock_code, dt DESC);
+CREATE INDEX IF NOT EXISTS idx_event_corp ON disclosure_event(corp_code, rcept_dt DESC);
