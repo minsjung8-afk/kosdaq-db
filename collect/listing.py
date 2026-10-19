@@ -25,17 +25,18 @@ def upsert_company(con, corp_code, stock_code, base, js=None):
     js = js or dart_get("company", corp_code=corp_code)
     name = base.get("corp_name") or js.get("stock_name") or js.get("corp_name")   # KRX 약식명 우선
     con.execute("""INSERT INTO company (corp_code, stock_code, corp_name, market, sector_krx, induty_code,
-        ceo_nm, est_dt, listed_dt, acc_mt, adres, hm_url, phn_no, jurir_no, bizr_no, updated_at, sect_tp, corp_name_full)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ceo_nm, est_dt, listed_dt, acc_mt, adres, hm_url, phn_no, jurir_no, bizr_no, updated_at, sect_tp, corp_name_full, parval)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(corp_code) DO UPDATE SET corp_name=excluded.corp_name, market=excluded.market,
         sector_krx=excluded.sector_krx, induty_code=excluded.induty_code, ceo_nm=excluded.ceo_nm,
         est_dt=excluded.est_dt, listed_dt=excluded.listed_dt, acc_mt=excluded.acc_mt, adres=excluded.adres,
         hm_url=excluded.hm_url, phn_no=excluded.phn_no, jurir_no=excluded.jurir_no, bizr_no=excluded.bizr_no,
-        updated_at=excluded.updated_at, sect_tp=excluded.sect_tp, corp_name_full=excluded.corp_name_full""",
+        updated_at=excluded.updated_at, sect_tp=excluded.sect_tp, corp_name_full=excluded.corp_name_full,
+        parval=COALESCE(excluded.parval, company.parval)""",
         (corp_code, stock_code, name, base.get("market"),
          ksic_name(js.get("induty_code")), js.get("induty_code"), js.get("ceo_nm"), js.get("est_dt"),
          base.get("listed_dt"), js.get("acc_mt"), js.get("adres"), js.get("hm_url"), js.get("phn_no"),
-         js.get("jurir_no"), js.get("bizr_no"), now(), base.get("sect_tp"), js.get("corp_name")))
+         js.get("jurir_no"), js.get("bizr_no"), now(), base.get("sect_tp"), js.get("corp_name"), base.get("parval")))
     con.commit()
 
 

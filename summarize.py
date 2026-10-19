@@ -57,3 +57,78 @@ def run(corp_codes=None, bsns_year=None, force=False):
             con.commit()
         except Exception as e:  # noqa
             print("요약 실패", r["corp_code"], e)
+
+
+RATING_PROMPT = """당신은 여신심사역이다. 아래는 신용평가사가 공시한 기업신용평가서 텍스트다.
+평가사 문장을 베끼지 말고 내 말로, 아래 JSON 스키마로만 답하라(없으면 null). 금액은 억원 단위 숫자.
+{
+ "industry": "업종 한 줄",
+ "business_model": "무엇을 누구에게 어떻게 파는지 2~3문장",
+ "main_products": [{"name": "", "revenue_share_pct": null}],
+ "market_position": "시장지위·경쟁력 한두 문장",
+ "group_support": "계열·대주주 지원 가능성(있으면)",
+ "rating_rationale": ["등급 논리(평가사가 든 근거) 3~5개, 각 한 줄"],
+ "rating_triggers": {"up": ["상향 요인"], "down": ["하향 요인"]},
+ "key_financials_view": "평가사의 재무 평가 요지 2~3문장(차입·현금흐름·유동성)",
+ "key_risks": ["심사상 유의할 리스크 3~5개"],
+ "summary_md": "승인신청서 '사업현황'란에 쓸 10줄 내외 서술. 내 문장으로."
+}
+
+신용평가서 텍스트:
+"""
+
+
+def _pdf_text(data: bytes, max_pages=40):
+    import io
+    from pypdf import PdfReader  # noqa
+    rd = PdfReader(io.BytesIO(data))
+    n = len(rd.pages)
+    return "\n".join((rd.pages[i].extract_text() or "") for i in range(min(n, max_pages))), n
+
+
+def run_rating(corp_codes=None, force=False, model="claude-sonnet-4-5"):
+    """등급 보유사: 최신 기업신용평가(없으면 사채) 평가서 PDF → 사업 요약. PDF는 메모리에서만 처리."""
+    import anthropic  # noqa
+    import requests  # noqa
+    from common import UA  # noqa
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ANTHROPIC_API_KEY 없음 - 신용평가서 요약 건너뜀")
+        return
+    con = connect()
+    client = anthropic.Anthropic()
+    rows = con.execute("""SELECT r.corp_code, r.agency, r.disc_dt, r.grade, r.file_url,
+                          CASE WHEN r.target_type LIKE '%기업신용평가%' THEN 0 ELSE 1 END AS pri
+                          FROM credit_rating r WHERE r.file_url IS NOT NULL
+                          AND (r.target_type LIKE '%기업신용평가%' OR r.target_type LIKE '%사채%')
+                          ORDER BY r.corp_code, pri, r.disc_dt DESC""").fetchall()
+    latest = {}
+    for r in rows:
+        latest.setdefault(r["corp_code"], r)
+    n = 0
+    for cc, r in latest.items():
+        if corp_codes and cc not in corp_codes:
+            continue
+        old = con.execute("SELECT disc_dt FROM rating_summary WHERE corp_code=?", (cc,)).fetchone()
+        if old and not force and old["disc_dt"] >= r["disc_dt"]:
+            continue
+        try:
+            pdf = requests.get(r["file_url"], headers=UA, timeout=60).content
+            if pdf[:4] != b"%PDF":
+                continue
+            text, pages = _pdf_text(pdf)
+            if len(text) < 500:
+                continue
+            msg = client.messages.create(model=model, max_tokens=2500,
+                                         messages=[{"role": "user", "content": RATING_PROMPT + text[:150_000]}])
+            out = msg.content[0].text.strip()
+            if out.startswith("```"):
+                out = out.strip("`").split("\n", 1)[1]
+            js = json.loads(out)
+            con.execute("INSERT OR REPLACE INTO rating_summary VALUES (?,?,?,?,?,?,?,?,?)",
+                        (cc, r["agency"], r["disc_dt"], r["grade"], r["file_url"], json.dumps(js, ensure_ascii=False),
+                         js.get("summary_md"), pages, now()))
+            con.commit()
+            n += 1
+        except Exception as e:  # noqa
+            print("신용평가서 요약 실패", cc, e)
+    print(f"신용평가서 요약 {n}건")

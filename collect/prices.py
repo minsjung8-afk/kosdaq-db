@@ -66,17 +66,20 @@ def build_summary(con, stock_code, shares_out=None, asof=None):
     avg_vol = sum(r["volume"] for r in m3) / len(m3) if m3 else None
     avg_val = sum(r["volume"] * r["close"] for r in m3) / len(m3) if m3 else None
     mcap = last["close"] * shares_out if shares_out else None
-    con.execute("INSERT OR REPLACE INTO price_summary VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    con.execute("""INSERT OR REPLACE INTO price_summary (stock_code, asof, close, shares_out, mcap, high_52w, low_52w,
+                chg_1m, chg_3m, chg_1y, avg_vol_3m, avg_value_3m, vol_60d, chg_1w, chg_6m, chg_2y, chg_3y)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (stock_code, asof, last["close"], shares_out, mcap,
                  max(r["close"] for r in y1) if y1 else None, min(r["close"] for r in y1) if y1 else None,
-                 chg(30), chg(91), chg(365), avg_vol, avg_val, vol))
+                 chg(30), chg(91), chg(365), avg_vol, avg_val, vol, chg(7), chg(182), chg(730), chg(1095)))
     con.commit()
     return asof
 
 
-def run(pairs, bsns_year=None, start="2025-01-01", market="KOSDAQ"):
+def run(pairs, bsns_year=None, start=None, market="KOSDAQ"):
     """pairs: [(corp_code, stock_code)]. 시세는 전종목으로 받되 요약은 pairs만."""
     con = connect()
+    start = start or (date.today() - timedelta(days=3 * 365 + 10)).isoformat()   # 3년치(3년 수익률용)
     con.execute("CREATE TABLE IF NOT EXISTS _krx_latest (stock_code TEXT, dt TEXT, shares REAL, mcap REAL, PRIMARY KEY(stock_code, dt))")
     try:
         n = fetch_prices_range(con, date.fromisoformat(start), date.today(), market)

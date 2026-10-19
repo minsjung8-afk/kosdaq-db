@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS company (
     bizr_no       TEXT,                    -- 사업자등록번호
     updated_at    TEXT,
     sect_tp       TEXT,                    -- KRX 소속부(우량/벤처/중견/기술성장 등)
-    corp_name_full TEXT                    -- DART 정식 회사명
+    corp_name_full TEXT,                   -- DART 정식 회사명
+    parval        REAL                     -- 액면가(원), KRX
 );
 
 -- 감사의견(사업보고서 "회계감사인의 명칭 및 감사의견")
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS business (
     summary_md    TEXT,                    -- 심사용 서술 요약
     summarized_at TEXT,
     fetched_at    TEXT,
+    rating_text   TEXT,                    -- 사업보고서 '신용평가에 관한 사항' 원문(표 평탄화)
     PRIMARY KEY (corp_code, bsns_year)
 );
 
@@ -128,6 +130,7 @@ CREATE TABLE IF NOT EXISTS price_summary (
     mcap          REAL,                    -- 시가총액
     high_52w REAL, low_52w REAL,
     chg_1m REAL, chg_3m REAL, chg_1y REAL, -- 수익률 %
+    chg_1w REAL, chg_6m REAL, chg_2y REAL, chg_3y REAL,
     avg_vol_3m    REAL,                    -- 3개월 평균 거래량
     avg_value_3m  REAL,                    -- 3개월 평균 거래대금(원) - 담보처분 유동성
     vol_60d       REAL,                    -- 60일 변동성(연율 %)
@@ -176,6 +179,34 @@ CREATE TABLE IF NOT EXISTS disclosure_event (
     rcept_dt      TEXT,
     report_nm     TEXT,
     flag          TEXT                     -- 유상증자/CB/BW/감사의견/관리종목/최대주주변경/소송 등
+);
+
+-- 신용등급 이력(금감원 신용평가서 공시)
+CREATE TABLE IF NOT EXISTS credit_rating (
+    corp_code     TEXT,
+    agency        TEXT,                    -- 한국신용평가/한국기업평가/나이스신용평가/서울신용평가
+    target_type   TEXT,                    -- 기업신용평가 / 제n회 사채 / 전자단기사채 ...
+    eval_kind     TEXT,                    -- 본평가/정기평가/수시평가(정정)
+    disc_dt       TEXT,                    -- 공시일자 YYYY-MM-DD
+    grade         TEXT,
+    watch         TEXT,
+    outlook       TEXT,
+    fetched_at    TEXT,
+    file_url      TEXT,                    -- 신용평가서 PDF 다운로드 링크
+    PRIMARY KEY (corp_code, agency, target_type, disc_dt, grade)
+);
+
+-- 신용평가서 기반 사업 요약 (원문 미저장, 요약만)
+CREATE TABLE IF NOT EXISTS rating_summary (
+    corp_code     TEXT PRIMARY KEY,
+    agency        TEXT,
+    disc_dt       TEXT,
+    grade         TEXT,
+    file_url      TEXT,
+    summary_json  TEXT,
+    summary_md    TEXT,
+    pages         INTEGER,
+    summarized_at TEXT
 );
 
 -- 수집 로그

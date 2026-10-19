@@ -55,7 +55,7 @@ print("[OK] KPI: 부채비율", k["debt_ratio"], "순차입금/자본", k["net_b
 # 3) 주가 요약
 import random, datetime  # noqa
 random.seed(1)
-d, p = datetime.date(2025, 10, 20), 10000.0
+d, p = datetime.date(2023, 10, 20), 10000.0
 rows = []
 while d <= datetime.date(2026, 10, 16):
     if d.weekday() < 5:

@@ -20,7 +20,7 @@ EP_DAILY = {"KOSDAQ": "sto/ksq_bydd_trd", "KOSPI": "sto/stk_bydd_trd", "KONEX": 
 
 FIELD_BASE = {"stock_code": "ISU_SRT_CD", "corp_name": "ISU_ABBRV", "full_name": "ISU_NM", "listed_dt": "LIST_DD",
               "sect_tp": "SECT_TP_NM", "sec_group": "SECUGRP_NM", "stock_type": "KIND_STKCERT_TP_NM",
-              "shares": "LIST_SHRS"}
+              "shares": "LIST_SHRS", "parval": "PARVAL"}
 FIELD_DAILY = {"stock_code": "ISU_CD", "dt": "BAS_DD", "open": "TDD_OPNPRC", "high": "TDD_HGPRC", "low": "TDD_LWPRC",
                "close": "TDD_CLSPRC", "volume": "ACC_TRDVOL", "value": "ACC_TRDVAL", "mcap": "MKTCAP", "shares": "LIST_SHRS"}
 
@@ -84,6 +84,7 @@ def base_info(market="KOSDAQ", bas_dd=None) -> list:
         row["stock_code"] = str(row["stock_code"]).zfill(6)
         row["listed_dt"] = (row["listed_dt"] or "").replace("/", "").replace("-", "")
         row["shares"] = _num(row["shares"])
+        row["parval"] = _num(row["parval"])
         out.append(row)
     return out
 

@@ -29,7 +29,7 @@ def _fva(con, sc):
 
 def company_detail(con, c):
     cc, sc = c["corp_code"], c["stock_code"]
-    biz = q(con, "SELECT bsns_year, rcept_no, overview_text, summary_json, summary_md FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc)
+    biz = q(con, "SELECT bsns_year, rcept_no, overview_text, summary_json, summary_md, rating_text FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc)
     b = biz[0] if biz else {}
     kpi = {}
     Q = {"11013": 1, "11012": 2, "11014": 3}
@@ -53,7 +53,7 @@ def company_detail(con, c):
             rows.append({**L, "label": plabel(L["bsns_year"], L["reprt_code"]), "kind": "interim"})
         if rows:
             kpi[fs] = [{k: v for k, v in r.items() if k not in ("corp_code", "fs_div")} for r in rows]
-    prices = q(con, "SELECT dt, close, volume FROM price_daily WHERE stock_code=? AND dt >= date('now','-1 year') ORDER BY dt", sc)
+    prices = q(con, "SELECT dt, open, high, low, close, volume FROM price_daily WHERE stock_code=? AND dt >= date('now','-3 years') ORDER BY dt", sc)
     ps = q(con, "SELECT * FROM price_summary WHERE stock_code=? ORDER BY asof DESC LIMIT 1", sc)
     return {
         "company": c,
@@ -65,7 +65,11 @@ def company_detail(con, c):
                      "overview": (b.get("overview_text") or "")[:4000], "summary": json.loads(b["summary_json"]) if b.get("summary_json") else None},
         "kpi": kpi,
         "price_summary": ps[0] if ps else None,
-        "prices": [[p["dt"], p["close"], p["volume"]] for p in prices],
+        "prices": [[p["dt"], p["open"], p["high"], p["low"], p["close"], p["volume"]] for p in prices],
+        "rating_text": b.get("rating_text"),
+        "rating_summary": (lambda rs: {**rs[0], "summary": json.loads(rs[0]["summary_json"])} if rs else None)(
+            q(con, "SELECT agency, disc_dt, grade, file_url, summary_json, summary_md FROM rating_summary WHERE corp_code=?", cc)),
+        "ratings": q(con, "SELECT agency, target_type, eval_kind, disc_dt, grade, watch, outlook FROM credit_rating WHERE corp_code=? ORDER BY disc_dt DESC", cc),
         "events": q(con, "SELECT rcept_dt, flag, report_nm, rcept_no FROM disclosure_event WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 20", cc),
         "reports": q(con, """SELECT m.pub_dt, m.source, m.publisher, m.analyst, m.title, m.url, m.opinion, m.target_price, m.old_target_price,
                              a.forecast_json, a.valuation_json, a.points_json, a.risks_json, a.memo_md
@@ -91,10 +95,13 @@ def build():
         k = next((r for r in reversed(_rows) if r.get("kind") == "annual"), _rows[-1])   # 검색 인덱스는 최근 연간 기준
         ps = d["price_summary"] or {}
         ao = d["audit"][0] if d["audit"] else {}
+        LONG = ("기업신용평가", "회사채", "사채")
+        cur_rt = next((r for r in d["ratings"] if any(k in (r["target_type"] or "") for k in LONG)), None)
         index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"],
                       "rev": k.get("revenue"), "op": k.get("op_income"), "debt": k.get("debt_ratio"),
                       "mcap": ps.get("mcap"), "opinion": ao.get("adt_opinion"), "year": k.get("bsns_year"),
-                      "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None})
+                      "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None,
+                      "rating": cur_rt["grade"] if cur_rt else None})
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
             "price_asof": max((r["asof"] for r in q(con, "SELECT asof FROM price_summary")), default=None)}
     (SITE / "data" / "companies.json").write_text(json.dumps({"meta": meta, "items": index}, ensure_ascii=False), encoding="utf-8")

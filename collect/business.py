@@ -69,6 +69,19 @@ def extract_business_section(xml_text: str):
     return full, overview
 
 
+def extract_rating_section(xml_text: str):
+    """'회사의 개요' SECTION-1 안의 '신용평가에 관한 사항' SECTION-2 텍스트(표는 ' | ' 구분)"""
+    for s1 in re.findall(r"<SECTION-1[^>]*>(.*?)</SECTION-1>", xml_text, flags=re.S | re.I):
+        m = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", s1, flags=re.S | re.I)
+        if not m or "회사의개요" not in _strip(m.group(1)).replace(" ", ""):
+            continue
+        for s2 in re.findall(r"<SECTION-2[^>]*>(.*?)</SECTION-2>", s1, flags=re.S | re.I):
+            m2 = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", s2, flags=re.S | re.I)
+            if m2 and "신용평가" in _strip(m2.group(1)):
+                return _strip(s2)[:6000]
+    return None
+
+
 def fetch_document_xml(rcept_no: str) -> str:
     raw = dart_get_binary("document", rcept_no=rcept_no)
     z = zipfile.ZipFile(io.BytesIO(raw))
@@ -90,14 +103,15 @@ def fetch_business(con, corp_code, bsns_year):
         return False
     xml_text = fetch_document_xml(rcept_no)
     full, overview = extract_business_section(xml_text)
+    rating_text = extract_rating_section(xml_text)
     if not full:
         log(con, corp_code, f"biz_{bsns_year}", "fail", "사업의 내용 섹션 미검출")
         return False
     con.execute("""INSERT INTO business (corp_code, bsns_year, rcept_no, reprt_code, overview_text, full_text,
-        char_len, fetched_at) VALUES (?,?,?,?,?,?,?,?)
+        char_len, fetched_at, rating_text) VALUES (?,?,?,?,?,?,?,?,?)
         ON CONFLICT(corp_code, bsns_year) DO UPDATE SET rcept_no=excluded.rcept_no, overview_text=excluded.overview_text,
-        full_text=excluded.full_text, char_len=excluded.char_len, fetched_at=excluded.fetched_at""",
-                (corp_code, bsns_year, rcept_no, "11011", overview, full, len(full), now()))
+        full_text=excluded.full_text, char_len=excluded.char_len, fetched_at=excluded.fetched_at, rating_text=excluded.rating_text""",
+                (corp_code, bsns_year, rcept_no, "11011", overview, full, len(full), now(), rating_text))
     con.commit()
     log(con, corp_code, f"biz_{bsns_year}", "ok", f"{len(full)} chars")
     return True

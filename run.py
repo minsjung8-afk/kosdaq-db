@@ -4,6 +4,7 @@
   python run.py biz --year 2025
   python run.py price --year 2025
   python run.py summarize                 # ANTHROPIC_API_KEY 필요
+  python run.py rating                    # 금감원 신용평가서 → 신용등급 이력 (3년)
   python run.py kind                      # KIND IR자료실 링크(선택)
   python run.py hk --period y1            # 한경컨센서스 기업리포트 메타+PDF (DB 내 종목만)
   python run.py analyze --limit 20        # 받은 PDF → 정형 분석 (ANTHROPIC_API_KEY)
@@ -29,7 +30,7 @@ def corp_pairs(con, limit=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "price", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "price", "rating", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -62,7 +63,11 @@ def main():
         prices.run(pairs, a.year)
     if a.job in ("summarize", "all"):
         import summarize
-        summarize.run(ccs, a.years[-1] if a.years else a.year - 1)
+        summarize.run_rating(set(ccs) if a.limit else None)                  # 등급 보유사: 신용평가서 기반 요약(우선)
+        summarize.run(ccs, a.years[-1] if a.years else a.year - 1)           # 나머지: 사업보고서 기반
+    if a.job in ("rating", "all"):
+        import fss_rating
+        fss_rating.run(set(ccs) if a.limit else None)
     if a.job == "kind":
         import kind_ir
         kind_ir.run()
