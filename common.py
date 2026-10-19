@@ -37,6 +37,11 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     except sqlite3.OperationalError:
         con.execute("PRAGMA journal_mode=DELETE")   # 네트워크/FUSE 마운트: WAL 불가
     con.executescript((ROOT / "schema.sql").read_text(encoding="utf-8"))
+    for col in ("sect_tp TEXT", "corp_name_full TEXT"):      # 기존 DB 마이그레이션
+        try:
+            con.execute(f"ALTER TABLE company ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass
     return con
 
 

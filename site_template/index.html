@@ -99,7 +99,7 @@ async function open(code){
   if(!d){$('#main').innerHTML='<div class="empty">상세 데이터가 없습니다.</div>';return}
   const c=d.company, ps=d.price_summary||{}, kp=d.kpi.CFS||d.kpi.OFS||[], last=kp[kp.length-1]||{}, ao=d.audit[0];
   const opClass=o=>!o?'':o==='적정'?'good':/한정/.test(o)?'warn':'bad';
-  let h=`<h2>${esc(c.corp_name)}</h2><div class="sub-title">${c.stock_code} · ${esc(c.market)} · ${esc(c.sector_krx||'')} · KSIC ${esc(c.induty_code||'-')}</div>`;
+  let h=`<h2>${esc(c.corp_name)}</h2><div class="sub-title">${c.stock_code} · ${esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
   h+=`<div class="tiles">
     <div class="tile"><div class="k">시가총액</div><div class="v">${억(ps.mcap)}<small>억</small></div><div class="d">${ps.asof||''}</div></div>
     <div class="tile"><div class="k">매출액 (${last.bsns_year||'-'}, ${d.kpi.CFS?'연결':'별도'})</div><div class="v">${억(last.revenue)}<small>억</small></div><div class="d">영업이익 ${억(last.op_income)}억</div></div>

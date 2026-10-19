@@ -73,7 +73,7 @@ def build():
         k = (d["kpi"].get("CFS") or d["kpi"].get("OFS") or [{}])[-1]
         ps = d["price_summary"] or {}
         ao = d["audit"][0] if d["audit"] else {}
-        index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "market": c["market"],
+        index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"],
                       "rev": k.get("revenue"), "op": k.get("op_income"), "debt": k.get("debt_ratio"),
                       "mcap": ps.get("mcap"), "opinion": ao.get("adt_opinion"), "year": k.get("bsns_year"),
                       "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None})

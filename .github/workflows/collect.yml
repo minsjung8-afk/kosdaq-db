@@ -9,6 +9,9 @@ on:
         default: "price"
         type: choice
         options: [init, fin, biz, price, summarize, site, all]
+      args:
+        description: "추가 인자 (예: --years 2024 2025 / --limit 50)"
+        default: ""
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -20,10 +23,11 @@ jobs:
       - run: pip install -r requirements.txt
       - name: collect
         env:
+          PYTHONUNBUFFERED: "1"
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python run.py ${{ github.event.inputs.job || 'price' }}
+        run: python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }}
       - name: build site
         run: python run.py site
       - name: commit db

@@ -19,7 +19,7 @@ EP_BASE_INFO = {"KOSDAQ": "sto/ksq_isu_base_info", "KOSPI": "sto/stk_isu_base_in
 EP_DAILY = {"KOSDAQ": "sto/ksq_bydd_trd", "KOSPI": "sto/stk_bydd_trd", "KONEX": "sto/knx_bydd_trd"}
 
 FIELD_BASE = {"stock_code": "ISU_SRT_CD", "corp_name": "ISU_ABBRV", "full_name": "ISU_NM", "listed_dt": "LIST_DD",
-              "sector_krx": "SECT_TP_NM", "sec_group": "SECUGRP_NM", "stock_type": "KIND_STKCERT_TP_NM",
+              "sect_tp": "SECT_TP_NM", "sec_group": "SECUGRP_NM", "stock_type": "KIND_STKCERT_TP_NM",
               "shares": "LIST_SHRS"}
 FIELD_DAILY = {"stock_code": "ISU_CD", "dt": "BAS_DD", "open": "TDD_OPNPRC", "high": "TDD_HGPRC", "low": "TDD_LWPRC",
                "close": "TDD_CLSPRC", "volume": "ACC_TRDVOL", "value": "ACC_TRDVAL", "mcap": "MKTCAP", "shares": "LIST_SHRS"}

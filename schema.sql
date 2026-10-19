@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS company (
     phn_no        TEXT,
     jurir_no      TEXT,                    -- 법인등록번호
     bizr_no       TEXT,                    -- 사업자등록번호
-    updated_at    TEXT
+    updated_at    TEXT,
+    sect_tp       TEXT,                    -- KRX 소속부(우량/벤처/중견/기술성장 등)
+    corp_name_full TEXT                    -- DART 정식 회사명
 );
 
 -- 감사의견(사업보고서 "회계감사인의 명칭 및 감사의견")
