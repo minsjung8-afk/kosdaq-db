@@ -39,7 +39,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     con.executescript((ROOT / "schema.sql").read_text(encoding="utf-8"))
     migrations = [("company", "sect_tp TEXT"), ("company", "corp_name_full TEXT")] + \
                  [("fin_kpi", c) for c in ("net_borrowings REAL", "da REAL", "ebitda REAL", "int_exp REAL",
-                                           "interest_cover REAL", "borrow_dep REAL")]
+                                           "interest_cover REAL", "borrow_dep REAL", "rcept_no TEXT")] + \
+                 [("fin_raw", "rcept_no TEXT")]
     for tbl, col in migrations:                                   # 기존 DB 마이그레이션
         try:
             con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")

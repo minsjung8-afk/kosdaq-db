@@ -28,11 +28,12 @@ def fetch_fin_raw(con, corp_code, bsns_year, reprt_code="11011"):
         js = dart_get("fnlttSinglAcntAll", corp_code=corp_code, bsns_year=bsns_year,
                       reprt_code=reprt_code, fs_div=fs_div)
         for r in js.get("list", []):
-            con.execute("""INSERT OR REPLACE INTO fin_raw VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            con.execute("""INSERT OR REPLACE INTO fin_raw (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm,
+                thstrm_amount, frmtrm_amount, bfefrmtrm_amount, ord, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (corp_code, bsns_year, reprt_code, fs_div, r.get("sj_div"),
                          r.get("account_id"), r.get("account_nm"),
                          to_num(r.get("thstrm_amount")), to_num(r.get("frmtrm_amount")),
-                         to_num(r.get("bfefrmtrm_amount")), int(r.get("ord") or 0)))
+                         to_num(r.get("bfefrmtrm_amount")), int(r.get("ord") or 0), r.get("rcept_no")))
             n += 1
     con.commit()
     return n
@@ -89,14 +90,19 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k["interest_cover"] = round(k["ebitda"] / ie, 1) if k.get("ebitda") is not None and ie else None   # EBITDA/이자비용
         k["borrow_dep"] = round(k["borrowings"] / k["total_assets"] * 100, 1) \
             if k.get("borrowings") is not None and k.get("total_assets") else None
+        rcept = next((r["rcept_no"] for r in rows if r.get("rcept_no")), None)
+        if rcept is None:   # 기존 행에 저장된 접수번호 유지
+            old = con.execute("SELECT rcept_no FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
+                              (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
+            rcept = old["rcept_no"] if old else None
         con.execute("""INSERT OR REPLACE INTO fin_kpi (corp_code, bsns_year, reprt_code, fs_div, revenue, op_income, net_income,
             total_assets, total_liab, equity, cash, borrowings, cfo, debt_ratio, op_margin, net_borrow_ratio,
-            net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
                      k.get("op_margin"), k.get("net_borrow_ratio"), k.get("net_borrowings"), k.get("da"),
-                     k.get("ebitda"), ie, k.get("interest_cover"), k.get("borrow_dep")))
+                     k.get("ebitda"), ie, k.get("interest_cover"), k.get("borrow_dep"), rcept))
     con.commit()
 
 
@@ -135,6 +141,49 @@ def fetch_latest_interim(con, cc, plan):
     return None
 
 
+import re as _re
+
+_RN = _re.compile(r"(사업보고서|반기보고서|분기보고서)\s*\((\d{4})\.(\d{2})\)")
+
+
+def backfill_rcept(con, corp_codes=None):
+    """fin_kpi.rcept_no가 비어 있는 회사에 대해 DART 공시목록(정기보고서) 1회 호출로 접수번호 채움.
+    보고서명 '(YYYY.MM)'과 결산월로 (bsns_year, reprt_code)를 역산."""
+    from common import dart_get, log
+    q = """SELECT DISTINCT k.corp_code, c.acc_mt FROM fin_kpi k JOIN company c USING(corp_code) WHERE k.rcept_no IS NULL"""
+    targets = [(r["corp_code"], r["acc_mt"]) for r in con.execute(q)]
+    if corp_codes:
+        targets = [t for t in targets if t[0] in corp_codes]
+    n = 0
+    for cc, acc_mt in targets:
+        acc = int(acc_mt) if str(acc_mt or "").strip().isdigit() else 12
+        try:
+            js = dart_get("list", corp_code=cc, bgn_de="20220101", end_de="20991231", pblntf_ty="A", page_count=100)
+        except Exception as e:  # noqa
+            log(con, cc, "rcept", "fail", e)
+            continue
+        found = {}
+        for r in sorted(js.get("list", []), key=lambda r: r["rcept_dt"]):   # 정정본이 뒤에 오면 최신으로 덮음
+            m = _RN.search(r["report_nm"])
+            if not m:
+                continue
+            kind, yy, mm = m.group(1), int(m.group(2)), int(m.group(3))
+            if kind == "사업보고서":
+                by, rc = (yy if acc == 12 else yy - 1), "11011"
+            else:
+                by = yy if (acc == 12 or mm > acc) else yy - 1
+                qn = ((mm - acc - 1) % 12) // 3 + 1          # 결산월 기준 몇 번째 분기말인지
+                rc = {1: "11013", 2: "11012", 3: "11014"}.get(qn)
+                if not rc or (kind == "반기보고서") != (rc == "11012"):
+                    continue
+            found[(str(by), rc)] = r["rcept_no"]
+        for (by, rc), rn in found.items():
+            cur = con.execute("UPDATE fin_kpi SET rcept_no=? WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND rcept_no IS NULL", (rn, cc, by, rc))
+            n += cur.rowcount
+        con.commit()
+    return n
+
+
 def rebuild_kpi_all(con):
     """fin_raw에서 fin_kpi 전부 재계산 (DART 호출 없음). KPI 정의 변경 시 사용"""
     keys = con.execute("SELECT DISTINCT corp_code, bsns_year, reprt_code FROM fin_raw").fetchall()
@@ -165,4 +214,8 @@ def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):
                 log(con, cc, "fin_interim", "ok" if r else "empty", str(r))
             except Exception as e:  # noqa
                 log(con, cc, "fin_interim", "fail", e)
+    try:
+        backfill_rcept(con, set(corp_codes))
+    except Exception as e:  # noqa
+        log(con, "-", "rcept", "fail", e)
     return con

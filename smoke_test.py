@@ -43,7 +43,7 @@ raw = [("BS", "ifrs-full_Assets", "자산총계", 1500e8), ("BS", "ifrs-full_Lia
        ("IS", "ifrs-full_ProfitLoss", "당기순이익", 100e8), ("CF", "ifrs-full_CashFlowsFromUsedInOperatingActivities", "영업활동현금흐름", 180e8)]
 for y in ("2024", "2025"):
     for sj, aid, nm, amt in raw:
-        con.execute("INSERT INTO fin_raw VALUES (?,?,?,?,?,?,?,?,?,?,?)", (CC, y, "11011", "CFS", sj, aid, nm, amt * (1.1 if y == "2025" else 1), None, None, 0))
+        con.execute("INSERT INTO fin_raw VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (CC, y, "11011", "CFS", sj, aid, nm, amt * (1.1 if y == "2025" else 1), None, None, 0, None))
 con.commit()
 for y in ("2024", "2025"):
     financials.build_kpi(con, CC, y)

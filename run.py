@@ -53,6 +53,7 @@ def main():
     if a.job == "kpi":
         import financials
         print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")
+        print("접수번호 보충:", financials.backfill_rcept(con), "건")
     if a.job in ("biz", "all"):
         import business
         business.run(ccs, a.years[-1] if a.years else a.year - 1)   # 최신 사업보고서 = 직전 연도

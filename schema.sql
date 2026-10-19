@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS fin_raw (
     frmtrm_amount REAL,                    -- 전기
     bfefrmtrm_amount REAL,                 -- 전전기
     ord           INTEGER,
+    rcept_no      TEXT,                    -- 해당 보고서 접수번호
     PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm)
 );
 
@@ -106,6 +107,7 @@ CREATE TABLE IF NOT EXISTS fin_kpi (
     int_exp       REAL,                    -- 이자비용(금융비용)
     interest_cover REAL,                   -- EBITDA/이자비용 (배)
     borrow_dep    REAL,                    -- 차입금의존도 = 총차입금/총자산 %
+    rcept_no      TEXT,                    -- 보고서 접수번호 (DART 링크용)
     PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div)
 );
 
