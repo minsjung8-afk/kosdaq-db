@@ -124,7 +124,11 @@ async function open(code){
   if(d.audit.length) h+=`<div class="twrap" style="margin-top:10px"><table><tr><th>연도</th><th>감사인</th><th>의견</th><th>강조사항</th><th>핵심감사사항</th></tr>${d.audit.map(a=>`<tr><td>${a.bsns_year}</td><td>${esc(a.adtor||'-')}</td><td><span class="pill ${opClass(a.adt_opinion)}">${esc(a.adt_opinion||'-')}</span></td><td>${esc(a.emphs_matter||'-')}</td><td>${esc(a.core_adt_matter||'-')}</td></tr>`).join('')}</table></div>`;
   if((d.ratings||[]).length){ h+=`<div class="src" style="margin-top:12px">신용등급 추이 (최근 3년, 금감원 신용평가서 공시)</div><div class="twrap"><table><tr><th>공시일</th><th>평가사</th><th>평가대상</th><th>구분</th><th>등급</th><th>전망/감시</th></tr>${d.ratings.slice(0,15).map(r=>`<tr><td>${r.disc_dt}</td><td>${esc(r.agency)}</td><td>${esc(r.target_type||'')}</td><td>${esc(r.eval_kind||'')}</td><td><b>${esc(r.grade)}</b></td><td>${esc([r.outlook,r.watch].filter(Boolean).join(' / ')||'-')}</td></tr>`).join('')}</table></div>`; }
   else if(d.rating_text){ h+=`<div class="src" style="margin-top:12px">신용등급 — 공시 등급 없음 · 사업보고서 '신용평가에 관한 사항' 발췌</div><div class="summary" style="font-size:13px">${esc(d.rating_text.slice(0,1500))}</div>`; }
-  if(d.shareholders.length) h+=`<div class="twrap" style="margin-top:10px"><table><tr><th>최대주주·특수관계인</th><th>관계</th><th class="n">기말주식수</th><th class="n">지분율</th></tr>${d.shareholders.map(s=>`<tr><td>${esc(s.nm)}</td><td>${esc(s.relate||'-')}</td><td class="n">${num(s.trmend_posesn_stock_co)}</td><td class="n">${pct(s.trmend_posesn_stock_qota_rt)}</td></tr>`).join('')}</table></div>`;
+  const sh=d.shareholders||{};
+  if((sh.top||[]).length){ h+=`<div class="src" style="margin-top:12px">주요 주주 (${sh.year} 사업보고서, 최대주주 및 특수관계인 상위 ${Math.min(5,sh.n)}명 / 총 ${sh.n}명)</div>
+    <div class="twrap"><table><tr><th>성명</th><th>관계</th><th class="n">기말주식수</th><th class="n">지분율</th></tr>${sh.top.map(r=>`<tr><td>${esc(r.nm)}</td><td>${esc(r.relate||'-')}</td><td class="n">${num(r.trmend_posesn_stock_co)}</td><td class="n">${pct(r.trmend_posesn_stock_qota_rt)}</td></tr>`).join('')}
+    <tr style="font-weight:600;background:var(--bg)"><td>최대주주 및 특수관계인 합계</td><td></td><td class="n">${num(sh.total&&sh.total.co)}</td><td class="n">${pct(sh.total&&sh.total.rt)}</td></tr>
+    ${d.minor?`<tr><td>소액주주 (${num(d.minor.shrholdr_co)}명)</td><td></td><td class="n">${num(d.minor.hold_stock_co)}</td><td class="n">${pct(d.minor.hold_stock_rate)}</td></tr>`:''}</table></div>`; }
   h+=`</section>`;
   // 2 사업내용
   const b=d.business, rs=d.rating_summary, s=rs?rs.summary:b.summary;

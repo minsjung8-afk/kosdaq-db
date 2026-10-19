@@ -72,6 +72,9 @@ print("[OK] 주가요약:", asof, "시총", round(ps["mcap"] / 1e8), "억, 1Y", 
 # 4) 이벤트/감사의견/주주
 con.execute("INSERT INTO audit_opinion VALUES (?,?,?,?,?,?,?)", (CC, "2025", "삼일회계법인", "적정", None, "계속기업 관련 중요한 불확실성", None))
 con.execute("INSERT INTO shareholder VALUES (?,?,?,?,?,?,?,?)", (CC, "2025", "홍길동", "본인", "보통주", 6000000, 6000000, 30.0))
+con.execute("INSERT INTO shareholder VALUES (?,?,?,?,?,?,?,?)", (CC, "2025", "김배우", "배우자", "보통주", 1000000, 1000000, 5.0))
+con.execute("INSERT INTO shareholder VALUES (?,?,?,?,?,?,?,?)", (CC, "2025", "계", "-", "보통주", 7000000, 7000000, 35.0))
+con.execute("INSERT INTO minor_shareholder VALUES (?,?,?,?,?,?)", (CC, "2025", 12000, 11000000, 55.0, 99.5))
 con.execute("INSERT INTO disclosure_event VALUES (?,?,?,?,?)", (CC, "20260701000001", "20260701", "주요사항보고서(전환사채권발행결정)", "CB"))
 con.commit()
 

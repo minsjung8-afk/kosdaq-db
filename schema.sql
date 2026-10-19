@@ -50,6 +50,17 @@ CREATE TABLE IF NOT EXISTS shareholder (
     PRIMARY KEY (corp_code, bsns_year, nm, stock_knd)
 );
 
+-- 소액주주 현황(사업보고서)
+CREATE TABLE IF NOT EXISTS minor_shareholder (
+    corp_code     TEXT,
+    bsns_year     TEXT,
+    shrholdr_co   REAL,                    -- 소액주주 수
+    hold_stock_co REAL,                    -- 보유주식수
+    hold_stock_rate REAL,                  -- 지분율 %
+    shrholdr_rate REAL,                    -- 주주수 비율 %
+    PRIMARY KEY (corp_code, bsns_year)
+);
+
 -- 2. 사업내용 -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS business (
     corp_code     TEXT,

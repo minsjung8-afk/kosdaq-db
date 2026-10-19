@@ -27,6 +27,24 @@ def _fva(con, sc):
         return []
 
 
+def _shareholders(con, cc):
+    """최근 사업보고서 기준 최대주주·특수관계인: 상위 5명 + 합계('계' 행이 있으면 그 값, 없으면 합산)"""
+    rows = q(con, """SELECT nm, relate, stock_knd, trmend_posesn_stock_co, trmend_posesn_stock_qota_rt, bsns_year FROM shareholder
+                     WHERE corp_code=? AND bsns_year=(SELECT MAX(bsns_year) FROM shareholder WHERE corp_code=?)""", cc, cc)
+    if not rows:
+        return {"year": None, "top": [], "total": None}
+    year = rows[0]["bsns_year"]
+    total_rows = [r for r in rows if (r["nm"] or "").strip() in ("계", "합계", "총계")]
+    body = [r for r in rows if r not in total_rows and (r["stock_knd"] or "보통주").startswith("보통")]
+    body.sort(key=lambda r: r["trmend_posesn_stock_qota_rt"] or 0, reverse=True)
+    if total_rows:
+        t = next((r for r in total_rows if (r["stock_knd"] or "보통주").startswith("보통")), total_rows[0])
+        total = {"co": t["trmend_posesn_stock_co"], "rt": t["trmend_posesn_stock_qota_rt"]}
+    else:
+        total = {"co": sum(r["trmend_posesn_stock_co"] or 0 for r in body), "rt": round(sum(r["trmend_posesn_stock_qota_rt"] or 0 for r in body), 2)}
+    return {"year": year, "top": body[:5], "n": len(body), "total": total}
+
+
 def company_detail(con, c):
     cc, sc = c["corp_code"], c["stock_code"]
     biz = q(con, "SELECT bsns_year, rcept_no, overview_text, summary_json, summary_md, rating_text FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc)
@@ -58,8 +76,8 @@ def company_detail(con, c):
     return {
         "company": c,
         "audit": q(con, "SELECT bsns_year, adtor, adt_opinion, emphs_matter, core_adt_matter FROM audit_opinion WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 3", cc),
-        "shareholders": q(con, """SELECT nm, relate, trmend_posesn_stock_co, trmend_posesn_stock_qota_rt FROM shareholder WHERE corp_code=?
-                                  AND bsns_year=(SELECT MAX(bsns_year) FROM shareholder WHERE corp_code=?) ORDER BY trmend_posesn_stock_qota_rt DESC LIMIT 8""", cc, cc),
+        "shareholders": _shareholders(con, cc),
+        "minor": (q(con, "SELECT * FROM minor_shareholder WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc) or [None])[0],
         "business": {"year": b.get("bsns_year"), "rcept_no": b.get("rcept_no"),
                      "dart_url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={b['rcept_no']}" if b.get("rcept_no") else None,
                      "overview": (b.get("overview_text") or "")[:4000], "summary": json.loads(b["summary_json"]) if b.get("summary_json") else None},

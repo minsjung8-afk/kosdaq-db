@@ -139,6 +139,16 @@ def fetch_shareholders(con, corp_code, bsns_year):
     con.commit()
 
 
+def fetch_minor_shareholders(con, corp_code, bsns_year):
+    """소액주주 현황: 주주수·주식수·지분율"""
+    js = dart_get("mrhlSttus", corp_code=corp_code, bsns_year=bsns_year, reprt_code="11011")
+    for r in js.get("list", []):
+        con.execute("INSERT OR REPLACE INTO minor_shareholder VALUES (?,?,?,?,?,?)",
+                    (corp_code, bsns_year, to_num(r.get("shrholdr_co")), to_num(r.get("hold_stock_co")),
+                     to_num(r.get("hold_stock_rate")), to_num(r.get("shrholdr_rate"))))
+    con.commit()
+
+
 def fetch_events(con, corp_code, bgn_de, end_de):
     """공시목록에서 심사 관점 키워드 공시만 적재"""
     page = 1
@@ -159,7 +169,7 @@ def fetch_events(con, corp_code, bgn_de, end_de):
 def run(corp_codes, bsns_year, event_from="20240101", event_to="20991231"):
     con = connect()
     for cc in corp_codes:
-        for fn, name in ((fetch_business, "biz"), (fetch_audit_opinion, "audit"), (fetch_shareholders, "shr")):
+        for fn, name in ((fetch_business, "biz"), (fetch_audit_opinion, "audit"), (fetch_shareholders, "shr"), (fetch_minor_shareholders, "minor")):
             try:
                 fn(con, cc, str(bsns_year))
             except Exception as e:  # noqa
