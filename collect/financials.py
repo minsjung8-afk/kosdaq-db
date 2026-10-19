@@ -17,6 +17,11 @@ KPI_MAP = {
     "amort":        (["ifrs-full_AmortisationExpense", "ifrs-full_AdjustmentsForAmortisationExpense"], ["무형자산상각비", "무형자산상각"]),
     "rou_dep":      ([], ["사용권자산상각비", "사용권자산감가상각비"]),
     "int_exp":      (["ifrs-full_InterestExpense", "ifrs-full_FinanceCosts"], ["이자비용", "금융비용", "금융원가"]),
+    "cur_assets":   (["ifrs-full_CurrentAssets"], ["유동자산"]),
+    "cur_liab":     (["ifrs-full_CurrentLiabilities"], ["유동부채"]),
+    "receivables":  (["ifrs-full_TradeAndOtherCurrentReceivables", "ifrs-full_CurrentTradeReceivables"], ["매출채권", "매출채권및기타채권", "매출채권 및 기타채권", "매출채권및기타유동채권"]),
+    "inventory":    (["ifrs-full_Inventories"], ["재고자산"]),
+    "capital":      (["ifrs-full_IssuedCapital"], ["자본금"]),
 }
 BORROW_KEYS = ["단기차입금", "장기차입금", "유동성장기부채", "유동성장기차입금", "사채", "전환사채", "신주인수권부사채",
                "리스부채", "유동리스부채", "비유동리스부채", "장기사채"]
@@ -37,6 +42,33 @@ def fetch_fin_raw(con, corp_code, bsns_year, reprt_code="11011"):
             n += 1
     con.commit()
     return n
+
+
+_DA_EXCL = ("채권", "할인", "현재가치", "충당", "환입", "손상", "처분", "누계")
+
+
+def _da_from_rows(rows, k):
+    """CF(간접법 조정) → 없으면 IS에서 상각비 탐색. 결과를 k['dep'], k['amort'], k['rou_dep']에 반영"""
+    for sj in (("CF",), ("IS", "CIS")):
+        cand = [(r["account_nm"].replace(" ", ""), r["thstrm_amount"], r["account_id"] or "")
+                for r in rows if r["sj_div"] in sj and r["account_nm"] and "상각" in r["account_nm"] and r["thstrm_amount"]]
+        cand = [c for c in cand if not any(x in c[0] for x in _DA_EXCL)]
+        if not cand:
+            continue
+        comb = [c for c in cand if ("감가" in c[0] and "무형" in c[0]) or "DepreciationAndAmortisation" in c[2]
+                or c[0] in ("상각비", "감가상각비등", "유무형자산상각비", "유·무형자산상각비")]
+        if comb:
+            k["dep"], k["amort"], k["rou_dep"] = abs(comb[0][1]), None, None
+            return
+        dep = [c for c in cand if "감가" in c[0] and "사용권" not in c[0] and "투자부동산" not in c[0]]
+        amo = [c for c in cand if "무형" in c[0]]
+        rou = [c for c in cand if "사용권" in c[0]]
+        inv = [c for c in cand if "투자부동산" in c[0]]
+        if dep or amo or rou:
+            k["dep"] = (abs(dep[0][1]) if dep else 0) + (abs(inv[0][1]) if inv else 0) or None
+            k["amort"] = abs(amo[0][1]) if amo else None
+            k["rou_dep"] = abs(rou[0][1]) if rou else None
+            return
 
 
 def _pick(rows, ids, names, sj=None):
@@ -61,13 +93,11 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             continue
         k = {}
         for key, (ids, names) in KPI_MAP.items():
-            sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash") else \
+            sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash", "cur_assets", "cur_liab", "receivables", "inventory", "capital") else \
                  ("CF",) if key in ("cfo", "dep", "amort", "rou_dep") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
-        # 상각비가 CF에 없으면 IS(비용 성격별 분류)에서 재시도
-        for key in ("dep", "amort", "rou_dep"):
-            if k.get(key) is None:
-                k[key] = _pick(rows, KPI_MAP[key][0], KPI_MAP[key][1], ("IS", "CIS"))
+        # 상각비: 계정명 패턴으로 재탐색 (합산 계정 '감가상각비와무형자산상각비' 우선, 없으면 감가+무형+사용권 합)
+        _da_from_rows(rows, k)
         # 차입금 근사: BS 계정명 키워드 합(중복 방지: 정확 일치만)
         bor = 0.0
         hit = False
@@ -90,6 +120,10 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k["interest_cover"] = round(k["ebitda"] / ie, 1) if k.get("ebitda") is not None and ie else None   # EBITDA/이자비용
         k["borrow_dep"] = round(k["borrowings"] / k["total_assets"] * 100, 1) \
             if k.get("borrowings") is not None and k.get("total_assets") else None
+        k["cur_ratio"] = round(k["cur_assets"] / k["cur_liab"] * 100, 1) if k.get("cur_assets") and k.get("cur_liab") else None
+        k["recv_turn"] = round(rev / k["receivables"], 1) if rev and k.get("receivables") else None       # 연환산은 사이트에서 분기 보정
+        k["inv_turn"] = round(rev / k["inventory"], 1) if rev and k.get("inventory") else None
+        k["nd_ebitda"] = round(k["net_borrowings"] / k["ebitda"], 1) if k.get("net_borrowings") is not None and k.get("ebitda") and k["ebitda"] > 0 else None
         rcept = next((r["rcept_no"] for r in rows if r.get("rcept_no")), None)
         if rcept is None:   # 기존 행에 저장된 접수번호 유지
             old = con.execute("SELECT rcept_no FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
@@ -97,12 +131,16 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             rcept = old["rcept_no"] if old else None
         con.execute("""INSERT OR REPLACE INTO fin_kpi (corp_code, bsns_year, reprt_code, fs_div, revenue, op_income, net_income,
             total_assets, total_liab, equity, cash, borrowings, cfo, debt_ratio, op_margin, net_borrow_ratio,
-            net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
+            cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
                      k.get("op_margin"), k.get("net_borrow_ratio"), k.get("net_borrowings"), k.get("da"),
-                     k.get("ebitda"), ie, k.get("interest_cover"), k.get("borrow_dep"), rcept))
+                     k.get("ebitda"), ie, k.get("interest_cover"), k.get("borrow_dep"), rcept,
+                     k.get("cur_assets"), k.get("cur_liab"), k.get("receivables"), k.get("inventory"), k.get("capital"),
+                     k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda")))
     con.commit()
 
 

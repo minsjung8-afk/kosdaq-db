@@ -40,7 +40,9 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     migrations = [("company", "sect_tp TEXT"), ("company", "corp_name_full TEXT"), ("company", "parval REAL")] + \
                  [("price_summary", c) for c in ("chg_1w REAL", "chg_6m REAL", "chg_2y REAL", "chg_3y REAL")] + \
                  [("fin_kpi", c) for c in ("net_borrowings REAL", "da REAL", "ebitda REAL", "int_exp REAL",
-                                           "interest_cover REAL", "borrow_dep REAL", "rcept_no TEXT")] + \
+                                           "interest_cover REAL", "borrow_dep REAL", "rcept_no TEXT",
+                                           "cur_assets REAL", "cur_liab REAL", "receivables REAL", "inventory REAL", "capital REAL",
+                                           "cur_ratio REAL", "recv_turn REAL", "inv_turn REAL", "nd_ebitda REAL")] + \
                  [("fin_raw", "rcept_no TEXT"), ("business", "rating_text TEXT")]
     for tbl, col in migrations:                                   # 기존 DB 마이그레이션
         try:

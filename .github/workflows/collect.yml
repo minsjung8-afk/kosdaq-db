@@ -4,6 +4,7 @@ on:
     - cron: "0 22 * * 0-4"     # 평일 07:00 KST: 시세
     - cron: "30 20 2 * *"      # 매월 2일 05:30 KST: 재무(연간+최근분기)
     - cron: "30 20 1,15 * *"   # 매월 1일·15일 05:30 KST: 신용등급
+    - cron: "0 19 * * 1,4"     # 매주 화·금 04:00 KST: 뉴스
     - cron: "0 20 5 4 *"       # 4/5 05:00 KST: 사업내용·감사의견·주주 (사업보고서)
   workflow_dispatch:
     inputs:
@@ -11,7 +12,7 @@ on:
         description: "run.py job"
         default: "price"
         type: choice
-        options: [init, fin, kpi, biz, price, rating, summarize, site, all]
+        options: [init, fin, kpi, biz, price, rating, news, summarize, site, all]
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50)"
         default: ""
@@ -46,6 +47,7 @@ jobs:
             case "${{ github.event.schedule }}" in
               "30 20 2 * *") JOB=fin ;;
               "30 20 1,15 * *") JOB=rating ;;
+              "0 19 * * 1,4") JOB=news ;;
               "0 20 5 4 *")  JOB=biz ;;
               *)             JOB=price ;;
             esac

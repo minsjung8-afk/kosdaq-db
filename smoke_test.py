@@ -97,6 +97,9 @@ from analyze_report import forecast_vs_actual  # noqa
 fva = forecast_vs_actual(con, SC)
 assert fva and fva[0]["ach_op"] == 82.5, fva
 print("[OK] 전망 vs 실적:", fva[0]["ach_rev"], fva[0]["ach_op"])
+for i,(dt,t,src) in enumerate([("2026-10-15","테스트전자, 3분기 영업이익 30% 증가","A경제"),("2026-10-15","테스트전자 3분기 영업익 30%↑…시장 기대 상회","B일보"),("2026-10-14","테스트전자 영업이익 30% 늘어","C뉴스"),("2026-10-10","테스트전자, 신규 검사장비 공급계약 체결","D경제"),("2026-10-02","테스트전자 CB 200억 발행 결정","E뉴스")]):
+    con.execute("INSERT INTO news VALUES (?,?,?,?,?,?)", (CC, dt, t, src, f"https://example.test/n{i}", now()))
+con.commit()
 import build_site  # noqa
 build_site.build()
 assert (ROOT / "site" / "data" / "c" / f"{SC}.json").exists()

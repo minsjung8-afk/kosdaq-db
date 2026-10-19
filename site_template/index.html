@@ -59,9 +59,33 @@ td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-
 .summary{max-width:72ch;white-space:pre-wrap}
 .summary ul{margin:6px 0;padding-left:18px}
 .src{font-size:12px;color:var(--mute)} .src a{color:var(--accent)}
+
+.flags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
+.flag{font:12px var(--mono);padding:3px 9px;border-radius:3px;border:1px solid}
+.flag.red{color:var(--bad);border-color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent)}
+.flag.amber{color:var(--warn);border-color:var(--warn);background:color-mix(in srgb,var(--warn) 8%,transparent)}
+.flag.ok{color:var(--good);border-color:var(--good)}
+.bar{position:relative;height:8px;background:var(--line);border-radius:4px}
+.bar i{position:absolute;top:-3px;width:3px;height:14px;background:var(--accent);border-radius:2px}
+.tl{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--line)}
+.tl li{position:relative;padding:3px 0 3px 12px;font-size:13px}
+.tl li::before{content:"";position:absolute;left:-7px;top:9px;width:8px;height:8px;border-radius:50%;background:var(--mute)}
+.tl li.red::before{background:var(--bad)} .tl li.amber::before{background:var(--warn)}
 .pbtn{font:12px var(--mono);padding:3px 10px;border:1px solid var(--line);background:var(--panel);color:var(--mute);border-radius:3px;cursor:pointer}.pbtn.on{color:var(--accent);border-color:var(--accent)}
 canvas{width:100%;height:260px;display:block;background:var(--panel);border:1px solid var(--line)}
 a{color:var(--accent)}
+
+.flags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
+.flag{font:12px var(--mono);padding:3px 9px;border-radius:3px;border:1px solid}
+.flag.red{color:var(--bad);border-color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent)}
+.flag.amber{color:var(--warn);border-color:var(--warn);background:color-mix(in srgb,var(--warn) 8%,transparent)}
+.flag.ok{color:var(--good);border-color:var(--good)}
+.bar{position:relative;height:8px;background:var(--line);border-radius:4px}
+.bar i{position:absolute;top:-3px;width:3px;height:14px;background:var(--accent);border-radius:2px}
+.tl{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--line)}
+.tl li{position:relative;padding:3px 0 3px 12px;font-size:13px}
+.tl li::before{content:"";position:absolute;left:-7px;top:9px;width:8px;height:8px;border-radius:50%;background:var(--mute)}
+.tl li.red::before{background:var(--bad)} .tl li.amber::before{background:var(--warn)}
 .pbtn{font:12px var(--mono);padding:3px 10px;border:1px solid var(--line);background:var(--panel);color:var(--mute);border-radius:3px;cursor:pointer}.pbtn.on{color:var(--accent);border-color:var(--accent)}
 @media (max-width:760px){body{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}aside{max-height:40vh;border-right:0;border-bottom:1px solid var(--line)}main{padding:14px 16px}}
 </style>
@@ -93,7 +117,7 @@ function render(list){
   $('#cnt').textContent=`${list.length}개`;
   $('#list').innerHTML=list.slice(0,300).map(i=>`<div class="row${cur===i.code?' on':''}" data-c="${i.code}">
     <span class="nm">${esc(i.name)}</span><span class="cd">${i.code}</span>
-    <span class="sub"><span>${esc(i.sector||'')}</span><span>매출 ${억(i.rev)}억</span><span>부채비율 ${pct(i.debt)}</span>${i.rating?`<span style="color:var(--accent)">${esc(i.rating)}</span>`:''}${i.opinion&&i.opinion!=='적정'?`<span class="neg">${esc(i.opinion)}</span>`:''}</span></div>`).join('')
+    <span class="sub"><span>${esc(i.sector||'')}</span><span>매출 ${억(i.rev)}억</span><span>부채비율 ${pct(i.debt)}</span>${i.red?`<span class="neg">⚑${i.red}</span>`:''}${i.amber?`<span style="color:var(--warn)">⚑${i.amber}</span>`:''}${i.rating?`<span style="color:var(--accent)">${esc(i.rating)}</span>`:''}${i.opinion&&i.opinion!=='적정'?`<span class="neg">${esc(i.opinion)}</span>`:''}</span></div>`).join('')
     +(list.length>300?'<div class="row"><span class="cd">상위 300개만 표시 · 검색어를 좁히세요</span></div>':'');
 }
 $('#list').addEventListener('click',e=>{const r=e.target.closest('.row');if(r&&r.dataset.c)open(r.dataset.c)});
@@ -107,13 +131,20 @@ async function open(code){
   const LONG=['기업신용평가','회사채','사채'];
   const curRt=(d.ratings||[]).find(r=>LONG.some(k=>(r.target_type||'').includes(k)));
   const rtBadge=curRt?`<span class="pill" style="margin-left:10px;vertical-align:middle;font-size:14px;color:var(--accent);border-color:var(--accent)">${esc(curRt.grade)}${curRt.outlook?' '+esc(curRt.outlook):''}</span><span class="src" style="margin-left:6px">${esc(curRt.agency)} · ${curRt.disc_dt}</span>`:`<span class="src" style="margin-left:10px">유효 공시등급 없음</span>`;
+  const fl=d.flags||[];
+  const flagStrip=fl.length?`<div class="flags">${fl.map(([n,l,t])=>`<span class="flag ${l}" title="${esc(t)}">${esc(n)}${t?` <small>${esc(t)}</small>`:''}</span>`).join('')}</div>`:`<div class="flags"><span class="flag ok">경고 플래그 없음</span></div>`;
   let h=`<h2>${esc(c.corp_name)}${rtBadge}</h2><div class="sub-title">${c.stock_code} · ${esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
+  h+=flagStrip;
   h+=`<div class="tiles">
     <div class="tile"><div class="k">시가총액</div><div class="v">${억(ps.mcap)}<small>억</small></div><div class="d">${ps.asof||''}</div></div>
     <div class="tile"><div class="k">매출액 (${last.label||last.bsns_year||'-'}, ${d.kpi.CFS?'연결':'별도'})</div><div class="v">${억(last.revenue)}<small>억</small></div><div class="d">영업이익 ${억(last.op_income)}억</div></div>
-    <div class="tile"><div class="k">부채비율</div><div class="v">${pct(last.debt_ratio)}</div><div class="d">차입금의존도 ${pct(last.borrow_dep)}</div></div>
+    <div class="tile"><div class="k">부채비율 / 상환능력</div><div class="v">${pct(last.debt_ratio)}</div><div class="d">순차입금/EBITDA ${last.nd_ebitda!=null?last.nd_ebitda.toFixed(1)+'x':'-'} · 차입금의존도 ${pct(last.borrow_dep)} · 유동비율 ${pct(last.cur_ratio)}</div></div>
     <div class="tile"><div class="k">감사의견 ${ao?ao.bsns_year:''}</div><div class="v"><span class="pill ${opClass(ao&&ao.adt_opinion)}">${esc(ao?ao.adt_opinion:'-')}</span></div><div class="d">${esc(ao?ao.adtor:'')}</div></div>
     <div class="tile"><div class="k">1Y 수익률 / 60일 변동성</div><div class="v ${ps.chg_1y<0?'neg':''}">${pct(ps.chg_1y)}</div><div class="d">변동성 ${pct(ps.vol_60d)} · 거래대금 ${억(ps.avg_value_3m)}억/일</div></div>
+    ${(()=>{const v=d.valuation; if(!v) return `<div class="tile"><div class="k">밸류에이션</div><div class="v">-</div><div class="d">시세·재무 필요</div></div>`;
+      const x=n=>n==null?'N/A':n.toFixed(1)+'x'; return `<div class="tile"><div class="k">밸류에이션 (${esc(v.basis)}, ${v.fs})</div>
+      <div class="v" style="font-size:15px;line-height:1.5">PER ${x(v.per)}${v.per==null?'<small>(적자)</small>':''} · PBR ${v.pbr==null?'N/A':v.pbr.toFixed(2)+'x'}<br>EV/${v.ev_basis||'EBITDA'} ${x(v.ev_ebitda)}${v.ev_basis==='영업이익'?' <small style="color:var(--warn)">영업이익 기준</small>':''}</div>
+      <div class="d">EV ${억(v.ev)}억 = 시총 ${억(v.mcap)} + 순차입금 ${억(v.net_borrowings)}</div></div>`;})()}
   </div>`;
   // 1 개요
   h+=`<section><h3>1. 개요</h3><div class="kv">
@@ -157,12 +188,14 @@ async function open(code){
   h+=`</section>`;
   // 3 재무: 한 표에 좌측 별도 | 우측 연결 (각 연간 2개년 + 전년동기·최근분기)
   h+=`<section><h3>3. 재무현황 (억원, %)</h3>`;
+  if(d.industry_pos&&d.industry_pos.n>=5){const ip=d.industry_pos; const row=(n,k,inv)=>{const p=ip[k]; if(p==null) return ''; const good=inv?100-p:p; return `<div style="display:grid;grid-template-columns:110px 1fr 90px;gap:10px;align-items:center;font-size:12px"><span>${n}</span><div class="bar"><i style="left:calc(${p}% - 1px)"></i></div><span class="n" style="color:${good>=66?'var(--good)':good<=33?'var(--bad)':'var(--mute)'}">${p}백분위${inv?' (낮을수록 양호)':''}</span></div>`};
+    h+=`<div style="margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);background:var(--panel)"><div class="src" style="margin-bottom:6px">같은 업종 내 위치 (KSIC ${ip.ind} ${esc(ip.name||'')} · 코스닥 ${ip.n}개사, 최근 연간 기준)</div><div style="display:grid;gap:5px">${row('부채비율','debt_ratio',true)}${row('차입금의존도','borrow_dep',true)}${row('영업이익률','op_margin',false)}${row('유동비율','cur_ratio',false)}${row('시가총액','mcap',false)}</div></div>`;}
   {
     const x=v=>v==null?'-':v.toFixed(1)+'x';
     const groups=[
       ['g1', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da'],['당기순이익','net_income',억],['영업활동CF','cfo',억]]],
       ['g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억],['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억]]],
-      ['g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['영업이익률','op_margin',pct],['EBITDA/이자비용','interest_cover',x]]],
+      ['g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['유동비율','cur_ratio',pct],['순차입금/EBITDA','nd_ebitda',x],['EBITDA/이자비용','interest_cover',x],['영업이익률','op_margin',pct],['매출채권회전율','recv_turn',x],['재고자산회전율','inv_turn',x]]],
     ];
     const bases=[['OFS','별도'],['CFS','연결']].filter(([fs])=>d.kpi[fs]&&d.kpi[fs].length);
     if(!bases.length) h+=`<div class="src">재무 미수집</div>`;
@@ -178,6 +211,12 @@ async function open(code){
     }
   }
   h+=`</section>`;
+  // 3b 미상환 CB·BW / 타법인출자
+  if((d.conv_bonds||[]).length||(d.other_invest||[]).length){ h+=`<section><h3>3-1. 미상환 CB·BW · 타법인 출자 (최근 사업보고서)</h3>`;
+    if(d.conv_bonds.length){const tot=d.conv_bonds.reduce((a,r)=>a+(r.remndr_amt||0),0); h+=`<div class="src">미상환 전환사채·신주인수권부사채 합계 <b>${억(tot)}억</b>${ps.mcap?` (시총 대비 ${(tot/ps.mcap*100).toFixed(0)}%)`:''}${ps.close?` · 현재가 ${num(ps.close)}원`:''}</div>
+      <div class="twrap"><table><tr><th>구분</th><th>종목</th><th>발행일</th><th>만기</th><th class="n">잔액(억)</th><th class="n">전환가</th><th class="n">전환가/주가</th><th class="n">전환가능주식</th><th>전환기간</th></tr>${d.conv_bonds.map(r=>{const rel=ps.close&&r.cnvrs_prc?r.cnvrs_prc/ps.close:null; return `<tr><td>${esc(r.kind)}</td><td>${esc(r.name||'')}</td><td>${esc(r.isu_dd||'-')}</td><td>${esc(r.exprd_dd||'-')}</td><td class="n">${억(r.remndr_amt)}</td><td class="n">${num(r.cnvrs_prc)}</td><td class="n ${rel>1.5?'neg':''}">${rel?rel.toFixed(2)+'x':'-'}</td><td class="n">${num(r.remndr_stock)}</td><td class="src">${esc(r.cnvrs_pd||'')}</td></tr>`}).join('')}</table></div>`;}
+    if(d.other_invest.length){h+=`<div class="src" style="margin-top:10px">타법인 출자 (장부가 상위)</div><div class="twrap"><table><tr><th>출자회사</th><th>목적</th><th>최초취득</th><th class="n">지분율</th><th class="n">장부가(억)</th><th class="n">피출자사 순이익(억)</th></tr>${d.other_invest.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.purpose||'-')}</td><td>${esc(r.acqs_de||'-')}</td><td class="n">${pct(r.trmend_qota_rt)}</td><td class="n">${억(r.trmend_book_amt)}</td><td class="n ${r.recent_ni<0?'neg':''}">${억(r.recent_ni)}</td></tr>`).join('')}</table></div>`;}
+    h+=`</section>`;}
   // 4 주가
   h+=`<section><h3>4. 주가추이 · 담보가치 참고</h3>`;
   if(d.prices.length){
@@ -192,9 +231,11 @@ async function open(code){
       <b>3M 평균거래량</b><span>${num(Math.round(ps.avg_vol_3m||0))}주 <span class="src">(거래대금 ${억(ps.avg_value_3m)}억/일)</span></span><b>60일 변동성(연율)</b><span>${pct(ps.vol_60d)}</span></div>`;}
   else h+=`<div class="src">주가 미수집</div>`;
   h+=`</section>`;
-  // 5 공시
-  h+=`<section><h3>5. 주요 공시 (심사 키워드 필터)</h3>`;
-  h+=d.events.length?`<div class="twrap"><table><tr><th>일자</th><th>구분</th><th>공시명</th></tr>${d.events.map(e=>`<tr><td>${e.rcept_dt}</td><td><span class="pill">${esc(e.flag)}</span></td><td><a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${e.rcept_no}" target="_blank" rel="noopener">${esc(e.report_nm)}</a></td></tr>`).join('')}</table></div>`:`<div class="src">해당 없음 / 미수집</div>`;
+  // 5 공시 타임라인
+  h+=`<section><h3>5. 주요 공시 타임라인 (심사 키워드 필터)</h3>`;
+  if(d.events.length){const lvl=f=>['감사의견','관리종목','최대주주변경','횡령배임','거래정지','상장폐지','회생'].includes(f)?'red':['유상증자','CB','BW','EB','소송','채무','담보제공'].includes(f)?'amber':'';
+    h+=`<ul class="tl">${d.events.map(e=>`<li class="${lvl(e.flag)}"><span class="src" style="font-family:var(--mono)">${e.rcept_dt.slice(0,4)}-${e.rcept_dt.slice(4,6)}-${e.rcept_dt.slice(6,8)}</span> <span class="pill">${esc(e.flag)}</span> <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${e.rcept_no}" target="_blank" rel="noopener">${esc(e.report_nm)}</a></li>`).join('')}</ul>`;}
+  else h+=`<div class="src">해당 없음 / 미수집</div>`;
   h+=`</section>`;
   // 6 리포트 (메타 + 추출 수치·자체 요약만. 원문 미포함)
   h+=`<section><h3>6. 증권사 리포트 · 분석</h3>`;
@@ -210,8 +251,23 @@ async function open(code){
         ${rk.length?`<div class="src">리스크</div><ul style="margin:2px 0;padding-left:18px">${rk.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}</div>`;}
   } else h+=`<div class="src">커버리지 없음 / 미수집</div>`;
   h+=`</section>`;
+  // 7 동일 업종 비교
+  h+=`<section><h3>7. 동일 업종 비교 (KSIC ${esc((c.induty_code||'').slice(0,2))} · 시총 근접 코스닥 3사, 최근 연간)</h3>`;
+  if((d.peers||[]).length){const me=last; const row=(nm,code,mc,r,isMe)=>`<tr ${isMe?'style="font-weight:600;background:var(--accent-bg)"':''}><td>${code?`<a href="#${code}">${esc(nm)}</a>`:esc(nm)}</td><td class="n">${억(mc)}</td><td class="n">${억(r.revenue)}</td><td class="n ${r.op_income<0?'neg':''}">${억(r.op_income)}</td><td class="n">${pct(r.op_margin)}</td><td class="n">${pct(r.debt_ratio)}</td><td class="n">${억(r.ebitda)}</td><td class="n">${억(r.net_borrowings)}</td></tr>`;
+    h+=`<div class="twrap"><table><tr><th>회사</th><th class="n">시총(억)</th><th class="n">매출</th><th class="n">영업이익</th><th class="n">영업이익률</th><th class="n">부채비율</th><th class="n">EBITDA</th><th class="n">순차입금</th></tr>${row(c.corp_name,null,ps.mcap,me,true)}${d.peers.map(p=>row(p.corp_name,p.stock_code,p.mcap,p,false)).join('')}</table></div>`;}
+  else h+=`<div class="src">비교 가능한 동일 업종 데이터 없음</div>`;
+  h+=`</section>`;
+  // 8 뉴스 (유사 제목 묶음, 펼치기)
+  h+=`<section><h3>8. 최근 뉴스 (90일 · 제목·링크만)</h3>`;
+  if((d.news||[]).length){
+    const tok=t=>new Set(t.replace(new RegExp(esc(c.corp_name).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'g'),'').replace(/[^가-힣a-zA-Z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>=2));
+    const groups=[]; for(const n of d.news){const t=tok(n.title); let g=groups.find(g=>{const a=[...t].filter(w=>g.tok.has(w)).length; return a>=Math.max(2,Math.min(t.size,g.tok.size)*0.5)}); if(g){g.items.push(n); t.forEach(w=>g.tok.add(w));} else groups.push({tok:t,items:[n]});}
+    h+=`<ul style="list-style:none;padding:0;margin:0">${groups.map((g,i)=>{const f=g.items[0]; const more=g.items.length-1; return `<li style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="src" style="font-family:var(--mono)">${f.dt}</span> <a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.title)}</a> <span class="src">${esc(f.source)}</span>${more?` <button class="pbtn" data-ng="${i}">외 ${more}건 ▾</button><ul id="ng${i}" hidden style="list-style:none;padding:4px 0 0 18px;margin:0">${g.items.slice(1).map(n=>`<li style="padding:2px 0"><span class="src" style="font-family:var(--mono)">${n.dt}</span> <a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a> <span class="src">${esc(n.source)}</span></li>`).join('')}</ul>`:''}</li>`}).join('')}</ul>`;}
+  else h+=`<div class="src">수집된 뉴스 없음</div>`;
+  h+=`</section>`;
   $('#main').innerHTML=h; $('#main').scrollTop=0;
-  if(d.prices.length){ const draw=p=>{const cut=new Date();cut.setFullYear(cut.getFullYear()-(p==='3y'?3:1));const c=cut.toISOString().slice(0,10);drawChart(d.prices.filter(x=>x[0]>=c))}; draw('1y'); document.querySelectorAll('.pbtn').forEach(b=>b.onclick=()=>{document.querySelectorAll('.pbtn').forEach(x=>x.classList.toggle('on',x===b));draw(b.dataset.p)}); }
+  document.querySelectorAll('[data-ng]').forEach(b=>b.onclick=()=>{const u=document.getElementById('ng'+b.dataset.ng); u.hidden=!u.hidden; b.textContent=b.textContent.replace(u.hidden?'▴':'▾',u.hidden?'▾':'▴');});
+  if(d.prices.length){ const draw=p=>{const cut=new Date();cut.setFullYear(cut.getFullYear()-(p==='3y'?3:1));const c=cut.toISOString().slice(0,10);drawChart(d.prices.filter(x=>x[0]>=c))}; draw('1y'); document.querySelectorAll('.pbtn[data-p]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.pbtn[data-p]').forEach(x=>x.classList.toggle('on',x===b));draw(b.dataset.p)}); }
 }
 function toWeekly(p){ // 주봉 집계: ISO 주 단위
   const out=[]; let cur=null, key=null;

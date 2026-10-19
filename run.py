@@ -30,7 +30,7 @@ def corp_pairs(con, limit=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "price", "rating", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -68,6 +68,9 @@ def main():
     if a.job in ("rating", "all"):
         import fss_rating
         fss_rating.run(set(ccs) if a.limit else None)
+    if a.job in ("news", "all"):
+        import news
+        news.run(set(ccs) if a.limit else None)
     if a.job == "kind":
         import kind_ir
         kind_ir.run()

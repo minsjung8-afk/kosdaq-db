@@ -195,6 +195,34 @@ def fetch_minor_shareholders(con, corp_code, bsns_year):
     con.commit()
 
 
+def fetch_conv_bonds(con, corp_code, bsns_year):
+    """미상환 전환사채(CB)·신주인수권부사채(BW) 잔액·전환가 (사업보고서 기준)"""
+    for ep, kind in (("cndlCaplScritsNrdmpBlce", "CB"), ("wrtcaplScritsNrdmpBlce", "BW")):
+        js = dart_get(ep, corp_code=corp_code, bsns_year=bsns_year, reprt_code="11011")
+        for r in js.get("list", []):
+            con.execute("""INSERT OR REPLACE INTO conv_bond (corp_code, bsns_year, kind, name, isu_dd, exprd_dd, remndr_amt, cnvrs_prc, cnvrs_pd, remndr_stock)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        (corp_code, bsns_year, kind, r.get("bd_nm") or r.get("isu_dcrs_de") or kind, r.get("isu_dd"), r.get("exprd_dd"),
+                         to_num(r.get("remndr_amt") or r.get("remndr")), to_num(r.get("cnvrs_prc") or r.get("ex_prc") or r.get("act_pric")),
+                         (r.get("cnvrs_pd_bgd") or r.get("ex_pd_bgd") or "") + "~" + (r.get("cnvrs_pd_edd") or r.get("ex_pd_edd") or ""),
+                         to_num(r.get("cnvrs_psbl_stock_co") or r.get("ex_psbl_stock_co"))))
+    con.commit()
+
+
+def fetch_other_investments(con, corp_code, bsns_year):
+    """타법인 출자현황"""
+    js = dart_get("otrCprInvstmntSttus", corp_code=corp_code, bsns_year=bsns_year, reprt_code="11011")
+    for r in js.get("list", []):
+        nm = r.get("inv_prm")
+        if not nm or nm in ("합계", "합 계"):
+            continue
+        con.execute("""INSERT OR REPLACE INTO other_invest (corp_code, bsns_year, name, purpose, acqs_de, trmend_qota_rt, trmend_book_amt, recent_rev, recent_ni)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (corp_code, bsns_year, nm, r.get("invstmnt_purps"), r.get("frst_acqs_de"), to_num(r.get("trmend_blce_qota_rt")),
+                     to_num(r.get("trmend_blce_acntbk_amount")), to_num(r.get("recent_bsns_year_fnnr_sttus_tot_assets")), to_num(r.get("recent_bsns_year_fnnr_sttus_thstrm_ntpf"))))
+    con.commit()
+
+
 def fetch_events(con, corp_code, bgn_de, end_de):
     """공시목록에서 심사 관점 키워드 공시만 적재"""
     page = 1
@@ -215,7 +243,8 @@ def fetch_events(con, corp_code, bgn_de, end_de):
 def run(corp_codes, bsns_year, event_from="20240101", event_to="20991231"):
     con = connect()
     for cc in corp_codes:
-        for fn, name in ((fetch_business, "biz"), (fetch_audit_opinion, "audit"), (fetch_shareholders, "shr"), (fetch_minor_shareholders, "minor")):
+        for fn, name in ((fetch_business, "biz"), (fetch_audit_opinion, "audit"), (fetch_shareholders, "shr"), (fetch_minor_shareholders, "minor"),
+                         (fetch_conv_bonds, "cbbw"), (fetch_other_investments, "invest")):
             try:
                 fn(con, cc, str(bsns_year))
             except Exception as e:  # noqa

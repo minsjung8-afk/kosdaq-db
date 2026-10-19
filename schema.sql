@@ -56,6 +56,23 @@ CREATE TABLE IF NOT EXISTS major_holder (
     PRIMARY KEY (corp_code, bsns_year, nm)
 );
 
+-- 미상환 CB·BW (사업보고서)
+CREATE TABLE IF NOT EXISTS conv_bond (
+    corp_code TEXT, bsns_year TEXT, kind TEXT, name TEXT, isu_dd TEXT, exprd_dd TEXT,
+    remndr_amt REAL,                      -- 미상환 잔액(원)
+    cnvrs_prc REAL,                       -- 전환(행사)가액
+    cnvrs_pd TEXT,                        -- 전환청구기간
+    remndr_stock REAL,                    -- 전환가능 주식수
+    PRIMARY KEY (corp_code, bsns_year, kind, name, isu_dd)
+);
+
+-- 타법인 출자현황 (사업보고서)
+CREATE TABLE IF NOT EXISTS other_invest (
+    corp_code TEXT, bsns_year TEXT, name TEXT, purpose TEXT, acqs_de TEXT,
+    trmend_qota_rt REAL, trmend_book_amt REAL, recent_rev REAL, recent_ni REAL,
+    PRIMARY KEY (corp_code, bsns_year, name)
+);
+
 -- 소액주주 현황(사업보고서)
 CREATE TABLE IF NOT EXISTS minor_shareholder (
     corp_code     TEXT,
@@ -127,6 +144,11 @@ CREATE TABLE IF NOT EXISTS fin_kpi (
     interest_cover REAL,                   -- EBITDA/이자비용 (배)
     borrow_dep    REAL,                    -- 차입금의존도 = 총차입금/총자산 %
     rcept_no      TEXT,                    -- 보고서 접수번호 (DART 링크용)
+    cur_assets REAL, cur_liab REAL, receivables REAL, inventory REAL, capital REAL,
+    cur_ratio     REAL,                    -- 유동비율 %
+    recv_turn     REAL,                    -- 매출채권회전율(회, 기간매출/기말채권)
+    inv_turn      REAL,                    -- 재고자산회전율(회)
+    nd_ebitda     REAL,                    -- 순차입금/EBITDA (배)
     PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div)
 );
 
@@ -225,6 +247,13 @@ CREATE TABLE IF NOT EXISTS rating_summary (
     pages         INTEGER,
     summarized_at TEXT
 );
+
+-- 뉴스 헤드라인 (제목·언론사·날짜·링크만, 90일 보관)
+CREATE TABLE IF NOT EXISTS news (
+    corp_code TEXT, dt TEXT, title TEXT, source TEXT, url TEXT, fetched_at TEXT,
+    PRIMARY KEY (corp_code, url)
+);
+CREATE INDEX IF NOT EXISTS idx_news_corp ON news(corp_code, dt DESC);
 
 -- 수집 로그
 CREATE TABLE IF NOT EXISTS fetch_log (
