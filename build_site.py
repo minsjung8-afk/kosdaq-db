@@ -32,9 +32,14 @@ def company_detail(con, c):
     biz = q(con, "SELECT bsns_year, rcept_no, overview_text, summary_json, summary_md FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc)
     b = biz[0] if biz else {}
     kpi = {}
-    RC = {"11013": "1Q", "11012": "반기", "11014": "3Q"}
+    Q = {"11013": 1, "11012": 2, "11014": 3}
+    acc = int(c.get("acc_mt") or 12) if str(c.get("acc_mt") or "").strip().isdigit() else 12
+
+    def plabel(year, rc):                       # 분기말 월 기준 라벨: 2025.06 (결산월 반영)
+        mm = ((acc + 3 * Q.get(rc, 0) - 1) % 12) + 1
+        return f"{year}.{mm:02d}"
     for fs in ("CFS", "OFS"):
-        ann = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' ORDER BY bsns_year DESC LIMIT 4", cc, fs)
+        ann = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' ORDER BY bsns_year DESC LIMIT 2", cc, fs)
         ann = sorted(ann, key=lambda r: r["bsns_year"])
         latest = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code!='11011' ORDER BY bsns_year DESC, reprt_code DESC LIMIT 1", cc, fs)
         rows = []
@@ -44,8 +49,8 @@ def company_detail(con, c):
             L = latest[0]
             prev = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code=? AND bsns_year=?", cc, fs, L["reprt_code"], str(int(L["bsns_year"]) - 1))
             if prev:
-                rows.append({**prev[0], "label": f"{prev[0]['bsns_year']}.{RC.get(L['reprt_code'], L['reprt_code'])}", "kind": "prev_interim"})
-            rows.append({**L, "label": f"{L['bsns_year']}.{RC.get(L['reprt_code'], L['reprt_code'])}", "kind": "interim"})
+                rows.append({**prev[0], "label": plabel(prev[0]["bsns_year"], L["reprt_code"]), "kind": "prev_interim"})
+            rows.append({**L, "label": plabel(L["bsns_year"], L["reprt_code"]), "kind": "interim"})
         if rows:
             kpi[fs] = [{k: v for k, v in r.items() if k not in ("corp_code", "fs_div")} for r in rows]
     prices = q(con, "SELECT dt, close, volume FROM price_daily WHERE stock_code=? AND dt >= date('now','-1 year') ORDER BY dt", sc)

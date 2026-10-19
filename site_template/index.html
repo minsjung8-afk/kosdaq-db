@@ -49,6 +49,7 @@ table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{color:var(--mute);font-weight:500;font-size:12px}
 tr.g1>td,tr.g1>th{background:var(--g1)} tr.g2>td,tr.g2>th{background:var(--g2)} tr.g3>td,tr.g3>th{background:var(--g3)}
+td.sep,th.sep{border-left:2px solid var(--line)}
 td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top}
 .kv{display:grid;grid-template-columns:max-content 1fr max-content 1fr;gap:4px 14px;font-size:13px}
 .kv b{color:var(--mute);font-weight:500}
@@ -133,22 +134,27 @@ async function open(code){
   else h+=`<div class="src">사업내용 미수집</div>`;
   if(b.dart_url) h+=`<div class="src" style="margin-top:8px">원문: <a href="${b.dart_url}" target="_blank" rel="noopener">DART ${b.rcept_no}</a></div>`;
   h+=`</section>`;
-  // 3 재무
+  // 3 재무: 한 표에 좌측 별도 | 우측 연결 (각 연간 2개년 + 전년동기·최근분기)
   h+=`<section><h3>3. 재무현황 (억원, %)</h3>`;
-  for(const [fs,label] of [['CFS','연결'],['OFS','별도']]){const rows=d.kpi[fs];if(!rows)continue;
+  {
     const x=v=>v==null?'-':v.toFixed(1)+'x';
     const groups=[
-      ['손익','g1', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da'],['당기순이익','net_income',억],['영업활동CF','cfo',억]]],
-      ['자산·부채·자본','g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억],['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억]]],
-      ['재무지표','g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['영업이익률','op_margin',pct],['EBITDA/이자비용','interest_cover',x]]],
+      ['g1', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da'],['당기순이익','net_income',억],['영업활동CF','cfo',억]]],
+      ['g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억],['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억]]],
+      ['g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['영업이익률','op_margin',pct],['EBITDA/이자비용','interest_cover',x]]],
     ];
-    const head=`<tr><th>항목</th>${rows.map(r=>`<th class="n" ${r.kind==='interim'?'style="border-bottom:2px solid var(--accent)"':''}>${r.label||r.bsns_year}</th>`).join('')}</tr>`;
-    // 전년대비: 연간→직전 연간, 최근분기→전년동기. 금액은 %, 비율은 %p, 배수는 x차
-    const prevOf=(i)=>{const r=rows[i]; if(r.kind==='annual'){const p=rows[i-1]; return p&&p.kind==='annual'?p:null;} if(r.kind==='interim'){const p=rows[i-1]; return p&&p.kind==='prev_interim'?p:null;} return null;};
-    const chg=(cur,prev,f)=>{ if(cur==null||prev==null) return ''; let t; if(f===억){ if(prev<=0) return ''; const v=(cur/prev-1)*100; t=(v>0?'+':'')+v.toFixed(1)+'%'; } else if(f===pct){ const v=cur-prev; t=(v>0?'+':'')+v.toFixed(1)+'%p'; } else { if(prev===0) return ''; const v=(cur-prev)/Math.abs(prev)*100; t=(v>0?'+':'')+v.toFixed(1)+'%'; } return `<br><small style="color:${t.startsWith('-')?'var(--bad)':t.startsWith('+')?'var(--good)':'var(--mute)'}">${t}</small>`; };
-    const cell=(r,i,k,f,sub)=>{const p=prevOf(i); return `<td class="n ${r[k]<0?'neg':''}">${f(r[k])}${sub?`<br><small style="color:var(--mute)">(${f(r[sub])})</small>`:chg(r[k],p&&p[k],f)}</td>`;};
-    h+=`<div class="src" style="margin:6px 0 4px">${label} · 억원 · 연간 4개년 + 최근분기(누적)·전년동기 · 작은 글씨는 전년(동기)대비 증감(금액·배수 %, 비율 %p) · 음영: 손익 / 자산·부채·자본 / 재무지표</div><div class="twrap"><table>${head}${groups.map(([g,cls,cols])=>cols.map(([n,k,f,sub])=>`<tr class="${cls}"><td>${n}${sub?'<br><small style="color:var(--mute)">(유무형상각비)</small>':''}</td>${rows.map((r,i)=>cell(r,i,k,f,sub)).join('')}</tr>`).join('')).join('')}</table></div>`;}
-  if(!d.kpi.CFS&&!d.kpi.OFS) h+=`<div class="src">재무 미수집</div>`;
+    const bases=[['OFS','별도'],['CFS','연결']].filter(([fs])=>d.kpi[fs]&&d.kpi[fs].length);
+    if(!bases.length) h+=`<div class="src">재무 미수집</div>`;
+    else{
+      const prevOf=(rows,i)=>{const r=rows[i]; if(r.kind==='annual'){const p=rows[i-1]; return p&&p.kind==='annual'?p:null;} if(r.kind==='interim'){const p=rows[i-1]; return p&&p.kind==='prev_interim'?p:null;} return null;};
+      const chg=(cur,prev,f)=>{ if(cur==null||prev==null) return ''; let t; if(f===억){ if(prev<=0) return ''; const v=(cur/prev-1)*100; t=(v>0?'+':'')+v.toFixed(1)+'%'; } else if(f===pct){ const v=cur-prev; t=(v>0?'+':'')+v.toFixed(1)+'%p'; } else { if(prev===0) return ''; const v=(cur-prev)/Math.abs(prev)*100; t=(v>0?'+':'')+v.toFixed(1)+'%'; } return `<br><small style="color:${t.startsWith('-')?'var(--bad)':t.startsWith('+')?'var(--good)':'var(--mute)'}">${t}</small>`; };
+      const cell=(rows,i,k,f,sub,first)=>{const r=rows[i],p=prevOf(rows,i); return `<td class="n${first?' sep':''} ${r[k]<0?'neg':''}">${f(r[k])}${sub?`<br><small style="color:var(--mute)">(${f(r[sub])})</small>`:chg(r[k],p&&p[k],f)}</td>`;};
+      const head1=`<tr><th></th>${bases.map(([fs,nm])=>`<th class="sep" colspan="${d.kpi[fs].length}" style="text-align:center;font-weight:600;color:var(--fg)">${nm}</th>`).join('')}</tr>`;
+      const head2=`<tr><th>항목</th>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>`<th class="n${i===0?' sep':''}" ${r.kind==='interim'?'style="border-bottom:2px solid var(--accent)"':''}>${r.label||r.bsns_year}</th>`).join('')).join('')}</tr>`;
+      const body=groups.map(([cls,cols])=>cols.map(([n,k,f,sub])=>`<tr class="${cls}"><td>${n}${sub?'<br><small style="color:var(--mute)">(유무형상각비)</small>':''}</td>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>cell(d.kpi[fs],i,k,f,sub,i===0)).join('')).join('')}</tr>`).join('')).join('');
+      h+=`<div class="src" style="margin:6px 0 4px">억원 · 연간 2개년 + 전년동기·최근분기(누적) · 작은 글씨는 전년(동기)대비 증감(금액·배수 %, 비율 %p) · 음영: 손익 / 자산·부채·자본 / 재무지표</div><div class="twrap"><table>${head1}${head2}${body}</table></div>`;
+    }
+  }
   h+=`</section>`;
   // 4 주가
   h+=`<section><h3>4. 주가추이 · 담보가치 참고</h3>`;

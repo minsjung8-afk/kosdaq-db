@@ -145,7 +145,7 @@ def rebuild_kpi_all(con):
 
 def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):
     """years: 연간(사업보고서) 적재 연도. interim=True면 최근 분기 + 전년 동기 추가.
-    오늘 기준 기본: 직전 4개년 연간 + 최근분기·전년동기 = 회사당 (4+2)×2(연결/별도) = 12호출"""
+    오늘 기준 기본: 직전 2개년 연간 + 최근분기·전년동기 = 회사당 (2+2)×2(연결/별도) = 8호출"""
     con = connect()
     if annual_years is None:
         annual_years = years
