@@ -42,12 +42,30 @@ h2{font-size:22px;margin:0 0 2px;font-weight:600}
 .sub-title{color:var(--mute);font-family:var(--mono);font-size:13px;margin-bottom:16px}
 section{margin-bottom:26px}
 section>h3{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin:0 0 8px;padding-bottom:4px;border-bottom:1px solid var(--line)}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}@media (min-width:1700px){.tiles{grid-template-columns:repeat(6,1fr)}}
 .tile{background:var(--panel);border:1px solid var(--line);padding:10px 12px}
 .tile .k{font-size:11px;color:var(--mute);letter-spacing:.03em}
 .tile .v{font-family:var(--mono);font-size:18px;font-weight:500;font-variant-numeric:tabular-nums}
 .tile .v small{font-size:12px;color:var(--mute);margin-left:2px}
 .tile .d{font-size:11px;color:var(--mute);font-family:var(--mono)}
+.tile .kvs{display:grid;grid-template-columns:auto auto;justify-content:space-between;gap:2px 10px;font-size:12.5px;margin-top:3px}.tile .kvs b{font-weight:500;color:var(--mute)}.tile .kvs span{font-variant-numeric:tabular-nums;font-weight:600;text-align:right}
+.tile .foot{font-size:11px;color:var(--mute);margin-top:5px;border-top:1px dashed var(--line);padding-top:4px}
+/* 업종 내 위치: 카드형 */
+.ind{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px 18px;margin-top:6px}
+.ind .it .lb{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}.ind .it .lb b{font-weight:500}.ind .it .lb span{font-variant-numeric:tabular-nums;font-weight:600}
+.ind .it .hint{font-size:10.5px;color:var(--mute);margin-top:2px}
+/* 재무현황 표 */
+table.fin{font-size:13px}table.fin th,table.fin td{padding:5px 7px;vertical-align:middle;line-height:1.35}
+table.fin th.n,table.fin td.n{font-family:var(--font);font-variant-numeric:tabular-nums;white-space:nowrap}
+table.fin td:first-child{font-weight:500;white-space:nowrap}table.fin td:first-child small{font-weight:400;color:var(--mute)}
+table.fin td .val{display:inline-block;min-width:3.2em;text-align:right;font-weight:500}table.fin td .val.neg{color:var(--bad)}
+table.fin td .chg{display:inline-block;min-width:4.4em;text-align:right;font-size:10px;color:var(--mute);margin-left:4px;letter-spacing:-.01em}table.fin td .chg.up{color:var(--good)}table.fin td .chg.dn{color:var(--bad)}
+table.fin tr.g1>td:first-child{border-left:3px solid #4a7fb5}table.fin tr.g2>td:first-child{border-left:3px solid #b8894a}table.fin tr.g3>td:first-child{border-left:3px solid #4f9a6a}
+table.fin tr.gs>td{border-top:2px solid var(--line)}
+table.fin th.sep,table.fin td.sep{border-left:3px solid var(--line)}
+table.fin th.top{text-align:center;font-weight:700;color:var(--fg);font-size:13px;background:var(--bg)}
+table.fin th.col{font-size:12.5px;font-weight:600;color:var(--fg)}table.fin th.col a{color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--accent)}
+table.fin th.col.cur{color:var(--accent)}
 .twrap{overflow-x:auto}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
@@ -172,13 +190,13 @@ async function open(code){
   h+=`<div class="tiles">
     <div class="tile"><div class="k">시가총액</div><div class="v">${억(ps.mcap)}<small>억</small></div><div class="d">${ps.asof||''}</div></div>
     <div class="tile"><div class="k">매출액 (${last.label||last.bsns_year||'-'}, ${d.kpi.CFS?'연결':'별도'})</div><div class="v">${억(last.revenue)}<small>억</small></div><div class="d">영업이익 ${억(last.op_income)}억</div></div>
-    <div class="tile"><div class="k">부채비율 / 상환능력</div><div class="v">${pct(last.debt_ratio)}</div><div class="d">순차입금/EBITDA ${last.nd_ebitda!=null?last.nd_ebitda.toFixed(1)+'x':'-'} · 차입금의존도 ${pct(last.borrow_dep)} · 유동비율 ${pct(last.cur_ratio)}</div></div>
+    <div class="tile"><div class="k">부채비율 (${last.label||last.bsns_year||'-'})</div><div class="v">${pct(last.debt_ratio)}</div><div class="kvs"><b>순차입금/EBITDA</b><span>${last.nd_ebitda!=null?last.nd_ebitda.toFixed(1)+'x':'-'}</span><b>차입금의존도</b><span>${pct(last.borrow_dep)}</span><b>유동비율</b><span>${pct(last.cur_ratio)}</span></div></div>
     <div class="tile"><div class="k">감사의견 ${ao?ao.bsns_year:''}</div><div class="v"><span class="pill ${opClass(ao&&ao.adt_opinion)}">${esc(ao?ao.adt_opinion:'-')}</span></div><div class="d">${esc(ao?ao.adtor:'')}</div></div>
-    <div class="tile"><div class="k">1Y 수익률 / 60일 변동성</div><div class="v ${ps.chg_1y<0?'neg':''}">${pct(ps.chg_1y)}</div><div class="d">변동성 ${pct(ps.vol_60d)} · 거래대금 ${억(ps.avg_value_3m)}억/일</div></div>
+    <div class="tile"><div class="k">1년 수익률</div><div class="v ${ps.chg_1y<0?'neg':''}">${pct(ps.chg_1y)}</div><div class="kvs"><b>변동성 (60일, 연율)</b><span>${pct(ps.vol_60d)}</span><b>일평균 거래대금 (3M)</b><span>${억(ps.avg_value_3m)}억</span></div></div>
     ${(()=>{const v=d.valuation; if(!v) return `<div class="tile"><div class="k">밸류에이션</div><div class="v">-</div><div class="d">시세·재무 필요</div></div>`;
-      const x=n=>n==null?'N/A':n.toFixed(1)+'x'; return `<div class="tile"><div class="k">밸류에이션 (${esc(v.basis)}, ${v.fs})</div>
-      <div class="v" style="font-size:15px;line-height:1.5">PER ${x(v.per)}${v.per==null?'<small>(적자)</small>':''} · PBR ${v.pbr==null?'N/A':v.pbr.toFixed(2)+'x'}<br>EV/${v.ev_basis||'EBITDA'} ${x(v.ev_ebitda)}${v.ev_basis==='영업이익'?' <small style="color:var(--warn)">영업이익 기준</small>':''}</div>
-      <div class="d">EV ${억(v.ev)}억 = 시총 ${억(v.mcap)} + 순차입금 ${억(v.net_borrowings)}</div></div>`;})()}
+      const x=n=>n==null?'N/A':n.toFixed(1)+'x'; const nb=v.net_borrowings||0; return `<div class="tile"><div class="k">밸류에이션 (${esc(v.basis)} · ${v.fs})</div>
+      <div class="kvs" style="font-size:13px;margin-top:6px"><b>PER</b><span>${x(v.per)}${v.per==null?' <small style="font-weight:400;color:var(--mute)">적자</small>':''}</span><b>PBR</b><span>${v.pbr==null?'N/A':v.pbr.toFixed(2)+'x'}</span><b>EV/${v.ev_basis||'EBITDA'}${v.ev_basis==='영업이익'?' <small style="color:var(--warn)">*</small>':''}</b><span>${x(v.ev_ebitda)}</span></div>
+      <div class="foot">EV ${억(v.ev)}억 = 시총 ${억(v.mcap)}억 ${nb<0?'−':'+'} 순차입금 ${억(Math.abs(nb))}억${v.ev_basis==='영업이익'?'<br>* EBITDA 산출 불가 → 영업이익 기준':''}</div></div>`;})()}
   </div>`;
   // 1 개요
   h+=`<section><h3>1. 개요</h3><div class="kv">
@@ -222,8 +240,8 @@ async function open(code){
   h+=`</section>`;
   // 3 재무: 한 표에 좌측 별도 | 우측 연결 (각 연간 2개년 + 전년동기·최근분기)
   h+=`<section><h3>3. 재무현황 (억원, %)</h3>`;
-  if(d.industry_pos&&d.industry_pos.n>=5){const ip=d.industry_pos; const row=(n,k,inv)=>{const p=ip[k]; if(p==null) return ''; const good=inv?100-p:p; return `<div style="display:grid;grid-template-columns:110px 1fr 90px;gap:10px;align-items:center;font-size:12px"><span>${n}</span><div class="bar"><i style="left:calc(${p}% - 1px)"></i></div><span class="n" style="color:${good>=66?'var(--good)':good<=33?'var(--bad)':'var(--mute)'}">${p}백분위${inv?' (낮을수록 양호)':''}</span></div>`};
-    h+=`<div style="margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);background:var(--panel)"><div class="src" style="margin-bottom:6px">같은 업종 내 위치 (KSIC ${ip.ind} ${esc(ip.name||'')} · ${esc(ip.market||'')} ${ip.n}개사, 최근 연간 기준)</div><div style="display:grid;gap:5px">${row('부채비율','debt_ratio',true)}${row('차입금의존도','borrow_dep',true)}${row('영업이익률','op_margin',false)}${row('유동비율','cur_ratio',false)}${row('시가총액','mcap',false)}</div></div>`;}
+  if(d.industry_pos&&d.industry_pos.n>=5){const ip=d.industry_pos; const it=(n,k,inv)=>{const p=ip[k]; if(!p) return ''; const q=(p.rank-1)/Math.max(1,p.n-1); const col=q<=0.33?'var(--good)':q>=0.67?'var(--bad)':'var(--fg)'; return `<div class="it"><div class="lb"><b>${n}</b><span style="color:${col}">${p.rank}위<small style="font-weight:400;color:var(--mute)"> / ${p.n}개사</small></span></div><div class="bar"><i style="left:calc(${Math.round((1-q)*100)}% - 1px)"></i></div><div class="hint">${inv?'낮을수록 상위':'높을수록 상위'}</div></div>`};
+    h+=`<div style="margin:0 0 14px;padding:8px 12px 10px;border:1px solid var(--line);background:var(--panel)"><div class="src">같은 업종 내 순위 — KSIC ${ip.ind} ${esc(ip.name||'')} · ${esc(ip.market||'')} ${ip.n}개사 · 최근 연간 기준 · 1위 = 가장 양호 (막대 오른쪽일수록 상위)</div><div class="ind">${it('시가총액','mcap',false)}${it('영업이익률','op_margin',false)}${it('부채비율','debt_ratio',true)}${it('차입금의존도','borrow_dep',true)}${it('유동비율','cur_ratio',false)}</div></div>`;}
   {
     const x=v=>v==null?'-':v.toFixed(1)+'x';
     const groups=[
@@ -235,13 +253,13 @@ async function open(code){
     if(!bases.length) h+=`<div class="src">재무 미수집</div>`;
     else{
       const prevOf=(rows,i)=>{const r=rows[i]; if(r.kind==='annual'){const p=rows[i-1]; return p&&p.kind==='annual'?p:null;} if(r.kind==='interim'){const p=rows[i-1]; return p&&p.kind==='prev_interim'?p:null;} return null;};
-      const chg=(cur,prev,f)=>{ if(cur==null||prev==null) return ''; let t; if(f===억){ if(prev<=0) return ''; const v=(cur/prev-1)*100; t=(v>0?'+':'')+v.toFixed(1)+'%'; } else if(f===pct){ const v=cur-prev; t=(v>0?'+':'')+v.toFixed(1)+'%p'; } else { if(prev===0) return ''; const v=(cur-prev)/Math.abs(prev)*100; t=(v>0?'+':'')+v.toFixed(1)+'%'; } return `<br><small style="color:${t.startsWith('-')?'var(--bad)':t.startsWith('+')?'var(--good)':'var(--mute)'}">${t}</small>`; };
-      const cell=(rows,i,k,f,sub,first)=>{const r=rows[i],p=prevOf(rows,i); return `<td class="n${first?' sep':''} ${r[k]<0?'neg':''}">${f(r[k])}${sub?`<br><small style="color:var(--mute)">(${f(r[sub])})</small>`:chg(r[k],p&&p[k],f)}</td>`;};
-      const head1=`<tr><th></th>${bases.map(([fs,nm])=>`<th class="sep" colspan="${d.kpi[fs].length}" style="text-align:center;font-weight:600;color:var(--fg)">${nm}</th>`).join('')}</tr>`;
+      const chg=(cur,prev,f)=>{ if(cur==null||prev==null) return '<span class="chg"></span>'; let v,t; if(f===억){ if(prev<=0) return '<span class="chg"></span>'; v=(cur/prev-1)*100; t=Math.abs(v).toFixed(1)+'%'; } else if(f===pct){ v=cur-prev; t=Math.abs(v).toFixed(1)+'%p'; } else { if(prev===0) return '<span class="chg"></span>'; v=(cur-prev)/Math.abs(prev)*100; t=Math.abs(v).toFixed(1)+'%'; } if(Math.abs(v)>999) t='>999%'; return `<span class="chg ${v>0?'up':v<0?'dn':''}">${v>0?'▲':v<0?'▼':''}${t}</span>`; };
+      const cell=(rows,i,k,f,sub,first)=>{const r=rows[i],p=prevOf(rows,i); return `<td class="n${first?' sep':''}"><span class="val ${r[k]<0?'neg':''}">${f(r[k])}</span>${sub?`<span class="chg">(${f(r[sub])})</span>`:(p?chg(r[k],p[k],f):'')}</td>`;};
+      const head1=`<tr><th></th>${bases.map(([fs,nm])=>`<th class="sep top" colspan="${d.kpi[fs].length}">${nm}</th>`).join('')}</tr>`;
       const plink=r=>r.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener" title="DART 보고서 열기">${r.label||r.bsns_year}</a>`:(r.label||r.bsns_year);
-      const head2=`<tr><th>항목</th>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>`<th class="n${i===0?' sep':''}" ${r.kind==='interim'?'style="border-bottom:2px solid var(--accent)"':''}>${plink(r)}</th>`).join('')).join('')}</tr>`;
-      const body=groups.map(([cls,cols])=>cols.map(([n,k,f,sub])=>`<tr class="${cls}"><td>${n}${sub?'<br><small style="color:var(--mute)">(유무형상각비)</small>':''}</td>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>cell(d.kpi[fs],i,k,f,sub,i===0)).join('')).join('')}</tr>`).join('')).join('');
-      h+=`<div class="src" style="margin:6px 0 4px">억원 · 연간 2개년 + 전년동기·최근분기(누적) · 작은 글씨는 전년(동기)대비 증감(금액·배수 %, 비율 %p) · 음영: 손익 / 자산·부채·자본 / 재무지표</div><div class="twrap"><table>${head1}${head2}${body}</table></div>`;
+      const head2=`<tr><th>항목</th>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>`<th class="n col${i===0?' sep':''}${r.kind==='interim'?' cur':''}" ${r.kind==='interim'?'style="border-bottom:2px solid var(--accent)"':''}>${plink(r)}${r.kind!=='annual'?'<small style="font-weight:400;color:var(--mute)"> 누적</small>':''}</th>`).join('')).join('')}</tr>`;
+      const body=groups.map(([cls,cols],gi)=>cols.map(([n,k,f,sub],ri)=>`<tr class="${cls}${gi>0&&ri===0?' gs':''}"><td>${n}${sub?' <small>(유무형상각비)</small>':''}</td>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>cell(d.kpi[fs],i,k,f,sub,i===0)).join('')).join('')}</tr>`).join('')).join('');
+      h+=`<div class="src" style="margin:6px 0 6px">단위 억원 · 연간 2개년 + 전년동기·최근분기(누적) · ▲▼는 전년(동기) 대비 증감(금액·배수 %, 비율 %p) · 연도 클릭 → DART 보고서</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div>`;
     }
   }
   h+=`</section>`;
@@ -262,7 +280,7 @@ async function open(code){
       <b>종가</b><span>${num(ps.close)}원</span><b>액면가</b><span>${c.parval?num(c.parval)+'원':'-'}</span>
       <b>52주 최고</b><span>${num(ps.high_52w)}원</span><b>52주 최저</b><span>${num(ps.low_52w)}원</span>
       <b>시가총액</b><span>${억(ps.mcap)}억</span><b>발행주식수</b><span>${num(ps.shares_out)}주</span>
-      <b>3M 평균거래량</b><span>${num(Math.round(ps.avg_vol_3m||0))}주 <span class="src">(거래대금 ${억(ps.avg_value_3m)}억/일)</span></span><b>60일 변동성(연율)</b><span>${pct(ps.vol_60d)}</span></div>`;}
+      <b>3M 평균거래량</b><span>${num(Math.round(ps.avg_vol_3m||0))}주 <span class="src">(거래대금 ${억(ps.avg_value_3m)}억/일)</span></span><b>변동성 (60일, 연율)</b><span>${pct(ps.vol_60d)}</span></div>`;}
   else h+=`<div class="src">주가 미수집</div>`;
   h+=`</section>`;
   // 5 공시 타임라인

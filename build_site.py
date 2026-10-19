@@ -153,7 +153,7 @@ def company_detail(con, c):
     prices = adjusted_rows(con, sc, since=con.execute("SELECT date('now','-3 years')").fetchone()[0])
     ps = q(con, "SELECT * FROM price_summary WHERE stock_code=? ORDER BY asof DESC LIMIT 1", sc)
     d = {
-        "company": c,
+        "company": {**c, "adres": re.sub(r"&nbsp;?|\s+", " ", c.get("adres") or "").strip()},   # DART 주소의 &nbsp 제거
         "audit": q(con, "SELECT bsns_year, adtor, adt_opinion, emphs_matter, core_adt_matter FROM audit_opinion WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 3", cc),
         "shareholders": _shareholders(con, cc),
         "minor": (q(con, "SELECT * FROM minor_shareholder WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc) or [None])[0],
@@ -195,11 +195,11 @@ def company_detail(con, c):
     if st and ann:
         last = ann[-1]
         d["industry_pos"] = {"ind": ind, "name": c.get("sector_krx"), "n": len(st["debt_ratio"]), "market": c.get("market"),
-                             "debt_ratio": _pctile(st["debt_ratio"], last.get("debt_ratio")),
-                             "op_margin": _pctile(st["op_margin"], last.get("op_margin")),
-                             "cur_ratio": _pctile(st["cur_ratio"], last.get("cur_ratio")),
-                             "borrow_dep": _pctile(st["borrow_dep"], last.get("borrow_dep")),
-                             "mcap": _pctile(st["mcap"], (d["price_summary"] or {}).get("mcap"))}
+                             "debt_ratio": _rank(st["debt_ratio"], last.get("debt_ratio"), lower_better=True),
+                             "op_margin": _rank(st["op_margin"], last.get("op_margin")),
+                             "cur_ratio": _rank(st["cur_ratio"], last.get("cur_ratio")),
+                             "borrow_dep": _rank(st["borrow_dep"], last.get("borrow_dep"), lower_better=True),
+                             "mcap": _rank(st["mcap"], (d["price_summary"] or {}).get("mcap"))}
     return d
 
 
@@ -226,11 +226,17 @@ def _industry_stats(con):
     return stats
 
 
-def _pctile(sorted_vals, v):
+def _rank(sorted_vals, v, lower_better=False):
+    """같은 시장·업종 내 순위. 1위 = 가장 양호. 반환 {"rank", "n"} (모수 5 미만이면 None)"""
     if v is None or not sorted_vals or len(sorted_vals) < 5:
         return None
     import bisect
-    return round(bisect.bisect_left(sorted_vals, v) / len(sorted_vals) * 100)
+    n = len(sorted_vals)
+    if lower_better:
+        rank = bisect.bisect_left(sorted_vals, v) + 1          # 자기보다 작은 값의 수 + 1
+    else:
+        rank = (n - bisect.bisect_right(sorted_vals, v)) + 1   # 자기보다 큰 값의 수 + 1
+    return {"rank": min(rank, n), "n": n}
 
 
 def _flags(c, kpi, ps, audit, events, ratings):
