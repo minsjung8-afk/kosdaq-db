@@ -10,10 +10,11 @@
 :root{
   --bg:#f6f7f5; --panel:#ffffff; --fg:#1b1f1d; --mute:#6b716e; --line:#dcdfdb;
   --accent:#1f5f8b; --accent-bg:#e8f0f6; --good:#2e7d4f; --warn:#b26a00; --bad:#b3261e;
+  --g1:#eef3f8; --g2:#f7f2ea; --g3:#eef5ef;   /* 손익 / 자산부채자본 / 재무지표 음영 */
   --font:"IBM Plex Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
 }
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#15181a;--panel:#1d2124;--fg:#e6e8e6;--mute:#9aa19d;--line:#2f3539;--accent:#6fb1e0;--accent-bg:#1e2f3c;--good:#6cc08f;--warn:#e0a53a;--bad:#f07a73;color-scheme:dark}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#15181a;--panel:#1d2124;--fg:#e6e8e6;--mute:#9aa19d;--line:#2f3539;--accent:#6fb1e0;--accent-bg:#1e2f3c;--good:#6cc08f;--warn:#e0a53a;--bad:#f07a73;--g1:#1c252e;--g2:#262220;--g3:#1d2823;color-scheme:dark}}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font:14px/1.55 var(--font);display:grid;grid-template-columns:340px 1fr;grid-template-rows:auto 1fr}
@@ -47,7 +48,8 @@ section>h3{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:va
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{color:var(--mute);font-weight:500;font-size:12px}
-td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.g1>td,tr.g1>th{background:var(--g1)} tr.g2>td,tr.g2>th{background:var(--g2)} tr.g3>td,tr.g3>th{background:var(--g3)}
+td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top}
 .kv{display:grid;grid-template-columns:max-content 1fr max-content 1fr;gap:4px 14px;font-size:13px}
 .kv b{color:var(--mute);font-weight:500}
 .pill{display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;font-family:var(--mono);border:1px solid var(--line)}
@@ -136,13 +138,16 @@ async function open(code){
   for(const [fs,label] of [['CFS','연결'],['OFS','별도']]){const rows=d.kpi[fs];if(!rows)continue;
     const x=v=>v==null?'-':v.toFixed(1)+'x';
     const groups=[
-      ['손익', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da'],['당기순이익','net_income',억],['영업활동CF','cfo',억]]],
-      ['자산·부채·자본', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억],['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억]]],
-      ['재무지표', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['영업이익률','op_margin',pct],['EBITDA/이자비용','interest_cover',x]]],
+      ['손익','g1', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da'],['당기순이익','net_income',억],['영업활동CF','cfo',억]]],
+      ['자산·부채·자본','g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억],['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억]]],
+      ['재무지표','g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['영업이익률','op_margin',pct],['EBITDA/이자비용','interest_cover',x]]],
     ];
     const head=`<tr><th>항목</th>${rows.map(r=>`<th class="n" ${r.kind==='interim'?'style="border-bottom:2px solid var(--accent)"':''}>${r.label||r.bsns_year}</th>`).join('')}</tr>`;
-    const cell=(r,k,f,sub)=>`<td class="n ${r[k]<0?'neg':''}">${f(r[k])}${sub?`<br><small style="color:var(--mute)">(${f(r[sub])})</small>`:''}</td>`;
-    h+=`<div class="src" style="margin:6px 0 4px">${label} · 억원 · 연간 4개년 + 최근분기(누적)·전년동기</div><div class="twrap"><table>${head}${groups.map(([g,cols])=>`<tr><th colspan="${rows.length+1}" style="background:var(--bg);padding-top:9px">${g}</th></tr>`+cols.map(([n,k,f,sub])=>`<tr><td>${n}${sub?'<br><small style="color:var(--mute)">(유무형상각비)</small>':''}</td>${rows.map(r=>cell(r,k,f,sub)).join('')}</tr>`).join('')).join('')}</table></div>`;}
+    // 전년대비: 연간→직전 연간, 최근분기→전년동기. 금액은 %, 비율은 %p, 배수는 x차
+    const prevOf=(i)=>{const r=rows[i]; if(r.kind==='annual'){const p=rows[i-1]; return p&&p.kind==='annual'?p:null;} if(r.kind==='interim'){const p=rows[i-1]; return p&&p.kind==='prev_interim'?p:null;} return null;};
+    const chg=(cur,prev,f)=>{ if(cur==null||prev==null) return ''; let t; if(f===억){ if(prev<=0) return ''; const v=(cur/prev-1)*100; t=(v>0?'+':'')+v.toFixed(1)+'%'; } else if(f===pct){ const v=cur-prev; t=(v>0?'+':'')+v.toFixed(1)+'%p'; } else { if(prev===0) return ''; const v=(cur-prev)/Math.abs(prev)*100; t=(v>0?'+':'')+v.toFixed(1)+'%'; } return `<br><small style="color:${t.startsWith('-')?'var(--bad)':t.startsWith('+')?'var(--good)':'var(--mute)'}">${t}</small>`; };
+    const cell=(r,i,k,f,sub)=>{const p=prevOf(i); return `<td class="n ${r[k]<0?'neg':''}">${f(r[k])}${sub?`<br><small style="color:var(--mute)">(${f(r[sub])})</small>`:chg(r[k],p&&p[k],f)}</td>`;};
+    h+=`<div class="src" style="margin:6px 0 4px">${label} · 억원 · 연간 4개년 + 최근분기(누적)·전년동기 · 작은 글씨는 전년(동기)대비 증감(금액·배수 %, 비율 %p) · 음영: 손익 / 자산·부채·자본 / 재무지표</div><div class="twrap"><table>${head}${groups.map(([g,cls,cols])=>cols.map(([n,k,f,sub])=>`<tr class="${cls}"><td>${n}${sub?'<br><small style="color:var(--mute)">(유무형상각비)</small>':''}</td>${rows.map((r,i)=>cell(r,i,k,f,sub)).join('')}</tr>`).join('')).join('')}</table></div>`;}
   if(!d.kpi.CFS&&!d.kpi.OFS) h+=`<div class="src">재무 미수집</div>`;
   h+=`</section>`;
   // 4 주가
