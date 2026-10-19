@@ -5,8 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "run.py job (fin/biz/price/all...)"
+        description: "run.py job"
         default: "price"
+        type: choice
+        options: [init, fin, biz, price, summarize, site, all]
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -29,6 +31,13 @@ jobs:
           git config user.name "kosdaq-bot"; git config user.email "bot@users.noreply.github.com"
           git add kosdaq.db && git commit -m "data: $(date -u +%F)" || echo "no change"
           git push
+      - name: ensure pages project
+        continue-on-error: true
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create kosdaq-db --production-branch=main
       - name: deploy
         uses: cloudflare/wrangler-action@v3
         with:
