@@ -45,7 +45,7 @@ def main():
     con = connect()
     pairs = corp_pairs(con, a.limit)
     ccs = [p[0] for p in pairs]
-    years = a.years or [a.year - 2, a.year - 1]        # 연간: 직직전·직전 연도 (올해분은 분기로)
+    years = a.years or [a.year - 4, a.year - 3, a.year - 2, a.year - 1]   # 연간 4개년 (올해분은 분기로)
 
     if a.job in ("fin", "all"):
         import financials

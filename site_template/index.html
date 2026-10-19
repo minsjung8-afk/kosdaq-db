@@ -142,7 +142,7 @@ async function open(code){
     ];
     const head=`<tr><th>항목</th>${rows.map(r=>`<th class="n" ${r.kind==='interim'?'style="border-bottom:2px solid var(--accent)"':''}>${r.label||r.bsns_year}</th>`).join('')}</tr>`;
     const cell=(r,k,f,sub)=>`<td class="n ${r[k]<0?'neg':''}">${f(r[k])}${sub?`<br><small style="color:var(--mute)">(${f(r[sub])})</small>`:''}</td>`;
-    h+=`<div class="src" style="margin:6px 0 4px">${label} · 억원 · 연간 2개년 + 최근분기(누적)·전년동기</div><div class="twrap"><table>${head}${groups.map(([g,cols])=>`<tr><th colspan="${rows.length+1}" style="background:var(--bg);padding-top:9px">${g}</th></tr>`+cols.map(([n,k,f,sub])=>`<tr><td>${n}${sub?'<br><small style="color:var(--mute)">(유무형상각비)</small>':''}</td>${rows.map(r=>cell(r,k,f,sub)).join('')}</tr>`).join('')).join('')}</table></div>`;}
+    h+=`<div class="src" style="margin:6px 0 4px">${label} · 억원 · 연간 4개년 + 최근분기(누적)·전년동기</div><div class="twrap"><table>${head}${groups.map(([g,cols])=>`<tr><th colspan="${rows.length+1}" style="background:var(--bg);padding-top:9px">${g}</th></tr>`+cols.map(([n,k,f,sub])=>`<tr><td>${n}${sub?'<br><small style="color:var(--mute)">(유무형상각비)</small>':''}</td>${rows.map(r=>cell(r,k,f,sub)).join('')}</tr>`).join('')).join('')}</table></div>`;}
   if(!d.kpi.CFS&&!d.kpi.OFS) h+=`<div class="src">재무 미수집</div>`;
   h+=`</section>`;
   // 4 주가

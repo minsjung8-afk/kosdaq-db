@@ -34,7 +34,7 @@ def company_detail(con, c):
     kpi = {}
     RC = {"11013": "1Q", "11012": "반기", "11014": "3Q"}
     for fs in ("CFS", "OFS"):
-        ann = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' ORDER BY bsns_year DESC LIMIT 2", cc, fs)
+        ann = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' ORDER BY bsns_year DESC LIMIT 4", cc, fs)
         ann = sorted(ann, key=lambda r: r["bsns_year"])
         latest = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code!='11011' ORDER BY bsns_year DESC, reprt_code DESC LIMIT 1", cc, fs)
         rows = []
