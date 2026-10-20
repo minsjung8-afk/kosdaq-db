@@ -94,6 +94,9 @@ def log(con, corp_code, job, status, msg=""):
 _last_call = 0.0
 
 
+QUOTA_HIT = False   # DART 일일 한도 도달 여부(catchup 체인 중단용)
+
+
 def dart_get(endpoint: str, retry: int = 3, **params):
     """DART JSON API 호출. status 000 이외는 예외. 초당 호출 간격 유지."""
     global _last_call
@@ -114,6 +117,8 @@ def dart_get(endpoint: str, retry: int = 3, **params):
         if st == "013":          # 조회 데이터 없음
             return {"status": "013", "list": []}
         if st in ("020", "021"):  # 한도 초과
+            global QUOTA_HIT
+            QUOTA_HIT = True
             raise RuntimeError(f"DART 한도 초과: {js.get('message')}")
         raise RuntimeError(f"DART {endpoint} 오류 {st}: {js.get('message')}")
     raise RuntimeError(f"DART {endpoint} HTTP 실패")

@@ -31,9 +31,10 @@ def corp_pairs(con, limit=None):
     return rows[:limit] if limit else rows
 
 
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -73,6 +74,31 @@ def main():
     if a.job in ("mezz", "all"):
         import mezz
         mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
+    if a.job == "delta":
+        import delta
+        delta.run(days=a.limit)
+    if a.job == "daily":                     # 평일 아침: 시세 + 수시공시 델타(전환청구·리픽싱·5%보고·주요이벤트)
+        import prices, delta
+        prices.run(pairs, a.year, markets=a.market)
+        try:
+            delta.run()
+        except Exception as e:  # noqa
+            print("[daily] delta 실패:", e)
+    if a.job == "catchup":                   # 야간: 미수집분을 mezz → biz → fin → kpi 순으로, DART 한도 도달 시 중단(다음날 이어서)
+        import common, mezz, business, financials
+        done = lambda tbl: {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
+        steps = [("mezz", lambda: mezz.run(ccs, new_only=True)),
+                 ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
+                 ("fin", lambda: financials.run([c for c in ccs if c not in done("fin_kpi")], years)),
+                 ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건"))]
+        for name, fn in steps:
+            if common.QUOTA_HIT:
+                print(f"[catchup] DART 한도 도달 — {name} 이후 단계는 내일로", flush=True); break
+            print(f"[catchup] {name} 시작", flush=True)
+            try:
+                fn()
+            except Exception as e:  # noqa
+                print(f"[catchup] {name} 오류: {e}", flush=True)
     if a.job in ("price", "all"):
         import prices
         prices.run(pairs, a.year, start=a.start, markets=a.market)

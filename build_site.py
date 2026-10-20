@@ -74,6 +74,13 @@ def _ltm(rows):
 
 
 
+
+def _safe(fn):
+    try:
+        return fn()
+    except Exception:
+        return []
+
 def _quarters(con, cc):
     """fin_kpi의 연간·분기(누적) 행에서 분기별 손익을 복원 → 최근 최대 8분기 [{label, rev, op, nd, ltm_rev, ltm_op, ltm_ebitda}].
     1Q=1Q누적, 2Q=반기−1Q, 3Q=3Q누적−반기, 4Q=연간−3Q누적. 누락 분기는 None. LTM은 연속 4분기 합(없으면 None)."""
@@ -272,6 +279,7 @@ def company_detail(con, c):
         "forecast_vs_actual": _fva(con, sc),
         "conv_bonds": [],
         "mezz_out": q(con, "SELECT * FROM mezz_outstanding WHERE corp_code=? ORDER BY kind, exprd_dd", cc),
+        "mezz_events": _safe(lambda: q(con, "SELECT rcept_no, rcept_dt, kind, round, amount, shares, price, report_nm FROM mezz_event WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 30", cc)),
         "mezz_issue": _eb_target(con, c, q(con, "SELECT * FROM mezz_issue WHERE corp_code=? ORDER BY COALESCE(bddd, pymd, rcept_no) DESC", cc)),
         "news": q(con, "SELECT dt, title, source, url FROM news WHERE corp_code=? ORDER BY dt DESC LIMIT 60", cc),
         "peers": _peers(con, c, ps[0] if ps else None),
