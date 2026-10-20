@@ -42,6 +42,7 @@ def main():
     ap.add_argument("--no-pdf", action="store_true")
     ap.add_argument("--no-interim", action="store_true", help="fin: 분기보고서 생략")
     ap.add_argument("--market", nargs="*", default=["KOSDAQ", "KOSPI", "KONEX"], help="init/price 대상 시장")
+    ap.add_argument("--start", help="price: 시세 수집 시작일 YYYY-MM-DD (기본 3년 전). 과거 백필 시 예: --start 2016-01-01")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
 
@@ -74,7 +75,7 @@ def main():
         mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
     if a.job in ("price", "all"):
         import prices
-        prices.run(pairs, a.year, markets=a.market)
+        prices.run(pairs, a.year, start=a.start, markets=a.market)
     if a.job in ("summarize", "all"):
         import summarize
         summarize.run_rating(set(ccs) if a.limit else None)                  # 등급 보유사: 신용평가서 기반 요약(우선)

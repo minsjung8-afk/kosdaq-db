@@ -151,6 +151,23 @@ def _peers(con, c, ps):
     return rows[:3]
 
 
+
+def _compact_prices(rows, cut):
+    """최근 3년은 일봉 그대로, 그 이전은 주봉(월요일 기준)으로 축약 — 전체기간 차트용 용량 절감"""
+    import datetime as _dt
+    old, new = [r for r in rows if r["dt"] < cut], [r for r in rows if r["dt"] >= cut]
+    out, cur, key = [], None, None
+    for r in old:
+        d = _dt.date.fromisoformat(r["dt"]); k = (d - _dt.timedelta(days=d.weekday())).isoformat()
+        if k != key:
+            if cur: out.append(cur)
+            cur = dict(r); key = k
+        else:
+            cur["high"] = max(cur["high"] or 0, r["high"] or 0); cur["low"] = min(cur["low"] or 1e18, r["low"] or 1e18)
+            cur["close"] = r["close"]; cur["volume"] = (cur["volume"] or 0) + (r["volume"] or 0)
+    if cur: out.append(cur)
+    return out + new
+
 def company_detail(con, c):
     cc, sc = c["corp_code"], c["stock_code"]
     biz = q(con, "SELECT bsns_year, rcept_no, overview_text, summary_json, summary_md, rating_text FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc)
@@ -178,7 +195,7 @@ def company_detail(con, c):
         if rows:
             kpi[fs] = [{k: v for k, v in r.items() if k not in ("corp_code", "fs_div")} for r in rows]
     from prices import adjusted_rows  # noqa  수정주가(분할·병합 반영)
-    prices = adjusted_rows(con, sc, since=con.execute("SELECT date('now','-3 years')").fetchone()[0])
+    prices = _compact_prices(adjusted_rows(con, sc), con.execute("SELECT date('now','-3 years')").fetchone()[0])   # 최근 3년 일봉 + 그 이전 주봉
     ps = q(con, "SELECT * FROM price_summary WHERE stock_code=? ORDER BY asof DESC LIMIT 1", sc)
     d = {
         "company": {**c, "adres": re.sub(r"&nbsp;?|\s+", " ", c.get("adres") or "").strip()},   # DART 주소의 &nbsp 제거
