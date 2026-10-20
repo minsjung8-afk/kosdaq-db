@@ -5,7 +5,7 @@ import os
 
 from common import connect, now
 
-PROMPT = """당신은 여신심사역이다. 아래는 코스닥 상장사 사업보고서 'II. 사업의 내용' 원문이다.
+PROMPT = """당신은 여신심사역이다. 아래는 상장사(코스피·코스닥·코넥스) 사업보고서 'II. 사업의 내용' 원문이다.
 심사 관점에서 다음 JSON 스키마로만 답하라(값이 없으면 null). 추정은 "추정"이라고 표시.
 {
  "industry": "업종 한 줄",
@@ -25,16 +25,23 @@ PROMPT = """당신은 여신심사역이다. 아래는 코스닥 상장사 사�
 """
 
 
+def _parse_json(out: str) -> dict:
+    """모델 응답에서 JSON만 안전하게 추출(코드펜스·앞뒤 설명문 제거, 첫 '{'~마지막 '}')"""
+    out = out.strip()
+    if out.startswith("```"):
+        out = out.strip("`").split("\n", 1)[1]
+    i, j = out.find("{"), out.rfind("}")
+    if i >= 0 and j > i:
+        out = out[i:j + 1]
+    return json.loads(out)
+
 def summarize_text(text: str, model: str = "claude-sonnet-4-5") -> dict:
     import anthropic  # noqa
     client = anthropic.Anthropic()
     text = text[:120_000]  # 안전 상한
-    msg = client.messages.create(model=model, max_tokens=2500,
+    msg = client.messages.create(model=model, max_tokens=4000,
                                  messages=[{"role": "user", "content": PROMPT + text}])
-    out = msg.content[0].text.strip()
-    if out.startswith("```"):
-        out = out.strip("`").split("\n", 1)[1]
-    return json.loads(out)
+    return _parse_json(msg.content[0].text)
 
 
 def run(corp_codes=None, bsns_year=None, force=False):
@@ -105,6 +112,8 @@ def run_rating(corp_codes=None, force=False, model="claude-sonnet-4-5"):
     for r in rows:
         latest.setdefault(r["corp_code"], r)
     n = 0
+    net_fail = 0          # 금감원 연속 접속 실패 카운터 — 차단/장애 시 3시간 헛도는 것 방지
+    import time
     for cc, r in latest.items():
         if corp_codes and cc not in corp_codes:
             continue
@@ -112,18 +121,26 @@ def run_rating(corp_codes=None, force=False, model="claude-sonnet-4-5"):
         if old and not force and old["disc_dt"] >= r["disc_dt"]:
             continue
         try:
-            pdf = requests.get(r["file_url"], headers=UA, timeout=60).content
+            try:
+                pdf = requests.get(r["file_url"], headers=UA, timeout=(15, 60)).content
+                net_fail = 0
+            except requests.exceptions.ConnectionError as e:
+                net_fail += 1
+                print("신용평가서 다운로드 실패", cc, type(e).__name__, flush=True)
+                if net_fail >= 5:
+                    print(f"[summarize] 금감원 접속 연속 {net_fail}회 실패 — 차단/장애로 보고 중단(다음 실행에서 이어서)", flush=True)
+                    break
+                time.sleep(30)
+                continue
+            time.sleep(1.5)   # 금감원 서버 부하 완화(차단 예방)
             if pdf[:4] != b"%PDF":
                 continue
             text, pages = _pdf_text(pdf)
             if len(text) < 500:
                 continue
-            msg = client.messages.create(model=model, max_tokens=2500,
+            msg = client.messages.create(model=model, max_tokens=4000,
                                          messages=[{"role": "user", "content": RATING_PROMPT + text[:150_000]}])
-            out = msg.content[0].text.strip()
-            if out.startswith("```"):
-                out = out.strip("`").split("\n", 1)[1]
-            js = json.loads(out)
+            js = _parse_json(msg.content[0].text)
             con.execute("INSERT OR REPLACE INTO rating_summary VALUES (?,?,?,?,?,?,?,?,?)",
                         (cc, r["agency"], r["disc_dt"], r["grade"], r["file_url"], json.dumps(js, ensure_ascii=False),
                          js.get("summary_md"), pages, now()))

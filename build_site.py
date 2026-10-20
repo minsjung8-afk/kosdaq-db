@@ -197,7 +197,7 @@ def company_detail(con, c):
         "rating_text": b.get("rating_text"),
         "rating_summary": (lambda rs: {**rs[0], "summary": json.loads(rs[0]["summary_json"])} if rs else None)(
             q(con, "SELECT agency, disc_dt, grade, file_url, summary_json, summary_md FROM rating_summary WHERE corp_code=?", cc)),
-        "ratings": q(con, "SELECT agency, target_type, eval_kind, disc_dt, grade, watch, outlook FROM credit_rating WHERE corp_code=? ORDER BY disc_dt DESC", cc),
+        "ratings": q(con, "SELECT agency, target_type, eval_kind, disc_dt, grade, watch, outlook, file_url FROM credit_rating WHERE corp_code=? ORDER BY disc_dt DESC", cc),
         "events": q(con, "SELECT rcept_dt, flag, report_nm, rcept_no FROM disclosure_event WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 20", cc),
         "reports": q(con, """SELECT m.pub_dt, m.source, m.publisher, m.analyst, m.title, m.url, m.opinion, m.target_price, m.old_target_price,
                              a.forecast_json, a.valuation_json, a.points_json, a.risks_json, a.memo_md
