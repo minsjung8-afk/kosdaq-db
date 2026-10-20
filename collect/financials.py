@@ -237,7 +237,9 @@ def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):
     if annual_years is None:
         annual_years = years
     plan = latest_interim_plan()
-    for cc in corp_codes:
+    cs = list(corp_codes)
+    quota = False
+    for i, cc in enumerate(cs, 1):
         for y in annual_years:
             try:
                 n = fetch_fin_raw(con, cc, str(y), "11011")
@@ -246,12 +248,22 @@ def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):
                 log(con, cc, f"fin_{y}", "ok" if n else "empty", f"{n} rows")
             except Exception as e:  # noqa
                 log(con, cc, f"fin_{y}", "fail", e)
-        if interim:
+                if "한도" in str(e):
+                    quota = True
+                    break
+        if not quota and interim:
             try:
                 r = fetch_latest_interim(con, cc, plan)
                 log(con, cc, "fin_interim", "ok" if r else "empty", str(r))
             except Exception as e:  # noqa
                 log(con, cc, "fin_interim", "fail", e)
+                if "한도" in str(e):
+                    quota = True
+        if quota:
+            print(f"[fin] DART 일일 한도 도달 — {i}/{len(cs)}에서 중단(내일 --new-only로 이어서)", flush=True)
+            break
+        if i % 100 == 0:
+            print(f"[fin] {i}/{len(cs)}", flush=True)
     try:
         backfill_rcept(con, set(corp_codes))
     except Exception as e:  # noqa

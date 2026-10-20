@@ -242,15 +242,25 @@ def fetch_events(con, corp_code, bgn_de, end_de):
 
 def run(corp_codes, bsns_year, event_from="20240101", event_to="20991231"):
     con = connect()
-    for cc in corp_codes:
+    cs = list(corp_codes)
+    for i, cc in enumerate(cs, 1):
+        quota = False
         for fn, name in ((fetch_business, "biz"), (fetch_audit_opinion, "audit"), (fetch_shareholders, "shr"), (fetch_minor_shareholders, "minor"),
                          (fetch_other_investments, "invest")):          # CB·BW는 mezz.py (DART 정기보고서 API에 CB/BW 없음 — cndlCapl*은 조건부자본증권)
             try:
                 fn(con, cc, str(bsns_year))
             except Exception as e:  # noqa
                 log(con, cc, name, "fail", e)
+                if "한도" in str(e):
+                    quota = True
+                    break
+        if quota:
+            print(f"[biz] DART 일일 한도 도달 — {i}/{len(cs)}에서 중단(내일 --new-only로 이어서)", flush=True)
+            break
         try:
             fetch_events(con, cc, event_from, event_to)
         except Exception as e:  # noqa
             log(con, cc, "events", "fail", e)
+        if i % 100 == 0:
+            print(f"[biz] {i}/{len(cs)}", flush=True)
     return con
