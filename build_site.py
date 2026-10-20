@@ -138,6 +138,7 @@ def _peers(con, c, ps):
         return []
     rows = q(con, """SELECT c.corp_code, c.stock_code, c.corp_name, p.mcap, k.revenue, k.op_income, k.op_margin, k.debt_ratio, k.ebitda, k.net_borrowings, k.bsns_year
                      FROM company c LEFT JOIN price_summary p ON p.stock_code=c.stock_code
+                       AND p.asof=(SELECT MAX(asof) FROM price_summary z WHERE z.stock_code=c.stock_code)
                      LEFT JOIN fin_kpi k ON k.corp_code=c.corp_code AND k.reprt_code='11011'
                        AND k.fs_div=(SELECT CASE WHEN EXISTS(SELECT 1 FROM fin_kpi x WHERE x.corp_code=c.corp_code AND x.fs_div='CFS' AND x.reprt_code='11011') THEN 'CFS' ELSE 'OFS' END)
                        AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi y WHERE y.corp_code=c.corp_code AND y.reprt_code='11011')
@@ -240,7 +241,7 @@ def _industry_stats(con):
                      FROM company c JOIN fin_kpi k ON k.corp_code=c.corp_code AND k.reprt_code='11011'
                      AND k.fs_div=(SELECT CASE WHEN EXISTS(SELECT 1 FROM fin_kpi x WHERE x.corp_code=c.corp_code AND x.fs_div='CFS' AND x.reprt_code='11011') THEN 'CFS' ELSE 'OFS' END)
                      AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi y WHERE y.corp_code=c.corp_code AND y.reprt_code='11011')""")
-    mc = {r["stock_code"]: r["mcap"] for r in q(con, "SELECT stock_code, mcap FROM price_summary")}
+    mc = {r["stock_code"]: r["mcap"] for r in q(con, "SELECT stock_code, mcap FROM price_summary ORDER BY asof")}   # 뒤(최신 asof)가 덮어씀
     code2stock = {r["corp_code"]: r["stock_code"] for r in q(con, "SELECT corp_code, stock_code FROM company")}
     stats = {}
     for r in rows:
