@@ -3,7 +3,7 @@
 import json
 import os
 
-from common import connect, now
+from common import connect, now, ztext
 
 PROMPT = """당신은 여신심사역이다. 아래는 상장사(코스피·코스닥·코넥스) 사업보고서 'II. 사업의 내용' 원문이다.
 심사 관점에서 다음 JSON 스키마로만 답하라(값이 없으면 null). 추정은 "추정"이라고 표시.
@@ -49,7 +49,7 @@ def run(corp_codes=None, bsns_year=None, force=False):
         print("ANTHROPIC_API_KEY 없음 - 요약 단계 건너뜀")
         return
     con = connect()
-    q = "SELECT corp_code, bsns_year, full_text FROM business WHERE full_text IS NOT NULL"
+    q = "SELECT corp_code, bsns_year, COALESCE(full_z, full_text) AS full_text FROM business WHERE (full_z IS NOT NULL OR full_text IS NOT NULL)"
     if not force:
         q += " AND summary_json IS NULL"
     for r in con.execute(q):
@@ -58,7 +58,7 @@ def run(corp_codes=None, bsns_year=None, force=False):
         if bsns_year and r["bsns_year"] != str(bsns_year):
             continue
         try:
-            js = summarize_text(r["full_text"])
+            js = summarize_text(ztext(r["full_text"]))
             con.execute("UPDATE business SET summary_json=?, summary_md=?, summarized_at=? WHERE corp_code=? AND bsns_year=?",
                         (json.dumps(js, ensure_ascii=False), js.get("summary_md"), now(), r["corp_code"], r["bsns_year"]))
             con.commit()

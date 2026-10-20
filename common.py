@@ -43,13 +43,45 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
                                            "interest_cover REAL", "borrow_dep REAL", "rcept_no TEXT",
                                            "cur_assets REAL", "cur_liab REAL", "receivables REAL", "inventory REAL", "capital REAL",
                                            "cur_ratio REAL", "recv_turn REAL", "inv_turn REAL", "nd_ebitda REAL")] + \
-                 [("fin_raw", "rcept_no TEXT"), ("business", "rating_text TEXT")]
+                 [("fin_raw", "rcept_no TEXT"), ("business", "rating_text TEXT"), ("business", "full_z BLOB")]
     for tbl, col in migrations:                                   # 기존 DB 마이그레이션
         try:
             con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")
         except sqlite3.OperationalError:
             pass
+    _compress_business(con)
     return con
+
+
+def zpack(text):
+    """긴 원문 → zlib BLOB (DB·아티팩트 용량 1/4)"""
+    import zlib
+    return zlib.compress(text.encode("utf-8"), 6) if text else None
+
+
+def ztext(v):
+    """full_z(BLOB) 또는 예전 full_text(str) → str"""
+    import zlib
+    if v is None:
+        return None
+    if isinstance(v, (bytes, memoryview)):
+        return zlib.decompress(bytes(v)).decode("utf-8")
+    return v
+
+
+def _compress_business(con):
+    """1회성: 기존 business.full_text(평문) → full_z(zlib)로 옮기고 평문은 비움"""
+    try:
+        n = con.execute("SELECT COUNT(*) FROM business WHERE full_text IS NOT NULL").fetchone()[0]
+    except sqlite3.OperationalError:
+        return
+    if not n:
+        return
+    rows = con.execute("SELECT corp_code, bsns_year, full_text FROM business WHERE full_text IS NOT NULL").fetchall()
+    con.executemany("UPDATE business SET full_z=?, full_text=NULL WHERE corp_code=? AND bsns_year=?",
+                    [(zpack(r["full_text"]), r["corp_code"], r["bsns_year"]) for r in rows])
+    con.commit()
+    print(f"[db] 사업내용 원문 {n}건 압축 저장(full_text → full_z)", flush=True)
 
 
 def log(con, corp_code, job, status, msg=""):

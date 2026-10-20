@@ -74,13 +74,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with: { name: kosdaq-db, path: kosdaq.db.gz, retention-days: 90, compression-level: 0 }
-      - name: prune old db artifacts   # 비공개 저장소 아티팩트 총량 500MB 제한 → 최신 3개만 유지
+      - name: prune old db artifacts   # 비공개 저장소 아티팩트 총량 500MB 제한 → 최신 2개(+마지막 성공)만 유지
         if: always()
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           LS=$(gh run list -w collect.yml -s success -L 1 --json databaseId -q '.[0].databaseId')   # 마지막 성공 실행은 항상 보존
           gh api --paginate "repos/${{ github.repository }}/actions/artifacts?name=kosdaq-db&per_page=100" -q '.artifacts[] | "\(.id) \(.created_at) \(.workflow_run.id)"' \
-            | sort -k2 -r | tail -n +4 | while read id dt rid; do
+            | sort -k2 -r | tail -n +3 | while read id dt rid; do
               if [ "$rid" != "${{ github.run_id }}" ] && [ "$rid" != "$LS" ]; then gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "삭제 $id ($dt)"; fi
             done || true
       - name: build site

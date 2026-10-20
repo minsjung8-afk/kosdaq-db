@@ -4,7 +4,7 @@ import io
 import re
 import zipfile
 
-from common import connect, dart_get, dart_get_binary, log, now, to_num
+from common import connect, dart_get, dart_get_binary, log, now, to_num, zpack
 
 EVENT_FLAGS = {
     "유상증자": "유상증자", "전환사채": "CB", "신주인수권부사채": "BW", "교환사채": "EB",
@@ -153,11 +153,11 @@ def fetch_business(con, corp_code, bsns_year):
     if not full:
         log(con, corp_code, f"biz_{bsns_year}", "fail", "사업의 내용 섹션 미검출")
         return False
-    con.execute("""INSERT INTO business (corp_code, bsns_year, rcept_no, reprt_code, overview_text, full_text,
+    con.execute("""INSERT INTO business (corp_code, bsns_year, rcept_no, reprt_code, overview_text, full_z,
         char_len, fetched_at, rating_text) VALUES (?,?,?,?,?,?,?,?,?)
         ON CONFLICT(corp_code, bsns_year) DO UPDATE SET rcept_no=excluded.rcept_no, overview_text=excluded.overview_text,
-        full_text=excluded.full_text, char_len=excluded.char_len, fetched_at=excluded.fetched_at, rating_text=excluded.rating_text""",
-                (corp_code, bsns_year, rcept_no, "11011", overview, full, len(full), now(), rating_text))
+        full_z=excluded.full_z, full_text=NULL, char_len=excluded.char_len, fetched_at=excluded.fetched_at, rating_text=excluded.rating_text""",
+                (corp_code, bsns_year, rcept_no, "11011", overview, zpack(full), len(full), now(), rating_text))
     con.commit()
     log(con, corp_code, f"biz_{bsns_year}", "ok", f"{len(full)} chars")
     return True
