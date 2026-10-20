@@ -42,7 +42,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
                  [("fin_kpi", c) for c in ("net_borrowings REAL", "da REAL", "ebitda REAL", "int_exp REAL",
                                            "interest_cover REAL", "borrow_dep REAL", "rcept_no TEXT",
                                            "cur_assets REAL", "cur_liab REAL", "receivables REAL", "inventory REAL", "capital REAL",
-                                           "cur_ratio REAL", "recv_turn REAL", "inv_turn REAL", "nd_ebitda REAL")] + \
+                                           "cur_ratio REAL", "recv_turn REAL", "inv_turn REAL", "nd_ebitda REAL",
+                                           "payables REAL", "nwc REAL", "net_margin REAL", "borrow_op REAL")] + \
                  [("fin_raw", "rcept_no TEXT"), ("business", "rating_text TEXT"), ("business", "full_z BLOB")]
     for tbl, col in migrations:                                   # 기존 DB 마이그레이션
         try:

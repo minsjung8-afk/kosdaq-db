@@ -22,6 +22,8 @@ KPI_MAP = {
     "receivables":  (["ifrs-full_TradeAndOtherCurrentReceivables", "ifrs-full_CurrentTradeReceivables"], ["매출채권", "매출채권및기타채권", "매출채권 및 기타채권", "매출채권및기타유동채권"]),
     "inventory":    (["ifrs-full_Inventories"], ["재고자산"]),
     "capital":      (["ifrs-full_IssuedCapital"], ["자본금"]),
+    "payables":     (["ifrs-full_TradeAndOtherCurrentPayables", "ifrs-full_TradeAndOtherPayables", "ifrs-full_TradeAndOtherCurrentPayablesToTradeSuppliers"],
+                     ["매입채무", "매입채무및기타채무", "매입채무 및 기타채무", "매입채무및기타유동채무", "매입채무및기타유동부채"]),
 }
 BORROW_KEYS = ["단기차입금", "장기차입금", "유동성장기부채", "유동성장기차입금", "사채", "전환사채", "신주인수권부사채",
                "리스부채", "유동리스부채", "비유동리스부채", "장기사채"]
@@ -93,7 +95,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             continue
         k = {}
         for key, (ids, names) in KPI_MAP.items():
-            sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash", "cur_assets", "cur_liab", "receivables", "inventory", "capital") else \
+            sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash", "cur_assets", "cur_liab", "receivables", "inventory", "capital", "payables") else \
                  ("CF",) if key in ("cfo", "dep", "amort", "rou_dep") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
         # 상각비: 계정명 패턴으로 재탐색 (합산 계정 '감가상각비와무형자산상각비' 우선, 없으면 감가+무형+사용권 합)
@@ -124,6 +126,10 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k["recv_turn"] = round(rev / k["receivables"], 1) if rev and k.get("receivables") else None       # 연환산은 사이트에서 분기 보정
         k["inv_turn"] = round(rev / k["inventory"], 1) if rev and k.get("inventory") else None
         k["nd_ebitda"] = round(k["net_borrowings"] / k["ebitda"], 1) if k.get("net_borrowings") is not None and k.get("ebitda") and k["ebitda"] > 0 else None
+        k["net_margin"] = round(k["net_income"] / rev * 100, 1) if k.get("net_income") is not None and rev else None
+        k["borrow_op"] = round(k["borrowings"] / k["op_income"], 1) if k.get("borrowings") is not None and k.get("op_income") and k["op_income"] > 0 else None   # 총차입금/영업이익(배), 적자면 N/A
+        k["nwc"] = ((k.get("receivables") or 0) + (k.get("inventory") or 0) - (k.get("payables") or 0)) \
+            if any(k.get(x) is not None for x in ("receivables", "inventory", "payables")) else None      # 순운전자본 근사(매출채권+재고−매입채무)
         rcept = next((r["rcept_no"] for r in rows if r.get("rcept_no")), None)
         if rcept is None:   # 기존 행에 저장된 접수번호 유지
             old = con.execute("SELECT rcept_no FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
@@ -132,15 +138,17 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         con.execute("""INSERT OR REPLACE INTO fin_kpi (corp_code, bsns_year, reprt_code, fs_div, revenue, op_income, net_income,
             total_assets, total_liab, equity, cash, borrowings, cfo, debt_ratio, op_margin, net_borrow_ratio,
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
-            cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
+            payables, nwc, net_margin, borrow_op)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
                      k.get("op_margin"), k.get("net_borrow_ratio"), k.get("net_borrowings"), k.get("da"),
                      k.get("ebitda"), ie, k.get("interest_cover"), k.get("borrow_dep"), rcept,
                      k.get("cur_assets"), k.get("cur_liab"), k.get("receivables"), k.get("inventory"), k.get("capital"),
-                     k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda")))
+                     k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda"),
+                     k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op")))
     con.commit()
 
 

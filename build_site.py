@@ -248,13 +248,15 @@ def company_detail(con, c):
                              "op_margin": _rank(st["op_margin"], last.get("op_margin")),
                              "cur_ratio": _rank(st["cur_ratio"], last.get("cur_ratio")),
                              "borrow_dep": _rank(st["borrow_dep"], last.get("borrow_dep"), lower_better=True),
+                             "net_margin": _rank(st.get("net_margin", []), last.get("net_margin")),
+                             "borrow_op": _rank(st.get("borrow_op", []), last.get("borrow_op"), lower_better=True),
                              "mcap": _rank(st["mcap"], (d["price_summary"] or {}).get("mcap"))}
     return d
 
 
 def _industry_stats(con):
     """(시장, KSIC 중분류)별 최근 연간 지표 분포 → 백분위 계산용 정렬 리스트"""
-    rows = q(con, """SELECT c.corp_code, c.market, substr(c.induty_code,1,2) AS ind, k.debt_ratio, k.op_margin, k.cur_ratio, k.borrow_dep
+    rows = q(con, """SELECT c.corp_code, c.market, substr(c.induty_code,1,2) AS ind, k.debt_ratio, k.op_margin, k.cur_ratio, k.borrow_dep, k.net_margin, k.borrow_op
                      FROM company c JOIN fin_kpi k ON k.corp_code=c.corp_code AND k.reprt_code='11011'
                      AND k.fs_div=(SELECT CASE WHEN EXISTS(SELECT 1 FROM fin_kpi x WHERE x.corp_code=c.corp_code AND x.fs_div='CFS' AND x.reprt_code='11011') THEN 'CFS' ELSE 'OFS' END)
                      AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi y WHERE y.corp_code=c.corp_code AND y.reprt_code='11011')""")
@@ -262,8 +264,8 @@ def _industry_stats(con):
     code2stock = {r["corp_code"]: r["stock_code"] for r in q(con, "SELECT corp_code, stock_code FROM company")}
     stats = {}
     for r in rows:
-        d = stats.setdefault((r["market"], r["ind"]), {"debt_ratio": [], "op_margin": [], "cur_ratio": [], "borrow_dep": [], "mcap": []})
-        for k in ("debt_ratio", "op_margin", "cur_ratio", "borrow_dep"):
+        d = stats.setdefault((r["market"], r["ind"]), {"debt_ratio": [], "op_margin": [], "cur_ratio": [], "borrow_dep": [], "net_margin": [], "borrow_op": [], "mcap": []})
+        for k in ("debt_ratio", "op_margin", "cur_ratio", "borrow_dep", "net_margin", "borrow_op"):
             if r[k] is not None:
                 d[k].append(r[k])
         m = mc.get(code2stock.get(r["corp_code"]))
