@@ -366,13 +366,13 @@ async function open(code){
      const days=ps.avg_vol_3m?Math.ceil(100000000/ps.avg_vol_3m):null; const mr=d.major_reports||[];
      const bar=(lb,v,w,col,cls)=>`<b>${lb}</b><div class="bar2"><i style="width:${Math.max(0,Math.min(100,w)).toFixed(0)}%;background:${col}"></i></div><span class="${cls||''}">${v==null?'미수집':num(Math.round(v))}</span>`;
      const base=Math.max(ps.close||0,avg60||0,ps.high_52w||0)||1;
-     h+=`<div class="cap2" style="margin:14px 0 6px">담보 · 주식담보 참고치 <span class="src" style="font-weight:400">시세 ${ps.asof||''} · KRX 대용가 · DART 대량보유 보고</span></div>
+     h+=`<div class="cap2" style="margin:14px 16px 6px">담보 · 주식담보 참고치 <span class="src" style="font-weight:400">시세 ${ps.asof||''} · KRX 대용가 · DART 대량보유 보고</span></div>
      <div class="mat">
       <div class="c"><b>현재가 / 60일 평균</b><span>${num(ps.close)} / ${avg60?num(Math.round(avg60)):'-'}원</span><small>${avg60?'평균 대비 '+((ps.close/avg60-1)*100).toFixed(1)+'%':''}</small></div>
       <div class="c"><b>일평균 거래대금 (3M)</b><span>${억(ps.avg_value_3m)}억</span><small>${days?'1억주 환가 소요 ≈ '+num(days)+'거래일':''}</small></div>
       <div class="c ${ps.vol_60d>70?'hot':''}"><b>변동성 (60일 연율)</b><span>${pct(ps.vol_60d)}</span><small>${ps.vol_60d>70?'고변동':''}</small></div>
       <div class="c"><b>52주 고 / 저</b><span>${num(ps.high_52w)} / ${num(ps.low_52w)}</span><small>${ps.high_52w?'현재가는 고점 대비 '+((ps.close/ps.high_52w-1)*100).toFixed(0)+'%':''}</small></div></div>
-     <div class="g2c" style="margin:10px 0 0"><div><div class="cap2">담보인정 시뮬레이션 (1주당)</div><div class="ltv">
+     <div class="g2c" style="margin:10px 16px 0"><div><div class="cap2">담보인정 시뮬레이션 (1주당)</div><div class="ltv">
       ${bar('현재가',ps.close,ps.close/base*100,'var(--navy2)')}${bar('60일 평균가',avg60,(avg60||0)/base*100,'var(--navy2)')}
       ${bar('대용가 (KRX)',sub,(sub||0)/base*100,'var(--mute)')}${bar('담보가 (대용가×90%)',colv,(colv||0)/base*100,'var(--gold)')}
       ${bar('52주 최저',ps.low_52w,(ps.low_52w||0)/base*100,'var(--bad)','bad')}</div>${sub?'':'<div class="src" style="margin-top:4px">대용가는 KRX 일별 공표값 — 수집 연결 전</div>'}</div>
