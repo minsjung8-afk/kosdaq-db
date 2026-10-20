@@ -104,6 +104,33 @@ def _valuation(kpi, ps):
 IND_STATS = {}
 
 
+
+_NAME_IDX = None
+def _norm_name(n):
+    return re.sub(r"\(주\)|㈜|주식회사|\(유\)|\s+", "", n or "").strip()
+
+def _eb_target(con, c, rows):
+    """EB(교환사채)는 교환대상 주식 기준으로 내가격/외가격을 봐야 함. 교환대상이 자기주식이면 발행사 주가,
+    타사 상장주식이면 그 회사의 최근 종가를 ex_close로 붙인다(비상장·미매칭이면 ex_close 없음 → 화면에서 판단 보류)."""
+    global _NAME_IDX
+    for r in rows:
+        if r.get("kind") != "EB":
+            continue
+        tgt = r.get("stock_knd") or ""
+        r["ex_tgt"] = tgt
+        if "자기주식" in tgt or "자사주" in tgt or (_norm_name(c["corp_name"]) and _norm_name(c["corp_name"]) in _norm_name(tgt)):
+            r["ex_self"] = 1
+            continue
+        if _NAME_IDX is None:
+            _NAME_IDX = {_norm_name(x["corp_name"]): x["stock_code"] for x in q(con, "SELECT corp_name, stock_code FROM company")}
+        key = _norm_name(re.sub(r"보통주|우선주|기명식|주권|\d+주", "", tgt))
+        sc2 = _NAME_IDX.get(key) or next((v for k, v in _NAME_IDX.items() if len(k) >= 2 and (k in key or key in k)), None)
+        if sc2:
+            px = q(con, "SELECT dt, close FROM price_daily WHERE stock_code=? AND close>0 ORDER BY dt DESC LIMIT 1", sc2)
+            if px:
+                r["ex_code"], r["ex_close"], r["ex_asof"] = sc2, px[0]["close"], px[0]["dt"]
+    return rows
+
 def _peers(con, c, ps):
     """같은 시장·KSIC 중분류 내 시총이 가장 가까운 3곳 (최근 연간 KPI 비교)"""
     ind = (c.get("induty_code") or "")[:2]
@@ -178,7 +205,7 @@ def company_detail(con, c):
         "forecast_vs_actual": _fva(con, sc),
         "conv_bonds": [],
         "mezz_out": q(con, "SELECT * FROM mezz_outstanding WHERE corp_code=? ORDER BY kind, exprd_dd", cc),
-        "mezz_issue": q(con, "SELECT * FROM mezz_issue WHERE corp_code=? ORDER BY COALESCE(bddd, pymd, rcept_no) DESC", cc),
+        "mezz_issue": _eb_target(con, c, q(con, "SELECT * FROM mezz_issue WHERE corp_code=? ORDER BY COALESCE(bddd, pymd, rcept_no) DESC", cc)),
         "news": q(con, "SELECT dt, title, source, url FROM news WHERE corp_code=? ORDER BY dt DESC LIMIT 60", cc),
         "peers": _peers(con, c, ps[0] if ps else None),
         "other_invest": q(con, "SELECT * FROM other_invest WHERE corp_code=? AND bsns_year=(SELECT MAX(bsns_year) FROM other_invest WHERE corp_code=?) ORDER BY trmend_book_amt DESC LIMIT 8", cc, cc),

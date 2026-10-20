@@ -62,13 +62,12 @@ def extract_put_call(xml_text, pymd=None):
         ds = [x for x in ds if not pymd or x > pymd]
         put_dt = min(ds) if ds else None
         m1 = re.search(r"발행일로부터\s*(\d+)\s*(개월|년)", put)
-        m2 = re.search(r"매\s*(\d+)\s*개월", put)
-        parts = []
-        if m1:
-            parts.append(f"발행일+{m1.group(1)}{m1.group(2)}")
-        if m2:
-            parts.append(f"이후 매 {m2.group(1)}개월")
-        put_txt = " ".join(parts) or put[:120]
+        if not put_dt and m1 and pymd:                      # 날짜가 없고 '발행일로부터 N개월'만 있으면 납입일 기준 계산
+            y, mo, d = map(int, pymd.split("-"))
+            n = int(m1.group(1)) * (12 if m1.group(2) == "년" else 1)
+            y, mo = y + (mo - 1 + n) // 12, (mo - 1 + n) % 12 + 1
+            put_dt = f"{y}-{mo:02d}-{min(d, 28):02d}"
+        put_txt = f"발행일+{m1.group(1)}{m1.group(2)}" if m1 else (put_dt or put[:80])   # 행사 시작 시점만(주기 생략)
     call = section(["매도청구권", "Call Option", "콜옵션"], 600)
     call_txt = None
     if call and "해당사항 없음" not in call[:200] and "해당 사항 없음" not in call[:200]:
@@ -246,6 +245,9 @@ def run(corp_codes=None, years=3, new_only=False):
                 log(con, cc, "mezz_issue", "ok")
             except Exception as e:  # noqa
                 log(con, cc, "mezz_issue", "fail", e)
+                if "한도" in str(e):
+                    print(f"[mezz] DART 일일 한도 도달 — {i}/{len(cs)}에서 중단(내일 --new-only로 이어서)", flush=True)
+                    break
         try:
             n = fetch_outstanding(con, cc)
             if n > 0:
@@ -253,6 +255,9 @@ def run(corp_codes=None, years=3, new_only=False):
             log(con, cc, "mezz", "ok", n)
         except Exception as e:  # noqa
             log(con, cc, "mezz", "fail", e)
+            if "한도" in str(e):
+                print(f"[mezz] DART 일일 한도 도달 — {i}/{len(cs)}에서 중단(내일 --new-only로 이어서)", flush=True)
+                break
         if i % 100 == 0:
             print(f"[mezz] {i}/{len(cs)}, 발행결정 {iss}건, 미상환 보유 {outs}사", flush=True)
     log(con, "-", "mezz", "ok", f"{len(cs)} companies / issues {iss} / outstanding {outs}")
