@@ -285,7 +285,7 @@ def _rank(sorted_vals, v, lower_better=False):
         rank = bisect.bisect_left(sorted_vals, v) + 1          # 자기보다 작은 값의 수 + 1
     else:
         rank = (n - bisect.bisect_right(sorted_vals, v)) + 1   # 자기보다 큰 값의 수 + 1
-    return {"rank": min(rank, n), "n": n}
+    return {"rank": min(rank, n), "n": n, "v": v}
 
 
 def _flags(c, kpi, ps, audit, events, ratings):
