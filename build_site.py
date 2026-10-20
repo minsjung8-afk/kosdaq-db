@@ -73,6 +73,53 @@ def _ltm(rows):
     return out, label
 
 
+
+def _quarters(con, cc):
+    """fin_kpi의 연간·분기(누적) 행에서 분기별 손익을 복원 → 최근 최대 8분기 [{label, rev, op, nd, ltm_rev, ltm_op, ltm_ebitda}].
+    1Q=1Q누적, 2Q=반기−1Q, 3Q=3Q누적−반기, 4Q=연간−3Q누적. 누락 분기는 None. LTM은 연속 4분기 합(없으면 None)."""
+    out = {}
+    for fs in ("CFS", "OFS"):
+        rows = q(con, "SELECT bsns_year, reprt_code, revenue, op_income, ebitda, net_borrowings FROM fin_kpi WHERE corp_code=? AND fs_div=? ORDER BY bsns_year, reprt_code", cc, fs)
+        if not rows:
+            continue
+        by = {(r["bsns_year"], r["reprt_code"]): r for r in rows}
+        years = sorted({r["bsns_year"] for r in rows})
+        qs = []
+        for y in years:
+            cum = {"1": by.get((y, "11013")), "2": by.get((y, "11012")), "3": by.get((y, "11014")), "4": by.get((y, "11011"))}
+            prevc = None
+            for qn in ("1", "2", "3", "4"):
+                r = cum[qn]
+                if r is None:
+                    prevc = None if qn != "1" else prevc
+                    qs.append({"label": f"{y[2:]}.{qn}Q", "rev": None, "op": None, "ebitda": None, "nd": None, "_y": y, "_q": qn})
+                    continue
+                def diff(k):
+                    if r[k] is None:
+                        return None
+                    if qn == "1":
+                        return r[k]
+                    if prevc is None or prevc[k] is None:
+                        return None
+                    return r[k] - prevc[k]
+                qs.append({"label": f"{y[2:]}.{qn}Q", "rev": diff("revenue"), "op": diff("op_income"), "ebitda": diff("ebitda"), "nd": r["net_borrowings"], "_y": y, "_q": qn})
+                prevc = r
+        # 뒤에서부터 값 있는 분기만 남기되 순서 유지, 최근 8개
+        while qs and qs[-1]["rev"] is None:
+            qs.pop()
+        qs = qs[-8:]
+        for i, qx in enumerate(qs):
+            win = qs[i - 3:i + 1] if i >= 3 else []
+            if len(win) == 4 and all(w["rev"] is not None and w["op"] is not None for w in win):
+                qx["ltm_rev"] = sum(w["rev"] for w in win); qx["ltm_op"] = sum(w["op"] for w in win)
+                qx["ltm_ebitda"] = sum(w["ebitda"] for w in win) if all(w["ebitda"] is not None for w in win) else None
+            else:
+                qx["ltm_rev"] = qx["ltm_op"] = qx["ltm_ebitda"] = None
+            qx.pop("_y", None); qx.pop("_q", None)
+        if any(qx["rev"] is not None for qx in qs):
+            out[fs] = qs
+    return out
+
 def _valuation(kpi, ps):
     rows = kpi.get("CFS") or kpi.get("OFS") or []
     if not rows or not ps or not ps.get("mcap"):
@@ -206,6 +253,8 @@ def company_detail(con, c):
                      "dart_url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={b['rcept_no']}" if b.get("rcept_no") else None,
                      "overview": (b.get("overview_text") or "")[:4000], "summary": json.loads(b["summary_json"]) if b.get("summary_json") else None},
         "kpi": kpi,
+        "quarters": _quarters(con, cc),
+        "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
         "valuation": _valuation(kpi, ps[0] if ps else None),
         "flags": None,   # 아래에서 채움

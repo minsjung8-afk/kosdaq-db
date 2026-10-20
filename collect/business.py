@@ -223,6 +223,18 @@ def fetch_other_investments(con, corp_code, bsns_year):
     con.commit()
 
 
+
+def fetch_major_reports(con, corp_code, bsns_year=None):
+    """DART 대량보유상황보고(majorstock): 5% 이상 보고자의 보유·증감·주요체결약정(담보제공 등) 비율. 1콜."""
+    js = dart_get("majorstock", corp_code=corp_code)
+    for r in js.get("list", []):
+        dt = r.get("rcept_dt") or ""
+        con.execute("INSERT OR REPLACE INTO major_report VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (corp_code, r.get("rcept_no"), f"{dt[:4]}-{dt[4:6]}-{dt[6:8]}" if len(dt) == 8 else dt, r.get("repror"), r.get("report_tp"),
+                     r.get("report_resn"), to_num(r.get("stkqy")), to_num(r.get("stkqy_irds")), to_num(r.get("stkrt")),
+                     to_num(r.get("stkrt_irds")), to_num(r.get("ctr_stkqy")), to_num(r.get("ctr_stkrt")), now()))
+    con.commit()
+
 def fetch_events(con, corp_code, bgn_de, end_de):
     """공시목록에서 심사 관점 키워드 공시만 적재"""
     page = 1
@@ -246,7 +258,7 @@ def run(corp_codes, bsns_year, event_from="20240101", event_to="20991231"):
     for i, cc in enumerate(cs, 1):
         quota = False
         for fn, name in ((fetch_business, "biz"), (fetch_audit_opinion, "audit"), (fetch_shareholders, "shr"), (fetch_minor_shareholders, "minor"),
-                         (fetch_other_investments, "invest")):          # CB·BW는 mezz.py (DART 정기보고서 API에 CB/BW 없음 — cndlCapl*은 조건부자본증권)
+                         (fetch_other_investments, "invest"), (fetch_major_reports, "major")):          # CB·BW는 mezz.py (DART 정기보고서 API에 CB/BW 없음 — cndlCapl*은 조건부자본증권)
             try:
                 fn(con, cc, str(bsns_year))
             except Exception as e:  # noqa

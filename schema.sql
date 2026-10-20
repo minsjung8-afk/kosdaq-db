@@ -278,3 +278,9 @@ CREATE TABLE IF NOT EXISTS mezz_outstanding (
     face_amt REAL, cv_rt REAL, cv_prc REAL, remndr_amt REAL, remndr_stock REAL, period TEXT, fetched_at TEXT
 );
 CREATE TABLE IF NOT EXISTS mezz_checked (corp_code TEXT, rcept_no TEXT, report_nm TEXT, at TEXT, PRIMARY KEY (corp_code, rcept_no));
+
+CREATE TABLE IF NOT EXISTS major_report (   -- 주식등의 대량보유상황보고(5% 룰) — DART majorstock
+    corp_code TEXT, rcept_no TEXT, rcept_dt TEXT, repror TEXT, report_tp TEXT, report_resn TEXT,
+    stkqy REAL, stkqy_irds REAL, stkrt REAL, stkrt_irds REAL, ctr_stkqy REAL, ctr_stkrt REAL, fetched_at TEXT,
+    PRIMARY KEY (corp_code, rcept_no)
+);

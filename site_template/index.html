@@ -101,6 +101,12 @@ table.fin th.col.cur{color:var(--gold-soft)}table.fin th.col small{color:#c5d0e4
 .summary{max-width:80ch;white-space:pre-wrap;background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:11px 15px;line-height:1.7;font-size:12.5px}
 .summary ul{margin:6px 0;padding-left:18px}
 .src{font-size:11.5px;color:var(--mute)} .src a{color:var(--navy2)}
+section>h3{cursor:pointer;user-select:none}section>h3::after{content:'▾';float:right;opacity:.7;font-size:12px}section.fold>h3::after{content:'▸'}section.fold>*:not(h3){display:none}section.fold{padding-bottom:0}section.fold>h3{margin-bottom:0}
+.mat{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px}.mat .c{background:#fbfcfe;border:1px solid var(--line);border-radius:8px;padding:8px 10px;text-align:center}.mat .c b{display:block;font-size:11px;color:var(--ink2);font-weight:600}.mat .c span{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}.mat .c small{display:block;font-size:10.5px;color:var(--mute)}.mat .c.hot{border-color:#f0c9ae;background:var(--warn-bg)}.mat .c.hot span{color:var(--warn)}
+.ltv{display:grid;grid-template-columns:130px 1fr 80px;gap:4px 10px;align-items:center;font-size:12px;margin-top:6px}.ltv .bar2{height:14px;background:var(--nbg);border-radius:4px;position:relative;overflow:hidden}.ltv .bar2 i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}.ltv b{font-weight:600;color:var(--ink2)}.ltv span{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}.ltv span.bad{color:var(--bad)}
+.g2c{display:grid;grid-template-columns:1fr 1fr;gap:12px}.g2c .full{grid-column:1/-1}.g2c>div{margin:0}@media (max-width:1100px){.g2c{grid-template-columns:1fr}}
+.cap2{font-size:12px;font-weight:800;color:var(--navy);margin:0 0 6px;display:flex;align-items:center;gap:7px}.cap2::before{content:'';width:14px;height:2px;background:var(--gold)}
+.warn{color:var(--warn);font-weight:700}
 tr.lnk{cursor:pointer}tr.lnk:hover td{background:var(--nbg2)!important}
 .biz{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 16px}.biz .full{grid-column:1/-1}.biz>div{margin:0}
 table.lbl td:first-child{width:130px;font-weight:600;color:var(--navy2);background:var(--nbg)!important;white-space:nowrap}table.lbl td{line-height:1.6;vertical-align:top}
@@ -227,6 +233,24 @@ async function open(code){
   if(d.audit.length) h+=`<div class="twrap" style="margin-top:10px"><table><tr><th>연도</th><th>감사인</th><th>의견</th><th>강조사항</th><th>핵심감사사항</th></tr>${d.audit.map(a=>`<tr><td>${a.bsns_year}</td><td>${esc(a.adtor||'-')}</td><td><span class="pill ${opClass(a.adt_opinion)}">${esc(a.adt_opinion||'-')}</span></td><td>${esc(a.emphs_matter||'-')}</td><td>${esc(a.core_adt_matter||'-')}</td></tr>`).join('')}</table></div>`;
   if((d.ratings||[]).length){ h+=`<div class="src" style="margin-top:12px">신용등급 추이 (최근 3년, 금감원 신용평가서 공시)</div><div class="twrap"><table><tr><th>공시일</th><th>평가사</th><th>평가대상</th><th>구분</th><th>등급</th><th>전망/감시</th><th>평가서</th></tr>${d.ratings.slice(0,15).map(r=>`<tr${r.file_url?` class="lnk" onclick="window.open('${esc(r.file_url)}','_blank','noopener')" title="금감원 신용평가서 열기"`:''}><td>${r.disc_dt}</td><td>${esc(r.agency)}</td><td>${esc(r.target_type||'')}</td><td>${esc(r.eval_kind||'')}</td><td><b>${esc(r.grade)}</b></td><td>${esc([r.outlook,r.watch].filter(Boolean).join(' / ')||'-')}</td><td>${r.file_url?`<a href="${esc(r.file_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ↗</a>`:'<span class="src">-</span>'}</td></tr>`).join('')}</table></div>`; }
   else if(d.rating_text){ h+=`<div class="src" style="margin-top:12px">신용등급 — 공시 등급 없음 · 사업보고서 '신용평가에 관한 사항' 발췌</div><div class="summary" style="font-size:13px">${esc(d.rating_text.slice(0,1500))}</div>`; }
+  // 최근 8분기 추이 · LTM (분기 데이터가 있는 만큼 표시; 2년치 분기 수집 후 8분기)
+  {const fs=d.kpi.CFS?'CFS':d.kpi.OFS?'OFS':null; const qs=(d.quarters&&d.quarters[fs])||[];
+   if(qs.length>=2){
+     const W=1100,H=280,L=60,R=70,T=24,B=36,n=qs.length,gw=(W-L-R)/n; const mx=Math.max(...qs.map(q=>q.rev||0))*1.15||1; const mo=Math.max(...qs.map(q=>Math.abs(q.op||0)))*1.2||1;
+     const ndv=qs.map(q=>q.nd).filter(v=>v!=null); const ndmx=ndv.length?Math.max(...ndv.map(Math.abs))*1.1||1:1;
+     const sc=v=>(H-B)-(v/mx)*(H-B-T), sco=v=>(H-B)-((v+mo)/(2*mo))*(H-B-T), scn=v=>(H-B)-(v/ndmx)*(H-B-T);
+     let g=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="background:#fff;border:1px solid var(--line);border-radius:8px">`;
+     for(let i=0;i<5;i++){const y=T+i*(H-B-T)/4; g+=`<line x1="${L}" y1="${y}" x2="${W-R}" y2="${y}" stroke="#eef1f6"/>`;}
+     qs.forEach((q,i)=>{const x=L+i*gw; if(q.rev!=null){g+=`<rect x="${(x+gw*0.15).toFixed(0)}" y="${sc(q.rev).toFixed(0)}" width="${(gw*0.42).toFixed(0)}" height="${((H-B)-sc(q.rev)).toFixed(0)}" fill="#2a4f80" rx="2"/><text x="${(x+gw*0.36).toFixed(0)}" y="${(sc(q.rev)-4).toFixed(0)}" font-size="10" text-anchor="middle" fill="#2a4f80" font-weight="700">${억(q.rev)}</text>`;}
+       if(q.op!=null){const col=q.op>=0?'#1a7d5a':'#b91c1c'; const y0=Math.min(sco(q.op),sco(0)), hh=Math.abs(sco(q.op)-sco(0)); g+=`<rect x="${(x+gw*0.6).toFixed(0)}" y="${y0.toFixed(0)}" width="${(gw*0.25).toFixed(0)}" height="${Math.max(hh,2).toFixed(0)}" fill="${col}" rx="2"/><text x="${(x+gw*0.72).toFixed(0)}" y="${(q.op>=0?sco(q.op)-4:sco(q.op)+12).toFixed(0)}" font-size="10" text-anchor="middle" fill="${col}" font-weight="700">${억(q.op)}</text>`;}
+       g+=`<text x="${(x+gw/2).toFixed(0)}" y="${H-B+16}" font-size="11" text-anchor="middle" fill="#4a5570">${q.label}</text>`;});
+     const pts=qs.map((q,i)=>q.nd==null?null:`${(L+i*gw+gw/2).toFixed(0)},${scn(q.nd).toFixed(0)}`).filter(Boolean);
+     if(pts.length>1){g+=`<polyline points="${pts.join(' ')}" fill="none" stroke="#b8862f" stroke-width="2.5"/>`; qs.forEach((q,i)=>{if(q.nd!=null) g+=`<circle cx="${(L+i*gw+gw/2).toFixed(0)}" cy="${scn(q.nd).toFixed(0)}" r="3.5" fill="#b8862f"/>`;}); const lq=[...qs].reverse().find(q=>q.nd!=null); g+=`<text x="${W-R+6}" y="${(scn(lq.nd)+4).toFixed(0)}" font-size="11" fill="#b8862f" font-weight="700">순차입금 ${억(lq.nd)}</text>`;}
+     g+=`<rect x="${L}" y="${T-14}" width="10" height="10" fill="#2a4f80"/><text x="${L+14}" y="${T-5}" font-size="11" fill="#4a5570">분기 매출(억)</text><rect x="${L+110}" y="${T-14}" width="10" height="10" fill="#1a7d5a"/><text x="${L+124}" y="${T-5}" font-size="11" fill="#4a5570">분기 영업이익(억, 적자 적색)</text><line x1="${L+300}" y1="${T-9}" x2="${L+320}" y2="${T-9}" stroke="#b8862f" stroke-width="2.5"/><text x="${L+326}" y="${T-5}" font-size="11" fill="#4a5570">순차입금(억)</text></svg>`;
+     const lt=qs.filter(q=>q.ltm_rev!=null);
+     h+=`<div class="src" style="margin-top:12px">최근 ${qs.length}분기 추이 · LTM (${fs==='CFS'?'연결':'별도'} · 억원${qs.length<8?' · 분기 2년치 수집 후 8분기로 확장':''})</div>${g}`;
+     if(lt.length) h+=`<div class="twrap" style="margin-top:6px"><table class="fin"><tr><th>LTM(최근 4분기 합산)</th>${lt.map(q=>`<th class="n">${q.label}</th>`).join('')}</tr><tr><td>매출액</td>${lt.map(q=>`<td class="n">${억(q.ltm_rev)}</td>`).join('')}</tr><tr><td>영업이익</td>${lt.map(q=>`<td class="n ${q.ltm_op<0?'neg':''}">${억(q.ltm_op)}</td>`).join('')}</tr><tr><td>영업이익률</td>${lt.map(q=>`<td class="n">${q.ltm_rev?(q.ltm_op/q.ltm_rev*100).toFixed(1)+'%':'-'}</td>`).join('')}</tr><tr><td>순차입금/LTM EBITDA</td>${lt.map(q=>`<td class="n">${q.nd!=null&&q.ltm_ebitda>0?(q.nd/q.ltm_ebitda).toFixed(1)+'x':'-'}</td>`).join('')}</tr></table></div>`;
+   } else h+=`<div class="src" style="margin-top:12px">최근 8분기 추이 · LTM — 분기 재무 수집 후 표시</div>`;}
   const sh=d.shareholders||{};
   if((sh.top||[]).length){ h+=`<div class="src" style="margin-top:12px">주요 주주 (${sh.year} 사업보고서 기준, 지분율 상위 5명 · 최대주주측 ${sh.n}명)</div>
     <div class="twrap"><table><tr><th>주주</th><th>구분</th><th class="n">주식수</th><th class="n">지분율</th></tr>${sh.top.map(r=>`<tr><td>${esc(r.nm)}</td><td>${r.ins?esc(r.relate):`<span class="pill">${esc(r.relate)}</span>`}</td><td class="n">${num(r.co)}</td><td class="n">${pct(r.rt)}</td></tr>`).join('')}
@@ -293,8 +317,13 @@ async function open(code){
   h+=`</section>`;
   // 3-1 기발행 메자닌 (CB·BW·EB·종류주식): 미상환 현황(정기보고서) + 발행결정(주요사항보고서)을 회차로 합쳐 한 표
   {
+  // 3-1 차입금·우발채무·계열 (사업보고서 주석·DART 공시 — 수집 전까지 안내)
+  {const dl=d.debt_detail, cg=d.contingent, gr=d.group;
+   h+=`<section data-sec="3-1"><h3>3-1. 차입금 · 우발채무 · 계열 <small>사업보고서 주석 · DART 공시</small></h3>`;
+   if(!dl&&!cg&&!gr) h+=`<div class="src" style="padding:4px 0 2px">차입금 만기구조 · 금융기관별 차입 · 우발채무(보증·담보·소송·약정) · 계열 지배구조 — <b>수집 예정</b>(사업보고서 주석 파싱 + DART 계열회사 API). 현재는 3. 재무현황의 총차입금·순차입금과 5. 공시 타임라인의 담보제공·소송 키워드를 참고하세요.</div>`;
+   h+=`</section>`;}
     const mo=d.mezz_out||[], mi=d.mezz_issue||[];
-    h+=`<section><h3>3-1. 기발행 메자닌 (CB · BW · EB · 종류주식)</h3>`;
+    h+=`<section><h3>3-2. 기발행 메자닌 (CB · BW · EB · 종류주식)</h3>`;
     if(!mo.length&&!mi.length) h+=`<div class="src">미상환 메자닌 없음 · 최근 3년 발행결정 공시 없음 (미수집이면 ‘mezz’ 실행 필요)</div>`;
     else{
       const tmOf=t=>{const m=String(t||'').match(/(\d+)\s*회|^(\d+)$/); return m?(m[1]||m[2]):null;};
@@ -314,7 +343,7 @@ async function open(code){
     }
     h+=`</section>`;
   }
-  if((d.other_invest||[]).length){ h+=`<section><h3>3-2. 타법인 출자 (최근 사업보고서, 장부가 상위)</h3><div class="twrap"><table><tr><th>출자회사</th><th>목적</th><th>최초취득</th><th class="n">지분율</th><th class="n">장부가(억)</th><th class="n">피출자사 순이익(억)</th></tr>${d.other_invest.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.purpose||'-')}</td><td>${esc(r.acqs_de||'-')}</td><td class="n">${pct(r.trmend_qota_rt)}</td><td class="n">${억(r.trmend_book_amt)}</td><td class="n ${r.recent_ni<0?'neg':''}">${억(r.recent_ni)}</td></tr>`).join('')}</table></div></section>`;}
+  if((d.other_invest||[]).length){ h+=`<section><h3>3-3. 타법인 출자 (최근 사업보고서, 장부가 상위)</h3><div class="twrap"><table><tr><th>출자회사</th><th>목적</th><th>최초취득</th><th class="n">지분율</th><th class="n">장부가(억)</th><th class="n">피출자사 순이익(억)</th></tr>${d.other_invest.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.purpose||'-')}</td><td>${esc(r.acqs_de||'-')}</td><td class="n">${pct(r.trmend_qota_rt)}</td><td class="n">${억(r.trmend_book_amt)}</td><td class="n ${r.recent_ni<0?'neg':''}">${억(r.recent_ni)}</td></tr>`).join('')}</table></div></section>`;}
   // 4 주가
   h+=`<section><h3>4. 주가추이 · 담보가치 참고</h3>`;
   if(d.prices.length){
@@ -326,7 +355,24 @@ async function open(code){
       <b>종가</b><span>${num(ps.close)}원</span><b>액면가</b><span>${c.parval?num(c.parval)+'원':'-'}</span>
       <b>52주 최고</b><span>${num(ps.high_52w)}원</span><b>52주 최저</b><span>${num(ps.low_52w)}원</span>
       <b>시가총액</b><span>${억(ps.mcap)}억</span><b>발행주식수</b><span>${num(ps.shares_out)}주</span>
-      <b>3M 평균거래량</b><span>${num(Math.round(ps.avg_vol_3m||0))}주 <span class="src">(거래대금 ${억(ps.avg_value_3m)}억/일)</span></span><b>변동성 (60일, 연율)</b><span>${pct(ps.vol_60d)}</span></div>`;}
+      <b>3M 평균거래량</b><span>${num(Math.round(ps.avg_vol_3m||0))}주 <span class="src">(거래대금 ${억(ps.avg_value_3m)}억/일)</span></span><b>변동성 (60일, 연율)</b><span>${pct(ps.vol_60d)}</span></div>`;
+    // 담보 · 주식담보 참고치
+    {const px=(d.prices||[]).slice(-60); const avg60=px.length?px.reduce((a,r)=>a+r[4],0)/px.length:null; const sub=ps.subst_price; const colv=sub?sub*0.9:null;
+     const days=ps.avg_vol_3m?Math.ceil(100000000/ps.avg_vol_3m):null; const mr=d.major_reports||[];
+     const bar=(lb,v,w,col,cls)=>`<b>${lb}</b><div class="bar2"><i style="width:${Math.max(0,Math.min(100,w)).toFixed(0)}%;background:${col}"></i></div><span class="${cls||''}">${v==null?'미수집':num(Math.round(v))}</span>`;
+     const base=Math.max(ps.close||0,avg60||0,ps.high_52w||0)||1;
+     h+=`<div class="cap2" style="margin:14px 0 6px">담보 · 주식담보 참고치 <span class="src" style="font-weight:400">시세 ${ps.asof||''} · KRX 대용가 · DART 대량보유 보고</span></div>
+     <div class="mat">
+      <div class="c"><b>현재가 / 60일 평균</b><span>${num(ps.close)} / ${avg60?num(Math.round(avg60)):'-'}원</span><small>${avg60?'평균 대비 '+((ps.close/avg60-1)*100).toFixed(1)+'%':''}</small></div>
+      <div class="c"><b>일평균 거래대금 (3M)</b><span>${억(ps.avg_value_3m)}억</span><small>${days?'1억주 환가 소요 ≈ '+num(days)+'거래일':''}</small></div>
+      <div class="c ${ps.vol_60d>70?'hot':''}"><b>변동성 (60일 연율)</b><span>${pct(ps.vol_60d)}</span><small>${ps.vol_60d>70?'고변동':''}</small></div>
+      <div class="c"><b>52주 고 / 저</b><span>${num(ps.high_52w)} / ${num(ps.low_52w)}</span><small>${ps.high_52w?'현재가는 고점 대비 '+((ps.close/ps.high_52w-1)*100).toFixed(0)+'%':''}</small></div></div>
+     <div class="g2c" style="margin:10px 0 0"><div><div class="cap2">담보인정 시뮬레이션 (1주당)</div><div class="ltv">
+      ${bar('현재가',ps.close,ps.close/base*100,'var(--navy2)')}${bar('60일 평균가',avg60,(avg60||0)/base*100,'var(--navy2)')}
+      ${bar('대용가 (KRX)',sub,(sub||0)/base*100,'var(--mute)')}${bar('담보가 (대용가×90%)',colv,(colv||0)/base*100,'var(--gold)')}
+      ${bar('52주 최저',ps.low_52w,(ps.low_52w||0)/base*100,'var(--bad)','bad')}</div>${sub?'':'<div class="src" style="margin-top:4px">대용가는 KRX 일별 공표값 — 수집 연결 전</div>'}</div>
+     <div><div class="cap2">대주주 담보제공 · 대량보유 변동 <span class="src" style="font-weight:400">5% 이상 보고자 기준</span></div>
+      ${mr.length?`<div class="twrap"><table><tr><th>공시일</th><th>보고자</th><th>사유</th><th class="n">보유비율</th><th class="n">증감</th><th class="n">약정(담보 등)</th><th></th></tr>${mr.slice(0,8).map(r=>`<tr><td>${r.rcept_dt}</td><td>${esc(r.repror||'')}</td><td>${esc(r.report_resn||'')}</td><td class="n">${pct(r.stkrt)}</td><td class="n ${r.stkrt_irds<0?'neg':''}">${r.stkrt_irds!=null?(r.stkrt_irds>0?'+':'')+r.stkrt_irds+'%p':'-'}</td><td class="n">${r.ctr_stkrt?`<span class="warn">${pct(r.ctr_stkrt)}</span>`:'-'}</td><td><a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">보고서</a></td></tr>`).join('')}</table></div><div class="src" style="margin-top:4px">약정 = 보고서의 '주요체결약정' 주식 비율(담보제공·대차 등). 상대방·종류는 보고서 본문 확인 · 5% 미만 주주의 담보제공은 공시 의무 없음</div>`:'<div class="src">대량보유 보고 미수집(biz 작업 후 표시)</div>'}</div></div>`;}}
   else h+=`<div class="src">주가 미수집</div>`;
   h+=`</section>`;
   // 5 공시 타임라인
@@ -363,7 +409,12 @@ async function open(code){
     h+=`<ul style="list-style:none;padding:0;margin:0">${groups.map((g,i)=>{const f=g.items[0]; const more=g.items.length-1; return `<li style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="src" style="font-family:var(--mono)">${f.dt}</span> <a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.title)}</a> <span class="src">${esc(f.source)}</span>${more?` <button class="pbtn" data-ng="${i}">외 ${more}건 ▾</button><ul id="ng${i}" hidden style="list-style:none;padding:4px 0 0 18px;margin:0">${g.items.slice(1).map(n=>`<li style="padding:2px 0"><span class="src" style="font-family:var(--mono)">${n.dt}</span> <a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a> <span class="src">${esc(n.source)}</span></li>`).join('')}</ul>`:''}</li>`}).join('')}</ul>`;}
   else h+=`<div class="src">수집된 뉴스 없음</div>`;
   h+=`</section>`;
-  $('#main').innerHTML=h; $('#main').scrollTop=0;
+  $('#main').innerHTML=h;
+  // 섹션 접기/펼치기 — 기본 펼침: 1, 3, 3-1, 4 (나머지는 접힘), 상태는 브라우저에 기억
+  {let st={}; try{st=JSON.parse(localStorage.getItem('fold')||'{}')}catch(e){}
+   document.querySelectorAll('#main section').forEach(sec=>{const h3=sec.querySelector('h3'); if(!h3) return; const key=(h3.textContent.match(/^\s*([0-9]+(?:-[0-9]+)?)/)||[])[1]||h3.textContent.slice(0,6);
+     const def=['1','3','3-1','4'].includes(key); const open=key in st?st[key]:def; if(!open) sec.classList.add('fold');
+     h3.addEventListener('click',()=>{sec.classList.toggle('fold'); st[key]=!sec.classList.contains('fold'); try{localStorage.setItem('fold',JSON.stringify(st))}catch(e){}});});} $('#main').scrollTop=0;
   document.querySelectorAll('[data-ng]').forEach(b=>b.onclick=()=>{const u=document.getElementById('ng'+b.dataset.ng); u.hidden=!u.hidden; b.textContent=b.textContent.replace(u.hidden?'▴':'▾',u.hidden?'▾':'▴');});
   if(d.prices.length) initChart(d.prices);
 }
