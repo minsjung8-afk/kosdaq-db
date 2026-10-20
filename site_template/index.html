@@ -271,9 +271,10 @@ async function open(code){
     h+=`<div style="margin:0 0 14px;padding:8px 12px 10px;border:1px solid var(--line);background:var(--panel)"><div class="src">같은 업종 내 순위 — KSIC ${ip.ind} ${esc(ip.name||'')} · ${esc(ip.market||'')} ${ip.n}개사 · 최근 연간 기준 · <b>모든 지표 1위 = 가장 우수</b> · 막대 오른쪽일수록 상위</div><div class="ind">${it('시가총액','mcap',false)}${it('영업이익률','op_margin',false)}${it('당기순이익률','net_margin',false)}${it('부채비율','debt_ratio',true)}${it('유동비율','cur_ratio',false)}${it('차입금의존도','borrow_dep',true)}${it('총차입금/영업이익','borrow_op',true)}</div></div>`;}
   {
     const x=v=>v==null?'-':v.toFixed(1)+'x';
+    const ks2=(c.induty_code||'').slice(0,2); const isProj=['41','42','31'].includes(ks2); const isFin=['64','65','66'].includes(ks2);   // 건설·조선=수주형 운전자본, 금융업=운전자본 비표시
     const groups=[
       ['g1', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da'],['당기순이익','net_income',억],['영업활동CF','cfo',억]]],
-      ['g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억],['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억],['순운전자본 <small>(매출채권+재고−매입채무)</small>','nwc',억]]],
+      ['g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억],['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억],...(isProj?[['순운전자본 <small>(수주형: 매출채권+미청구공사+재고−매입채무−초과청구−선수금)</small>','nwc_proj',억],['미청구공사(계약자산)','contract_assets',억],['초과청구공사(계약부채)','contract_liab',억],['선수금','advances',억]]:isFin?[]:[['순운전자본 <small>(매출채권+재고−매입채무)</small>','nwc',억]])]],
       ['g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['유동비율','cur_ratio',pct],['순차입금/EBITDA','nd_ebitda',x],['EBITDA/이자비용','interest_cover',x],['영업이익률','op_margin',pct],['당기순이익률','net_margin',pct],['총차입금/영업이익','borrow_op',x],['매출채권회전율','recv_turn',x],['재고자산회전율','inv_turn',x]]],
     ];
     const bases=[['OFS','별도'],['CFS','연결']].filter(([fs])=>d.kpi[fs]&&d.kpi[fs].length);
