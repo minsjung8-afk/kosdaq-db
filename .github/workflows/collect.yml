@@ -33,19 +33,29 @@ jobs:
       - run: pip install -r requirements.txt
       # DB는 저장소가 아니라 Actions 아티팩트(kosdaq-db, 90일 보관)에만 둔다 — GitHub 100MB 파일 제한 때문.
       # 매 실행: 지정 run 또는 가장 최근 '성공' 실행의 아티팩트를 받아 이어서 작업하고 다시 올린다.
-      - name: restore db
-        env: { GH_TOKEN: "${{ github.token }}" }
+      - name: restore db            # 1순위 R2(kosdaq-db/kosdaq.db.gz), restore_run 지정 시 그 아티팩트, 둘 다 없으면 최근 성공 아티팩트
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required     # R2 호환(최신 aws cli 체크섬 헤더 회피)
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_EP: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
-          RID="${{ github.event.inputs.restore_run }}"
-          if [ -z "$RID" ]; then
-            for id in $(gh run list -w collect.yml -s success -L 15 --json databaseId -q '.[].databaseId'); do
-              if gh run download $id -n kosdaq-db -D . 2>/dev/null; then RID=$id; break; fi
-            done
+          RID="${{ github.event.inputs.restore_run }}"; SRC=""
+          if [ -n "$RID" ]; then
+            gh run download $RID -n kosdaq-db -D . && SRC="artifact $RID"
+          elif [ -n "$AWS_ACCESS_KEY_ID" ] && aws s3 cp "s3://$R2_BUCKET/kosdaq.db.gz" . --endpoint-url "$R2_EP" --only-show-errors; then
+            SRC="R2"
           else
-            gh run download $RID -n kosdaq-db -D .
+            for id in $(gh run list -w collect.yml -s success -L 15 --json databaseId -q '.[].databaseId'); do
+              if gh run download $id -n kosdaq-db -D . 2>/dev/null; then SRC="artifact $id"; break; fi
+            done
           fi
           if [ -f kosdaq.db.gz ] && [ ! -f kosdaq.db ]; then gunzip -f kosdaq.db.gz; fi
-          echo "복원 run: ${RID:-없음(새 DB)}"; ls -la kosdaq.db* || true
+          echo "복원 출처: ${SRC:-없음(새 DB)}"; ls -la kosdaq.db* || true
       - name: collect
         env:
           PYTHONUNBUFFERED: "1"
@@ -70,19 +80,36 @@ jobs:
         run: |
           python -c "import sqlite3;c=sqlite3.connect('kosdaq.db');c.execute('VACUUM');c.close()" || true
           rm -f kosdaq.db.gz; gzip -6 -c kosdaq.db > kosdaq.db.gz; ls -la kosdaq.db.gz
-      - name: keep db artifact
+      - name: keep db (R2)           # 최신본 kosdaq.db.gz + 일자별 백업(backup/, 14일 보관). R2 미설정 시 아티팩트로 대체
         if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required     # R2 호환(최신 aws cli 체크섬 헤더 회피)
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_EP: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "R2 미설정 — 아티팩트만 사용"; echo "R2=0" >> $GITHUB_ENV; exit 0; fi
+          aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/kosdaq.db.gz" --endpoint-url "$R2_EP" --only-show-errors
+          D=$(date -u +%Y%m%d)
+          aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/backup/kosdaq-$D.db.gz" --endpoint-url "$R2_EP" --only-show-errors
+          CUT=$(date -u -d '14 days ago' +%Y%m%d)
+          aws s3 ls "s3://$R2_BUCKET/backup/" --endpoint-url "$R2_EP" | awk '{print $4}' | while read f; do
+            d=$(echo "$f" | sed -E 's/kosdaq-([0-9]{8}).*/\1/'); if [ -n "$d" ] && [ "$d" -lt "$CUT" ]; then aws s3 rm "s3://$R2_BUCKET/backup/$f" --endpoint-url "$R2_EP"; fi
+          done || true
+          echo "R2 저장 완료: kosdaq.db.gz, backup/kosdaq-$D.db.gz"; echo "R2=1" >> $GITHUB_ENV
+      - name: keep db artifact (R2 미설정 시 대체)
+        if: always() && env.R2 != '1'
         uses: actions/upload-artifact@v4
         with: { name: kosdaq-db, path: kosdaq.db.gz, retention-days: 90, compression-level: 0 }
-      - name: prune old db artifacts   # 비공개 저장소 아티팩트 총량 500MB 제한 → 최신 2개(+마지막 성공)만 유지
+      - name: prune old db artifacts   # R2 전환 후 남은 아티팩트 정리(최신 1개만)
         if: always()
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          LS=$(gh run list -w collect.yml -s success -L 1 --json databaseId -q '.[0].databaseId')   # 마지막 성공 실행은 항상 보존
-          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?name=kosdaq-db&per_page=100" -q '.artifacts[] | "\(.id) \(.created_at) \(.workflow_run.id)"' \
-            | sort -k2 -r | tail -n +3 | while read id dt rid; do
-              if [ "$rid" != "${{ github.run_id }}" ] && [ "$rid" != "$LS" ]; then gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "삭제 $id ($dt)"; fi
-            done || true
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?name=kosdaq-db&per_page=100" -q '.artifacts[] | "\(.id) \(.created_at)"' \
+            | sort -k2 -r | tail -n +2 | while read id dt; do gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "삭제 $id ($dt)"; done || true
       - name: build site
         run: python run.py site
       - name: ensure pages project
