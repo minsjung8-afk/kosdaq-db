@@ -19,6 +19,9 @@ on:
       restore_run:
         description: "이전 실행의 DB 아티팩트로 복원 (run id, 선택)"
         default: ""
+concurrency:
+  group: kosdaq-db            # DB를 공유하므로 동시 실행 금지(뒤 실행은 대기)
+  cancel-in-progress: false
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -28,14 +31,21 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt
+      # DB는 저장소가 아니라 Actions 아티팩트(kosdaq-db, 90일 보관)에만 둔다 — GitHub 100MB 파일 제한 때문.
+      # 매 실행: 지정 run 또는 가장 최근 '성공' 실행의 아티팩트를 받아 이어서 작업하고 다시 올린다.
       - name: restore db
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          if [ -n "${{ github.event.inputs.restore_run }}" ]; then
-            gh run download ${{ github.event.inputs.restore_run }} -n kosdaq-db -D . && echo "아티팩트에서 복원"
+          RID="${{ github.event.inputs.restore_run }}"
+          if [ -z "$RID" ]; then
+            for id in $(gh run list -w collect.yml -s success -L 15 --json databaseId -q '.[].databaseId'); do
+              if gh run download $id -n kosdaq-db -D . 2>/dev/null; then RID=$id; break; fi
+            done
+          else
+            gh run download $RID -n kosdaq-db -D .
           fi
-          if [ ! -f kosdaq.db ] && [ -f kosdaq.db.gz ]; then gunzip -kf kosdaq.db.gz; fi
-          ls -la kosdaq.db* || true
+          if [ -f kosdaq.db.gz ] && [ ! -f kosdaq.db ]; then gunzip -f kosdaq.db.gz; fi
+          echo "복원 run: ${RID:-없음(새 DB)}"; ls -la kosdaq.db* || true
       - name: collect
         env:
           PYTHONUNBUFFERED: "1"
@@ -55,21 +65,26 @@ jobs:
           else
             python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }}
           fi
+      - name: pack db
+        if: always()
+        run: |
+          python -c "import sqlite3;c=sqlite3.connect('kosdaq.db');c.execute('VACUUM');c.close()" || true
+          rm -f kosdaq.db.gz; gzip -6 -c kosdaq.db > kosdaq.db.gz; ls -la kosdaq.db.gz
       - name: keep db artifact
         if: always()
         uses: actions/upload-artifact@v4
-        with: { name: kosdaq-db, path: kosdaq.db, retention-days: 7 }
+        with: { name: kosdaq-db, path: kosdaq.db.gz, retention-days: 90, compression-level: 0 }
+      - name: prune old db artifacts   # 비공개 저장소 아티팩트 총량 500MB 제한 → 최신 3개만 유지
+        if: always()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          LS=$(gh run list -w collect.yml -s success -L 1 --json databaseId -q '.[0].databaseId')   # 마지막 성공 실행은 항상 보존
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?name=kosdaq-db&per_page=100" -q '.artifacts[] | "\(.id) \(.created_at) \(.workflow_run.id)"' \
+            | sort -k2 -r | tail -n +4 | while read id dt rid; do
+              if [ "$rid" != "${{ github.run_id }}" ] && [ "$rid" != "$LS" ]; then gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "삭제 $id ($dt)"; fi
+            done || true
       - name: build site
         run: python run.py site
-      - name: commit db
-        run: |
-          git config user.name "kosdaq-bot"; git config user.email "bot@users.noreply.github.com"
-          python -c "import sqlite3;c=sqlite3.connect('kosdaq.db');c.execute('VACUUM');c.close()"
-          gzip -9 -c kosdaq.db > kosdaq.db.gz && ls -la kosdaq.db.gz
-          git rm --cached -q kosdaq.db 2>/dev/null || true
-          git add kosdaq.db.gz .gitignore && git commit -m "data: $(date -u +%F)" || echo "no change"
-          git pull --rebase -X theirs || true      # 실행 중 코드 푸시가 있어도 DB 커밋 유지
-          git push
       - name: ensure pages project
         continue-on-error: true
         uses: cloudflare/wrangler-action@v3
