@@ -145,29 +145,38 @@ def _classify(header_text):
     return None
 
 
+UNIT = {"원": 1, "천원": 1e3, "백만원": 1e6, "억원": 1e8}
+PARSER_VER = 2       # 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱
+
+
+def _unit(text):
+    m = re.search(r"단위\s*[:：]\s*([천백억만]*원)", text)
+    return UNIT.get(m.group(1), 1) if m else 1
+
+
 def extract_outstanding(xml_text):
-    """자본금 변동사항 섹션의 미상환 CB/BW/EB 표 → [dict]"""
+    """정기보고서 'III-7. 증권의 발행을 통한 자금조달에 관한 사항'(구양식: 'I-3. 자본금 변동사항')의
+    '미상환 전환사채 / 신주인수권부사채 등 / 교환사채 발행현황' 표 → [dict]. 금액은 표 단위(백만원 등)를 원으로 환산."""
     out = []
-    for s2 in re.findall(r"<SECTION-2[^>]*>(.*?)</SECTION-2>", xml_text, flags=re.S | re.I):
-        m = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", s2, flags=re.S | re.I)
+    for sec in re.findall(r"<SECTION-2[^>]*>(.*?)</SECTION-2>", xml_text, flags=re.S | re.I):
+        m = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", sec, flags=re.S | re.I)
         title = _strip(m.group(1)).replace(" ", "") if m else ""
-        if "자본금" not in title or "변동" not in title:
+        if not ("자금조달" in title or "자본금" in title or "증권의발행" in title):
             continue
-        pos = 0
-        for tm in re.finditer(r"<TABLE[^>]*>(.*?)</TABLE>", s2, flags=re.S | re.I):
-            lead = _strip(s2[pos:tm.start()])[-200:]          # 표 앞 설명문(“미상환 전환사채 발행현황”)
-            pos = tm.end()
+        for tm in re.finditer(r"<TABLE[^>]*>(.*?)</TABLE>", sec, flags=re.S | re.I):
+            lead = _strip(sec[max(0, tm.start() - 2500):tm.start()])[-400:]     # 표 앞 제목·기준일·단위(작은 표 포함)
             tbl = tm.group(1)
-            rows = [[_strip(c).replace("\n", " ").strip() for c in re.findall(r"<T[DH][^>]*>(.*?)</T[DH]>", tr, flags=re.S | re.I)]
+            rows = [[_strip(c).replace("\n", " ").strip() for c in re.findall(r"<T[DHE][^>]*>(.*?)</T[DHE]>", tr, flags=re.S | re.I)]
                     for tr in re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I)]
             if not rows:
                 continue
             head = " ".join(" ".join(r) for r in rows[:3])
-            if "미상환" not in (lead + head):
+            if "미상환" not in (lead + head) or not re.search(r"전환|행사|교환", head):
                 continue
-            kind = _classify(lead[-60:] + " " + head)
+            kind = _classify(lead[-80:] + " " + head)
             if not kind:
                 continue
+            unit = _unit(lead)
             for cells in rows:
                 cells = [c for c in cells if c]
                 if len(cells) < 4:
@@ -190,8 +199,12 @@ def extract_outstanding(xml_text):
                     face, rt, prc, rem, stock = nums[0], None, None, nums[1], nums[2]
                 if rt is not None and rt > 1000:          # 비율 자리에 금액이 온 경우(전환비율 열 없음) 보정
                     face, rt, prc, rem, stock = nums[0], None, nums[1], nums[-2], nums[-1]
-                out.append({"kind": kind, "name": cells[0][:80], "isu_dd": _d(dates[0]), "exprd_dd": _d(dates[1]) if len(dates) > 1 else None,
-                            "face_amt": face, "cv_rt": rt, "cv_prc": prc, "remndr_amt": rem, "remndr_stock": stock, "period": period})
+                name = cells[0]
+                tm_cell = next((c for c in cells[1:3] if re.search(r"\d+\s*회", c)), None)   # 회차 열이 따로 있으면 이름 앞에 붙임
+                if tm_cell and tm_cell not in name:
+                    name = f"{tm_cell} {name}"
+                out.append({"kind": kind, "name": name[:80], "isu_dd": _d(dates[0]), "exprd_dd": _d(dates[1]) if len(dates) > 1 else None,
+                            "face_amt": face * unit, "cv_rt": rt, "cv_prc": prc, "remndr_amt": rem * unit, "remndr_stock": stock, "period": period})
     return out
 
 
@@ -199,10 +212,9 @@ def fetch_outstanding(con, corp_code):
     rcept, nm = latest_periodic_report(corp_code)
     if not rcept:
         return 0
-    old = con.execute("SELECT 1 FROM mezz_outstanding WHERE corp_code=? AND rcept_no=? LIMIT 1", (corp_code, rcept)).fetchone()
-    checked = con.execute("SELECT 1 FROM mezz_checked WHERE corp_code=? AND rcept_no=?", (corp_code, rcept)).fetchone()
-    if old or checked:
-        return -1                                          # 이미 이 보고서로 처리함
+    checked = con.execute("SELECT report_nm FROM mezz_checked WHERE corp_code=? AND rcept_no=?", (corp_code, rcept)).fetchone()
+    if checked and (checked[0] or "").endswith(f"#v{PARSER_VER}"):
+        return -1                                          # 이미 이 보고서를 현재 파서로 처리함
     xml = fetch_document_xml(rcept)
     rows = extract_outstanding(xml)
     con.execute("DELETE FROM mezz_outstanding WHERE corp_code=?", (corp_code,))
@@ -211,7 +223,7 @@ def fetch_outstanding(con, corp_code):
                        remndr_amt, remndr_stock, period, fetched_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, rcept, nm, r["kind"], r["name"], r["isu_dd"], r["exprd_dd"], r["face_amt"], r["cv_rt"], r["cv_prc"],
                      r["remndr_amt"], r["remndr_stock"], r["period"], now()))
-    con.execute("INSERT OR REPLACE INTO mezz_checked VALUES (?,?,?,?)", (corp_code, rcept, nm, now()))
+    con.execute("INSERT OR REPLACE INTO mezz_checked VALUES (?,?,?,?)", (corp_code, rcept, f"{nm}#v{PARSER_VER}", now()))
     con.commit()
     return len(rows)
 
@@ -222,15 +234,18 @@ def run(corp_codes=None, years=3, new_only=False):
     if corp_codes:
         cs = [c for c in cs if c in corp_codes]
     if new_only:
-        done = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM mezz_checked")}
+        done = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM mezz_checked WHERE report_nm LIKE ?", (f"%#v{PARSER_VER}",))}
         cs = [c for c in cs if c not in done]
         print(f"[mezz] --new-only: 미수집 {len(cs)}사", flush=True)
     iss = outs = 0
+    recent = {r[0] for r in con.execute("SELECT corp_code FROM fetch_log WHERE job='mezz_issue' AND status='ok' AND at >= date('now','-7 days')")}
     for i, cc in enumerate(cs, 1):
-        try:
-            iss += fetch_issue_decisions(con, cc, years)
-        except Exception as e:  # noqa
-            log(con, cc, "mezz_issue", "fail", e)
+        if cc not in recent:                               # 발행결정 API 4종은 7일 내 조회했으면 생략(한도 절약)
+            try:
+                iss += fetch_issue_decisions(con, cc, years)
+                log(con, cc, "mezz_issue", "ok")
+            except Exception as e:  # noqa
+                log(con, cc, "mezz_issue", "fail", e)
         try:
             n = fetch_outstanding(con, cc)
             if n > 0:
