@@ -6,6 +6,8 @@ import zipfile
 
 from common import connect, dart_get, dart_get_binary, log, now, to_num, zpack
 
+WORKERS = 4   # 사업보고서 원문 병렬 다운로드 수
+
 EVENT_FLAGS = {
     "유상증자": "유상증자", "전환사채": "CB", "신주인수권부사채": "BW", "교환사채": "EB",
     "감사보고서": "감사의견", "관리종목": "관리종목", "최대주주변경": "최대주주변경", "소송": "소송",
@@ -140,12 +142,19 @@ def fetch_document_xml(rcept_no: str) -> str:
     return data.decode("euc-kr", errors="ignore")
 
 
-def fetch_business(con, corp_code, bsns_year):
+def prefetch_report(corp_code, bsns_year):
+    """(병렬용) 사업보고서 접수번호 + 원문 XML 내려받기 — DB 접근 없음"""
     rcept_no = latest_annual_report(corp_code, bsns_year)
+    if not rcept_no:
+        return rcept_no, None
+    return rcept_no, fetch_document_xml(rcept_no)
+
+
+def fetch_business(con, corp_code, bsns_year, pre=None):
+    rcept_no, xml_text = pre if pre else prefetch_report(corp_code, bsns_year)
     if not rcept_no:
         log(con, corp_code, f"biz_{bsns_year}", "empty", "사업보고서 없음")
         return False
-    xml_text = fetch_document_xml(rcept_no)
     full, overview = extract_business_section(xml_text)
     rating_text = extract_rating_section(xml_text)
     for nm, cnt, rate in extract_major_holders(xml_text):
@@ -255,12 +264,37 @@ def fetch_events(con, corp_code, bgn_de, end_de):
 def run(corp_codes, bsns_year, event_from="20240101", event_to="20991231"):
     con = connect()
     cs = list(corp_codes)
+    from concurrent.futures import ThreadPoolExecutor
+    import time as _t
+    pool = ThreadPoolExecutor(max_workers=WORKERS)
+    futs = {}
+    def ensure(idx):   # idx 이후 WORKERS*2개를 미리 내려받기(원문 zip이 병목)
+        for k in range(idx, min(idx + WORKERS * 2, len(cs))):
+            if cs[k] not in futs:
+                futs[cs[k]] = pool.submit(prefetch_report, cs[k], str(bsns_year))
+    t0 = _t.time()
     for i, cc in enumerate(cs, 1):
+        ensure(i - 1)
         quota = False
+        try:
+            pre = futs.pop(cc).result()
+        except Exception as e:  # noqa
+            log(con, cc, "biz", "fail", e)
+            pre = (None, None)
+            if "한도" in str(e):
+                quota = True
         for fn, name in ((fetch_business, "biz"), (fetch_audit_opinion, "audit"), (fetch_shareholders, "shr"), (fetch_minor_shareholders, "minor"),
                          (fetch_other_investments, "invest"), (fetch_major_reports, "major")):          # CB·BW는 mezz.py (DART 정기보고서 API에 CB/BW 없음 — cndlCapl*은 조건부자본증권)
+            if quota:
+                break
             try:
-                fn(con, cc, str(bsns_year))
+                if name == "biz":
+                    if pre[0] is None and pre[1] is None:
+                        log(con, cc, f"biz_{bsns_year}", "empty", "사업보고서 없음/다운로드 실패")
+                    else:
+                        fn(con, cc, str(bsns_year), pre)
+                else:
+                    fn(con, cc, str(bsns_year))
             except Exception as e:  # noqa
                 log(con, cc, name, "fail", e)
                 if "한도" in str(e):
@@ -273,6 +307,7 @@ def run(corp_codes, bsns_year, event_from="20240101", event_to="20991231"):
             fetch_events(con, cc, event_from, event_to)
         except Exception as e:  # noqa
             log(con, cc, "events", "fail", e)
-        if i % 100 == 0:
-            print(f"[biz] {i}/{len(cs)}", flush=True)
+        if i % 50 == 0:
+            print(f"[biz] {i}/{len(cs)} · {(_t.time()-t0)/i:.1f}s/사", flush=True)
+    pool.shutdown(wait=False, cancel_futures=True)
     return con

@@ -57,6 +57,19 @@ jobs:
           fi
           if [ -f kosdaq.db.gz ] && [ ! -f kosdaq.db ]; then gunzip -f kosdaq.db.gz; fi
           echo "복원 출처: ${SRC:-없음(새 DB)}"; ls -la kosdaq.db* || true
+          # 무결성 점검 → 손상 시 .recover 복구 → 그래도 실패면 R2 일자별 백업(최신순) → 아티팩트 순으로 대체
+          if [ -f kosdaq.db ] && ! python dbcheck.py recover kosdaq.db; then
+            echo "::warning::복원 DB 손상 — 백업으로 대체 시도"; rm -f kosdaq.db
+            for key in $(aws s3 ls "s3://$R2_BUCKET/backup/" --endpoint-url "$R2_EP" 2>/dev/null | awk '{print $4}' | sort -r); do
+              aws s3 cp "s3://$R2_BUCKET/backup/$key" kosdaq.db.gz --endpoint-url "$R2_EP" --only-show-errors && gunzip -f kosdaq.db.gz
+              if python dbcheck.py recover kosdaq.db; then echo "백업 사용: $key"; break; else rm -f kosdaq.db; fi
+            done
+            if [ ! -f kosdaq.db ]; then
+              for id in $(gh run list -w collect.yml -s success -L 30 --json databaseId -q '.[].databaseId'); do
+                if gh run download $id -n kosdaq-db -D . 2>/dev/null; then gunzip -f kosdaq.db.gz; python dbcheck.py recover kosdaq.db && { echo "아티팩트 사용: $id"; break; } || rm -f kosdaq.db; fi
+              done
+            fi
+          fi
       - name: collect
         env:
           PYTHONUNBUFFERED: "1"
@@ -73,15 +86,18 @@ jobs:
               "10 15 * * *")  JOB=catchup ;;
               *)             JOB=daily ;;
             esac
-            python run.py $JOB
+            timeout --signal=INT 170m python run.py $JOB || echo "::warning::수집 종료 코드 $? (170분 제한 또는 오류) — 저장된 범위까지 보관"
           else
-            python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }}
+            timeout --signal=INT 170m python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }} || echo "::warning::수집 종료 코드 $? (170분 제한 또는 오류) — 저장된 범위까지 보관"
           fi
       - name: pack db
         if: always()
         run: |
-          python -c "import sqlite3;c=sqlite3.connect('kosdaq.db');c.execute('VACUUM');c.close()" || true
-          rm -f kosdaq.db.gz; gzip -6 -c kosdaq.db > kosdaq.db.gz; ls -la kosdaq.db.gz
+          if python dbcheck.py pack kosdaq.db; then
+            rm -f kosdaq.db.gz; gzip -6 -c kosdaq.db > kosdaq.db.gz; ls -la kosdaq.db.gz; echo "DB_OK=1" >> $GITHUB_ENV
+          else
+            echo "::error::DB 무결성 실패 — 이번 실행 결과는 업로드하지 않음(이전 본 유지)"; echo "DB_OK=0" >> $GITHUB_ENV
+          fi
       - name: keep db (R2)           # 최신본 kosdaq.db.gz + 일자별 백업(backup/, 14일 보관). R2 미설정 시 아티팩트로 대체
         if: always()
         env:
@@ -94,8 +110,9 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "R2 미설정 — 아티팩트만 사용"; echo "R2=0" >> $GITHUB_ENV; exit 0; fi
+          if [ "$DB_OK" != "1" ]; then echo "무결성 실패분은 올리지 않음"; echo "R2=1" >> $GITHUB_ENV; exit 0; fi
           aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/kosdaq.db.gz" --endpoint-url "$R2_EP" --only-show-errors
-          D=$(date -u +%Y%m%d)
+          D=$(date -u +%Y%m%d-%H%M)
           aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/backup/kosdaq-$D.db.gz" --endpoint-url "$R2_EP" --only-show-errors
           CUT=$(date -u -d '14 days ago' +%Y%m%d)
           aws s3 ls "s3://$R2_BUCKET/backup/" --endpoint-url "$R2_EP" | awk '{print $4}' | while read f; do
@@ -103,7 +120,7 @@ jobs:
           done || true
           echo "R2 저장 완료: kosdaq.db.gz, backup/kosdaq-$D.db.gz"; echo "R2=1" >> $GITHUB_ENV
       - name: keep db artifact (R2 미설정 시 대체)
-        if: always() && env.R2 != '1'
+        if: always() && env.R2 != '1' && env.DB_OK == '1'
         uses: actions/upload-artifact@v4
         with: { name: kosdaq-db, path: kosdaq.db.gz, retention-days: 90, compression-level: 0 }
       - name: prune old db artifacts   # R2 전환 후 남은 아티팩트 정리(최신 1개만)
