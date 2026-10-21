@@ -292,7 +292,7 @@ async function open(code){
     <div class="full"><div class="twrap"><table><tr><th class="up" style="width:50%">▲ 등급 상향 요인</th><th class="dn">▼ 등급 하향 요인</th></tr><tr><td>${(s.rating_triggers&&s.rating_triggers.up||[]).map(esc).join('<br>')||'-'}</td><td>${(s.rating_triggers&&s.rating_triggers.down||[]).map(esc).join('<br>')||'-'}</td></tr></table></div></div>
     ${memo(s.summary_md)}
     <div class="full src">출처: <a href="${esc(rs.file_url)}" target="_blank" rel="noopener">${esc(rs.agency)} 신용평가서 (금감원 공시)</a></div></div>`;}
-  else if(s){h+=`<div class="biz"><div class="full"><div class="twrap"><table class="lbl">
+  else if(s){h+=`<div class="src" style="margin-bottom:6px">AI 구조화 요약 · 사업보고서 기준${s._model?` · 모델 ${esc(String(s._model).replace('claude-','').replace(/-\d.*$/,''))}`:''}${b.rcept_no?` · <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${b.rcept_no}" target="_blank" rel="noopener">원문</a>`:''}</div><div class="biz"><div class="full"><div class="twrap"><table class="lbl">
     ${row('업종',esc(s.industry))}${row('사업모델',esc(s.business_model))}${row('주요 제품·매출비중',prodCell(s.main_products))}
     ${row('주요 고객',esc((s.major_customers||[]).join(', ')))}${row('거래처 집중도',esc(s.customer_concentration))}${row('원재료·공급망',esc(s.raw_material_supply))}
     ${row('경쟁환경',esc(s.competition))}${row('생산·가동률',esc(s.capacity_utilization))}${row('신규사업·투자',esc(s.new_business))}</table></div></div>

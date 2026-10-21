@@ -35,16 +35,21 @@ def _parse_json(out: str) -> dict:
         out = out[i:j + 1]
     return json.loads(out)
 
+MODELS = {"sonnet": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5", "opus": "claude-opus-4-1"}
+MAX_CHARS = int(os.environ.get("SUMMARY_MAX_CHARS", "70000"))      # 입력 절단(사업의 개요~생산·매출 절까지면 충분) — 비용 40% 절감
+
+
 def summarize_text(text: str, model: str = "claude-sonnet-4-5") -> dict:
     import anthropic  # noqa
     client = anthropic.Anthropic()
-    text = text[:120_000]  # 안전 상한
+    model = MODELS.get(model, model)
+    text = text[:MAX_CHARS]
     msg = client.messages.create(model=model, max_tokens=4000,
                                  messages=[{"role": "user", "content": PROMPT + text}])
     return _parse_json(msg.content[0].text)
 
 
-def run(corp_codes=None, bsns_year=None, force=False):
+def run(corp_codes=None, bsns_year=None, force=False, model="claude-sonnet-4-5"):
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY 없음 - 요약 단계 건너뜀")
         return
@@ -58,7 +63,8 @@ def run(corp_codes=None, bsns_year=None, force=False):
         if bsns_year and r["bsns_year"] != str(bsns_year):
             continue
         try:
-            js = summarize_text(ztext(r["full_text"]))
+            js = summarize_text(ztext(r["full_text"]), model)
+            js["_model"] = MODELS.get(model, model)
             con.execute("UPDATE business SET summary_json=?, summary_md=?, summarized_at=? WHERE corp_code=? AND bsns_year=?",
                         (json.dumps(js, ensure_ascii=False), js.get("summary_md"), now(), r["corp_code"], r["bsns_year"]))
             con.commit()

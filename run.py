@@ -46,6 +46,8 @@ def main():
     ap.add_argument("--debug", nargs="*", help="mezz: 종목코드 지정 진단·강제 재추출 (예: --debug 178320)")
     ap.add_argument("--start", help="price: 시세 수집 시작일 YYYY-MM-DD (기본 3년 전). 과거 백필 시 예: --start 2016-01-01")
     ap.add_argument("--type", default="기업신용평가", help="unlisted: 금감원 평가대상종류 필터(기본 기업신용평가, \"\"=전수)")
+    ap.add_argument("--model", default="sonnet", help="summarize: sonnet(기본)/haiku/opus 또는 모델 ID")
+    ap.add_argument("--force", action="store_true", help="summarize: 이미 요약된 회사도 다시 생성")
     ap.add_argument("--codes", nargs="*", help="대상 종목코드 지정 (예: --codes 060310 006840) — 모든 작업 공통")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
@@ -131,7 +133,7 @@ def main():
         import summarize
         if not a.codes:
             summarize.run_rating(set(ccs) if a.limit else None)              # 등급 보유사: 신용평가서 기반 요약(우선)
-        summarize.run(ccs, a.years[-1] if a.years else a.year - 1)           # 나머지(또는 --codes 지정분): 사업보고서 기반
+        summarize.run(ccs, a.years[-1] if a.years else a.year - 1, force=a.force, model=a.model)   # 나머지(또는 --codes 지정분): 사업보고서 기반
     if a.job in ("rating", "all"):
         import fss_rating
         fss_rating.run(set(ccs) if (a.limit or a.new_only) else None)
