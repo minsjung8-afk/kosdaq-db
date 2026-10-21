@@ -145,7 +145,7 @@ def _classify(header_text):
 
 
 UNIT = {"원": 1, "천원": 1e3, "백만원": 1e6, "억원": 1e8}
-PARSER_VER = 3       # 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱
+PARSER_VER = 4       # 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱
 
 
 def _unit(text):
@@ -153,52 +153,128 @@ def _unit(text):
     return UNIT.get(m.group(1), 1) if m else 1
 
 
+CELL_RE = re.compile(r"<T([DHEU])\b([^>]*)>(.*?)</T[DHEU]>", re.S | re.I)
+
+
+def _columns(trs):
+    """머리글 TR(1~2행, COLSPAN 포함)을 평탄한 열 이름 목록으로. 2단 머리글은 상위명/하위명 결합."""
+    def cells(tr):
+        out = []
+        for tag, attrs, inner in CELL_RE.findall(tr):
+            cs = re.search(r"COLSPAN=\"?(\d+)", attrs, flags=re.I)
+            rs = re.search(r"ROWSPAN=\"?(\d+)", attrs, flags=re.I)
+            out.append((_strip(inner).replace("\n", " ").strip(), int(cs.group(1)) if cs else 1, int(rs.group(1)) if rs else 1))
+        return out
+    h0 = cells(trs[0]) if trs else []
+    if not h0:
+        return []
+    h1 = cells(trs[1]) if len(trs) > 1 and all(c[2] == 1 for c in cells(trs[1])) and any(c[1] > 1 or c[2] > 1 for c in h0) else []
+    cols, k = [], 0
+    for name, cs, rs in h0:
+        if cs > 1 and h1:
+            for _ in range(cs):
+                sub = h1[k][0] if k < len(h1) else ""
+                cols.append(f"{name}/{sub}"); k += 1
+        else:
+            cols.append(name)
+    return cols, (2 if h1 else 1)
+
+
+def _field(col):
+    c = col.replace(" ", "")
+    if "비고" in c: return "note"
+    if "회차" in c: return "tm"
+    if "발행일" in c: return "isu"
+    if "만기일" in c: return "mtd"
+    if "기간" in c: return "period"
+    if "비율" in c: return "rt"
+    if re.search(r"(전환|행사|교환)가액", c): return "prc"
+    if re.search(r"(가능)?주식수", c) and "미상환" in c or re.search(r"(전환|행사|교환)가능주식", c): return "stock"
+    if "미상환" in c and ("총액" in c or "금액" in c): return "rem"
+    if "미행사" in c and ("총액" in c or "금액" in c): return "rem"
+    if "총액" in c or "권면" in c: return "face"
+    if "종류" in c and ("주식" in c or "대상" in c): return "stk_knd"
+    if "종류" in c or "구분" in c: return "name"
+    return None
+
+
+def _num(c):
+    c = (c or "").replace(",", "").replace(" ", "")
+    return to_num(c) if NUM_RE.match(c) else None
+
+
 def _parse_tables(seg, out, lead_extra=""):
-    """세그먼트 안의 표들을 훑어 미상환 CB/BW/EB 행을 out에 추가. 반환: 추가 행 수"""
+    """세그먼트 안의 표들을 훑어 미상환 CB/BW/EB 행을 out에 추가. 반환: 추가 행 수
+    v4: 머리글(COLSPAN 2단 포함)로 열을 식별해 값을 읽고(회차·비고 열의 숫자·날짜 오인 방지), 열 식별 실패 시 위치 기반 폴백."""
     n0 = len(out)
     for tm in re.finditer(r"<TABLE[^>]*>(.*?)</TABLE>", seg, flags=re.S | re.I):
         lead = (lead_extra + " " + _strip(seg[max(0, tm.start() - 2500):tm.start()]))[-400:]     # 표 앞 제목·기준일·단위(작은 표 포함)
         tbl = tm.group(1)
-        rows = [[_strip(c).replace("\n", " ").strip() for c in re.findall(r"<T[DHEU]\b[^>]*>(.*?)</T[DHEU]>", tr, flags=re.S | re.I)]
-                for tr in re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I)]
+        trs = re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I)
+        rows = [[_strip(c[2]).replace("\n", " ").strip() for c in CELL_RE.findall(tr)] for tr in trs]
         if not rows:
             continue
         head = " ".join(" ".join(r) for r in rows[:3])
         if "미상환" not in (lead + head) or not re.search(r"전환|행사|교환", head):
             continue
-        kind = _classify(lead[-80:] + " " + head)
+        hdr_only = " ".join(" ".join(r) for r in rows[:2] if not any(DATE_RE.search(c) for c in r))   # 데이터 행(비고의 '행사가액' 등) 제외한 머리글만
+        kind = _classify(lead_extra) if lead_extra else None                                             # 1순위: 소제목('미상환 전환사채 발행현황')
+        kind = kind or _classify(lead[-80:] + " " + hdr_only)
         if not kind:
             continue
         unit = _unit(lead)
-        for cells in rows:
+        colres = _columns(trs)
+        cols, nhead = (colres if colres else ([], 0))
+        fields = [_field(c) for c in cols] if cols else []
+        mapped = bool(cols) and "rem" in fields and "face" in fields
+        for ri, cells in enumerate(rows):
+            if mapped and ri < nhead:
+                continue
+            raw = cells
             cells = [c for c in cells if c]
-            if len(cells) < 4:
+            if len(cells) < 4 or any(k in cells[0] for k in ("합계", "합 계", "종류", "구분")):
                 continue
-            if any(k in cells[0] for k in ("합계", "합 계", "종류", "구분")):
-                continue
-            dates = [c for c in cells if DATE_RE.search(c) and "~" not in c]
-            if len(dates) < 1:
-                continue
-            period = next((c for c in cells if "~" in c), None)
-            nums = [to_num(c.replace(",", "")) for c in cells if NUM_RE.match(c.replace(" ", "").replace(",", "")) and c not in dates]
-            nums = [v for v in nums if v is not None]
-            if len(nums) < 3:
-                continue
-            if len(nums) >= 5:
-                face, rt, prc, rem, stock = nums[0], nums[1], nums[2], nums[-2], nums[-1]
-            elif len(nums) == 4:
-                face, rt, prc, rem, stock = nums[0], None, nums[1], nums[2], nums[3]
-            else:
-                face, rt, prc, rem, stock = nums[0], None, None, nums[1], nums[2]
-            if rt is not None and rt > 1000:          # 비율 자리에 금액이 온 경우(전환비율 열 없음) 보정
-                face, rt, prc, rem, stock = nums[0], None, nums[1], nums[-2], nums[-1]
-            name = cells[0]
-            tm_cell = next((c for c in cells[1:3] if re.search(r"\d+\s*회", c)), None)   # 회차 열이 따로 있으면 이름 앞에 붙임
-            if tm_cell and tm_cell not in name:
-                name = f"{tm_cell} {name}"
-            row = {"kind": kind, "name": name[:80], "isu_dd": _d(dates[0]), "exprd_dd": _d(dates[1]) if len(dates) > 1 else None,
-                   "face_amt": face * unit, "cv_rt": rt, "cv_prc": prc, "remndr_amt": rem * unit, "remndr_stock": stock, "period": period}
-            if not any(r["kind"] == row["kind"] and r["name"] == row["name"] and r["isu_dd"] == row["isu_dd"] for r in out):
+            row = None
+            if mapped and len(raw) == len(fields):
+                v = {}
+                for f, c in zip(fields, raw):
+                    if f and f not in v:
+                        v[f] = c
+                face, rem = _num(v.get("face")), _num(v.get("rem"))
+                if face is None and rem is None:
+                    continue
+                name = (v.get("name") or cells[0]).strip()
+                tmc = (v.get("tm") or "").strip()
+                if tmc and tmc not in name:
+                    name = f"{tmc if '회' in tmc else '제'+tmc+'회'} {name}"
+                row = {"kind": kind, "name": name[:80], "isu_dd": _d(v.get("isu")), "exprd_dd": _d(v.get("mtd")),
+                       "face_amt": (face or 0) * unit, "cv_rt": _num(v.get("rt")), "cv_prc": _num(v.get("prc")),
+                       "remndr_amt": (rem if rem is not None else 0) * unit, "remndr_stock": _num(v.get("stock")),
+                       "period": (v.get("period") or "").replace(" ", "") or None}
+            else:                                                     # 폴백: 위치 기반(구양식·열 수 불일치)
+                dates = [c for c in cells if DATE_RE.search(c) and "~" not in c]
+                if len(dates) < 1:
+                    continue
+                period = next((c for c in cells if "~" in c), None)
+                nums = [to_num(c.replace(",", "")) for c in cells if NUM_RE.match(c.replace(" ", "").replace(",", "")) and c not in dates]
+                nums = [x for x in nums if x is not None]
+                if len(nums) < 3:
+                    continue
+                if len(nums) >= 5:
+                    face, rt, prc, rem, stock = nums[0], nums[1], nums[2], nums[-2], nums[-1]
+                elif len(nums) == 4:
+                    face, rt, prc, rem, stock = nums[0], None, nums[1], nums[2], nums[3]
+                else:
+                    face, rt, prc, rem, stock = nums[0], None, None, nums[1], nums[2]
+                if rt is not None and rt > 1000:
+                    face, rt, prc, rem, stock = nums[0], None, nums[1], nums[-2], nums[-1]
+                name = cells[0]
+                tm_cell = next((c for c in cells[1:3] if re.search(r"\d+\s*회", c)), None)
+                if tm_cell and tm_cell not in name:
+                    name = f"{tm_cell} {name}"
+                row = {"kind": kind, "name": name[:80], "isu_dd": _d(dates[0]), "exprd_dd": _d(dates[1]) if len(dates) > 1 else None,
+                       "face_amt": face * unit, "cv_rt": rt, "cv_prc": prc, "remndr_amt": rem * unit, "remndr_stock": stock, "period": period}
+            if row and not any(r["kind"] == row["kind"] and r["name"] == row["name"] and r["isu_dd"] == row["isu_dd"] for r in out):
                 out.append(row)
     return len(out) - n0
 
