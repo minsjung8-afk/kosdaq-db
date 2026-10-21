@@ -358,22 +358,25 @@ async function open(code){
     h+=`<div class="ptb"><button class="pbtn on" data-tf="D">일봉</button><button class="pbtn" data-tf="W">주봉</button><button class="pbtn" data-tf="M">월봉</button><span class="sp"></span><button class="pbtn" data-p="3m">3개월</button><button class="pbtn" data-p="6m">6개월</button><button class="pbtn on" data-p="1y">1년</button><button class="pbtn" data-p="3y">3년</button><button class="pbtn" data-p="5y">5년</button><button class="pbtn" data-p="all">전체</button><span class="sp"></span><span class="lbl">이평</span><button class="pbtn on" data-ma="5">5</button><button class="pbtn on" data-ma="20">20</button><button class="pbtn on" data-ma="60">60</button><button class="pbtn" data-ma="120">120</button><span class="lbl">휠 확대·축소 / 드래그 이동 / 더블클릭 초기화 · 3년 이전은 주봉</span></div><div id="px"><div id="pxl"></div></div>
       <div class="twrap" style="margin-top:10px"><table><tr><th>수익률</th>${rets.map(([n])=>`<th class="n">${n}</th>`).join('')}</tr><tr><td>기준일 ${ps.asof||'-'}</td>${rets.map(([,k])=>`<td class="n">${rc(ps[k])}</td>`).join('')}</tr></table></div>
       <div class="twrap" style="margin-top:10px"><table class="lbl kv8"><tr>
-        <td>종가</td><td>${num(ps.close)}원 <small style="color:var(--mute)">(${ps.asof||'-'})</small></td><td>60일 평균가</td><td>${(()=>{const px=(d.prices||[]).slice(-60); const a=px.length?px.reduce((x,r)=>x+r[4],0)/px.length:null; return a?num(Math.round(a))+'원 <small style="color:var(--mute)">현재가 '+((ps.close/a-1)*100).toFixed(1)+'%</small>':'-'})()}</td>
-        <td>시가총액</td><td>${억(ps.mcap)}억</td><td>발행주식수</td><td>${num(ps.shares_out)}주</td></tr><tr>
-        <td>52주 최고</td><td>${num(ps.high_52w)}원${ps.high_52w?` <small style="color:var(--mute)">현재가 ${((ps.close/ps.high_52w-1)*100).toFixed(0)}%</small>`:''}</td><td>52주 최저</td><td>${num(ps.low_52w)}원${ps.low_52w?` <small style="color:var(--mute)">현재가 +${((ps.close/ps.low_52w-1)*100).toFixed(0)}%</small>`:''}</td>
-        <td>3M 평균거래량</td><td>${num(Math.round(ps.avg_vol_3m||0))}주</td><td>3M 평균거래대금</td><td>${억(ps.avg_value_3m)}억/일${ps.avg_vol_3m?` <small style="color:var(--mute)">1억주 환가 ≈ ${num(Math.ceil(1e8/ps.avg_vol_3m))}거래일</small>`:''}</td></tr><tr>
-        <td>변동성 (60일 연율)</td><td>${pct(ps.vol_60d)}${ps.vol_60d>70?' <span class="warn">고변동</span>':''}</td><td>액면가</td><td>${c.parval?num(c.parval)+'원':'-'}</td>
-        <td>EV/EBITDA</td><td>${d.valuation&&d.valuation.ev_ebitda!=null?d.valuation.ev_ebitda.toFixed(1)+'x':'-'}</td><td>시가총액 순위</td><td>${d.industry_pos&&d.industry_pos.mcap?d.industry_pos.mcap.rank+'위 / '+d.industry_pos.mcap.n+'개사 (업종)':'-'}</td></tr></table></div>`;
-    // 담보 · 주식담보 참고치
-    {const px=(d.prices||[]).slice(-60); const avg60=px.length?px.reduce((a,r)=>a+r[4],0)/px.length:null; const sub=ps.subst_price; const colv=sub?sub*0.9:null;
-     const days=ps.avg_vol_3m?Math.ceil(100000000/ps.avg_vol_3m):null; const mr=d.major_reports||[];
-     const bar=(lb,v,w,col,cls)=>`<b>${lb}</b><div class="bar2"><i style="width:${Math.max(0,Math.min(100,w)).toFixed(0)}%;background:${col}"></i></div><span class="${cls||''}">${v==null?'미수집':num(Math.round(v))}</span>`;
-     const base=Math.max(ps.close||0,avg60||0,ps.high_52w||0)||1;
-     h+=`<div class="cap2" style="margin:14px 16px 6px">담보 · 주식담보 참고치 <span class="src" style="font-weight:400">시세 ${ps.asof||''} · KRX 대용가 · DART 대량보유 보고</span></div>
-     <div class="g2c" style="margin:10px 16px 0;grid-template-columns:1fr"><div><div class="cap2">담보인정 시뮬레이션 (1주당)</div><div class="ltv">
-      ${bar('현재가',ps.close,ps.close/base*100,'var(--navy2)')}${bar('60일 평균가',avg60,(avg60||0)/base*100,'var(--navy2)')}
-      ${bar('대용가 (KRX)',sub,(sub||0)/base*100,'var(--mute)')}${bar('담보가 (대용가×90%)',colv,(colv||0)/base*100,'var(--gold)')}
-      ${bar('52주 최저',ps.low_52w,(ps.low_52w||0)/base*100,'var(--bad)','bad')}</div>${sub?'':'<div class="src" style="margin-top:4px">대용가는 KRX 일별 공표값 — 수집 연결 전</div>'}</div>
+        <td>거래소</td><td>${esc({KOSPI:'유가증권',KOSDAQ:'코스닥',KONEX:'코넥스'}[c.market]||c.market||'비상장')}${c.sect_tp?' <small style="color:var(--mute)">'+esc(c.sect_tp)+'</small>':''}</td><td>상장일</td><td>${c.listed_dt?esc(String(c.listed_dt).replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3')):'-'}</td>
+        <td>시가총액</td><td>${억(ps.mcap)}억</td><td>시가총액 순위</td><td>${d.industry_pos&&d.industry_pos.mcap?d.industry_pos.mcap.rank+'위 / '+d.industry_pos.mcap.n+'개사 (업종)':'-'}</td></tr><tr>
+        <td>종가</td><td>${num(ps.close)}원 <small style="color:var(--mute)">(${ps.asof||'-'})</small></td><td>액면가</td><td>${c.parval?num(c.parval)+'원':'-'}</td>
+        <td>발행주식수</td><td>${num(ps.shares_out)}주</td><td>평균거래량 (3M)</td><td>${num(Math.round(ps.avg_vol_3m||0))}주</td></tr><tr>
+        <td>변동성 (60일 연율)</td><td>${pct(ps.vol_60d)}${ps.vol_60d>70?' <span class="warn">고변동</span>':''}</td><td>PER</td><td>${d.valuation&&d.valuation.per!=null?d.valuation.per.toFixed(1)+'x':(d.valuation?'N/A <small style="color:var(--mute)">적자</small>':'-')}</td>
+        <td>EV/EBITDA</td><td>${d.valuation&&d.valuation.ev_ebitda!=null?d.valuation.ev_ebitda.toFixed(1)+'x':'-'}</td><td></td><td></td></tr></table></div>
+      ${(()=>{const px=(d.prices||[]); const last=(n,f)=>{const q=px.slice(-n); return q.length?q.reduce((x,r)=>x+f(r),0)/q.length:null};
+        const a60=last(60,r=>r[4]); const v1y=last(250,r=>r[4]*r[5]); const sub=ps.subst_price, cv=sub?sub*0.9:null;
+        const rel=(x,y)=>x&&y?((x/y-1)*100).toFixed(0)+'%':'-'; const sgn=v=>v==='-'||v[0]==='-'?v:'+'+v;
+        return `<div class="tiles" style="margin:10px 16px 0;grid-template-columns:repeat(5,1fr)">
+        <div class="tile"><div class="k">현재가 / 60일 평균</div><div class="v">${num(ps.close)}<small>원</small></div><div class="kvs"><b>60일 평균가</b><span>${a60?num(Math.round(a60))+'원':'-'}</span><b>평균 대비 현재가</b><span>${sgn(rel(ps.close,a60))}</span></div></div>
+        <div class="tile"><div class="k">52주 최저 / 최고</div><div class="v">${num(ps.low_52w)}<small>원 ~ </small>${num(ps.high_52w)}<small>원</small></div><div class="kvs"><b>최저 대비 현재가</b><span>${sgn(rel(ps.close,ps.low_52w))}</span><b>최고 대비 현재가</b><span>${rel(ps.close,ps.high_52w)}</span></div></div>
+        <div class="tile"><div class="k">대용가 (KRX)</div><div class="v">${sub?num(sub)+'<small>원</small>':'<span class="src" style="font-size:14px">미수집</span>'}</div><div class="kvs"><b>현재가 대비</b><span>${sub&&ps.close?rel(sub,ps.close):'-'}</span></div></div>
+        <div class="tile"><div class="k">담보가 (대용가×90%)</div><div class="v">${cv?num(Math.round(cv))+'<small>원</small>':'<span class="src" style="font-size:14px">미수집</span>'}</div><div class="kvs"><b>담보가 대비 현재가</b><span>${sgn(rel(ps.close,cv))}</span><b>담보가 대비 52주 최저</b><span class="${cv&&ps.low_52w&&ps.low_52w<cv?'bad':''}">${sgn(rel(ps.low_52w,cv))}</span></div></div>
+        <div class="tile"><div class="k">일평균 거래대금</div><div class="v">${억(ps.avg_value_3m)}<small>억 (3M)</small></div><div class="kvs"><b>1년 평균</b><span>${v1y?억(v1y)+'억':'-'}</span></div></div>
+        </div>`})()}`;
+    // 대주주 담보제공 · 대량보유 변동 (5% 보고)
+    {const mr=d.major_reports||[];
+     h+=`<div class="g2c" style="margin:10px 16px 0;grid-template-columns:1fr">
      <div><div class="cap2">대주주 담보제공 · 대량보유 변동 <span class="src" style="font-weight:400">5% 이상 보고자 기준</span></div>
       ${mr.length?`<div class="twrap"><table><tr><th>공시일</th><th>보고자</th><th>사유</th><th class="n">보유비율</th><th class="n">증감</th><th class="n">약정(담보 등)</th><th></th></tr>${mr.slice(0,8).map(r=>`<tr><td>${r.rcept_dt}</td><td>${esc(r.repror||'')}</td><td>${esc(r.report_resn||'')}</td><td class="n">${pct(r.stkrt)}</td><td class="n ${r.stkrt_irds<0?'neg':''}">${r.stkrt_irds!=null?(r.stkrt_irds>0?'+':'')+r.stkrt_irds+'%p':'-'}</td><td class="n">${r.ctr_stkrt?`<span class="warn">${pct(r.ctr_stkrt)}</span>`:'-'}</td><td><a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">보고서</a></td></tr>`).join('')}</table></div><div class="src" style="margin-top:4px">약정 = 보고서의 '주요체결약정' 주식 비율(담보제공·대차 등). 상대방·종류는 보고서 본문 확인 · 5% 미만 주주의 담보제공은 공시 의무 없음</div>`:'<div class="src">대량보유 보고 미수집(biz 작업 후 표시)</div>'}</div></div>`;}}
   else h+=`<div class="src">주가 미수집</div>`;
