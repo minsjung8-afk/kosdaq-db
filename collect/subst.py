@@ -20,9 +20,41 @@ HDR = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKi
        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "Accept": "application/json, text/javascript, */*; q=0.01"}
 
 
+LOGIN_PAGE = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001.cmd?locale=ko_KR"
+LOGIN_URL = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001D1.cmd"
+
+
+def login(s):
+    """KRX Data Marketplace 로그인 — 전종목 대용가는 로그인 세션 필요(미로그인 400 'LOGOUT'). 환경변수 KRX_ID/KRX_PW(GitHub Secrets)."""
+    import os
+    uid, pw = os.environ.get("KRX_ID"), os.environ.get("KRX_PW")
+    if not uid or not pw:
+        return False
+    ua = {"User-Agent": HDR["User-Agent"]}
+    s.get(LOGIN_PAGE, headers=ua, timeout=30)
+    s.get("https://data.krx.co.kr/contents/MDC/COMS/client/view/login.jsp?site=mdc", headers={**ua, "Referer": LOGIN_PAGE}, timeout=30)
+    r = s.post(LOGIN_URL, data={"mbrId": uid, "pw": pw, "mbrNm": "", "telNo": "", "di": "", "certType": ""},
+               headers={**ua, "Referer": LOGIN_PAGE, "Origin": "https://data.krx.co.kr", "X-Requested-With": "XMLHttpRequest",
+                        "Accept": "application/json, text/javascript, */*; q=0.01"}, timeout=30)
+    try:
+        js = r.json()
+    except Exception:
+        js = {}
+    ok = r.status_code == 200 and bool(js.get("MBR_NO"))
+    print(f"[subst] KRX 로그인 {'성공' if ok else '실패'} (HTTP {r.status_code}, code={js.get('_error_code')})", flush=True)
+    return ok
+
+
+_SESS = None
+
+
 def fetch(trd_dd: str):
     """trd_dd: YYYYMMDD → [{stock_code, sb_prc, mk_date, prev_close}]"""
-    s = requests.Session()
+    global _SESS
+    if _SESS is None:
+        _SESS = requests.Session()
+        login(_SESS)
+    s = _SESS
     s.get(HDR["Referer"], headers={"User-Agent": HDR["User-Agent"]}, timeout=30)          # 세션 쿠키
     r = s.post(URL, data={"bld": BLD, "locale": "ko_KR", "searchType": "1", "mktId": "ALL", "trdDd": trd_dd, "csvxls_isNo": "false"},
                headers=HDR, timeout=60)
@@ -51,10 +83,26 @@ def run(start=None, con=None):
         pass
     d0 = date.fromisoformat(start) if start else date.today()
     rows, used = [], None
-    # 0) 국내에서 받아 R2에 올린 파일(subst/latest.json → 워크플로가 subst_latest.json으로 내려줌)이 있으면 우선 사용 — 러너(해외 IP)는 KRX가 400으로 막음
     import json, os
+    # 1) KRX_ID/KRX_PW(Secrets)가 있으면 서버에서 직접 로그인·조회 시도
+    if os.environ.get("KRX_ID"):
+        for back in range(0, 8):
+            d = d0 - timedelta(days=back)
+            if d.weekday() >= 5:
+                continue
+            try:
+                rows = fetch(d.strftime("%Y%m%d"))
+            except Exception as e:  # noqa
+                print(f"[subst] 직접 조회 {d} 실패: {str(e)[:120]}", flush=True)
+                rows = []
+                if "400" in str(e):
+                    break                         # 로그인/권한 문제 — 날짜를 바꿔도 같음
+                continue
+            if rows:
+                used = d; print(f"[subst] 직접 조회 성공: 기준 {d} · {len(rows):,}종목", flush=True); break
+    # 2) 자택 Mac(국내)이 R2에 올린 파일(subst/latest.json → 워크플로가 subst_latest.json으로 내려줌)
     lf = os.environ.get("SUBST_FILE", "subst_latest.json")
-    if os.path.exists(lf):
+    if not rows and os.path.exists(lf):
         try:
             js = json.load(open(lf, encoding="utf-8"))
             rows = js.get("rows") or []

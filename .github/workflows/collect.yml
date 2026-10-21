@@ -80,6 +80,8 @@ jobs:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          KRX_ID: ${{ secrets.KRX_ID }}            # KRX Data Marketplace 로그인(대용가 전종목 조회용, 선택)
+          KRX_PW: ${{ secrets.KRX_PW }}
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             case "${{ github.event.schedule }}" in
