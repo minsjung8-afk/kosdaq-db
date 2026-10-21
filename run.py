@@ -111,12 +111,18 @@ def main():
     if a.job == "catchup":                   # 야간: 미수집분을 mezz → biz → fin → kpi 순으로, DART 한도 도달 시 중단(다음날 이어서)
         import common, mezz, business, financials, quarters
         done = lambda tbl: {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
+        def done_invest_latest(con):               # 이미 분기보고서(11012/11013/11014) 기준으로 받은 회사
+            try:
+                return {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM other_invest WHERE reprt_code IN ('11012','11013','11014')")}
+            except Exception:  # noqa
+                return set()
         steps = [("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("fin", lambda: financials.run([c for c in ccs if c not in done("fin_raw")], years)),
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),
                  ("quarters", lambda: quarters.run(ccs, con=con)),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
+                 ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=600))]   # 과거 시세(최근→과거, 시장별 600콜/일): 차트 5년·전체 기간용
         for name, fn in steps:
             if common.QUOTA_HIT and name != "price_backfill":                 # DART 한도 도달 시 DART 단계는 건너뛰고 KRX 시세 백필만 진행

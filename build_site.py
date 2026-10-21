@@ -283,7 +283,10 @@ def company_detail(con, c):
         "mezz_issue": _eb_target(con, c, q(con, "SELECT * FROM mezz_issue WHERE corp_code=? ORDER BY COALESCE(bddd, pymd, rcept_no) DESC", cc)),
         "news": q(con, "SELECT dt, title, source, url FROM news WHERE corp_code=? ORDER BY dt DESC LIMIT 60", cc),
         "peers": _peers(con, c, ps[0] if ps else None),
-        "other_invest": q(con, "SELECT * FROM other_invest WHERE corp_code=? AND bsns_year=(SELECT MAX(bsns_year) FROM other_invest WHERE corp_code=?) ORDER BY trmend_book_amt DESC LIMIT 8", cc, cc),
+        "other_invest": q(con, """SELECT * FROM other_invest WHERE corp_code=? AND COALESCE(rcept_no,'')||bsns_year||COALESCE(reprt_code,'11011') =
+                               (SELECT COALESCE(rcept_no,'')||bsns_year||COALESCE(reprt_code,'11011') FROM other_invest WHERE corp_code=?
+                                ORDER BY COALESCE(rcept_no,'') DESC, bsns_year DESC, CASE COALESCE(reprt_code,'11011') WHEN '11014' THEN 3 WHEN '11012' THEN 2 WHEN '11013' THEN 1 ELSE 0 END DESC LIMIT 1)
+                               ORDER BY trmend_book_amt DESC LIMIT 8""", cc, cc),   # 최신 보고서(접수번호 최대) 세트
     }
     d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], d["ratings"])
     halt = [r for r in prices[-60:] if r["close"] and not r["volume"] and r["open"] == r["high"] == r["low"] == r["close"]]   # 거래정지일(시·고·저 평탄화된 행)

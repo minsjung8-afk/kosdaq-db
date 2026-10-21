@@ -218,18 +218,52 @@ def fetch_conv_bonds(con, corp_code, bsns_year):
     con.commit()
 
 
-def fetch_other_investments(con, corp_code, bsns_year):
-    """타법인 출자현황"""
-    js = dart_get("otrCprInvstmntSttus", corp_code=corp_code, bsns_year=bsns_year, reprt_code="11011")
-    for r in js.get("list", []):
-        nm = r.get("inv_prm")
-        if not nm or nm in ("합계", "합 계"):
+def fetch_other_investments(con, corp_code, bsns_year, latest=True):
+    """타법인 출자현황 — latest=True면 최신 분기·반기보고서부터 시도(있으면 그것을 기준), 없으면 사업보고서(bsns_year).
+    저장 키는 (연도, 보고서코드)별로 두고 사이트는 접수번호가 가장 큰(최신) 보고서 세트를 보여준다."""
+    try:
+        con.execute("ALTER TABLE other_invest ADD COLUMN reprt_code TEXT")
+        con.execute("ALTER TABLE other_invest ADD COLUMN rcept_no TEXT")
+    except Exception:  # noqa
+        pass
+    plans = []
+    if latest:
+        from financials import latest_interim_plan
+        plans += [(str(y), rc) for y, rc in latest_interim_plan()[:2]]       # 최신 분기 후보 2개(예: 2026 반기, 2026 1Q)
+    plans.append((str(bsns_year), "11011"))
+    for y, rc in plans:
+        js = dart_get("otrCprInvstmntSttus", corp_code=corp_code, bsns_year=y, reprt_code=rc)
+        rows = [r for r in js.get("list", []) if r.get("inv_prm") and r.get("inv_prm") not in ("합계", "합 계")]
+        if not rows:
             continue
-        con.execute("""INSERT OR REPLACE INTO other_invest (corp_code, bsns_year, name, purpose, acqs_de, trmend_qota_rt, trmend_book_amt, recent_rev, recent_ni)
-                       VALUES (?,?,?,?,?,?,?,?,?)""",
-                    (corp_code, bsns_year, nm, r.get("invstmnt_purps"), r.get("frst_acqs_de"), to_num(r.get("trmend_blce_qota_rt")),
-                     to_num(r.get("trmend_blce_acntbk_amount")), to_num(r.get("recent_bsns_year_fnnr_sttus_tot_assets")), to_num(r.get("recent_bsns_year_fnnr_sttus_thstrm_ntpf"))))
+        con.execute("DELETE FROM other_invest WHERE corp_code=? AND bsns_year=? AND COALESCE(reprt_code,'11011')=?", (corp_code, y, rc))
+        for r in rows:
+            con.execute("""INSERT OR REPLACE INTO other_invest (corp_code, bsns_year, name, purpose, acqs_de, trmend_qota_rt, trmend_book_amt, recent_rev, recent_ni, reprt_code, rcept_no)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        (corp_code, y, r.get("inv_prm"), r.get("invstmnt_purps"), r.get("frst_acqs_de"), to_num(r.get("trmend_blce_qota_rt")),
+                         to_num(r.get("trmend_blce_acntbk_amount")), to_num(r.get("recent_bsns_year_fnnr_sttus_tot_assets")), to_num(r.get("recent_bsns_year_fnnr_sttus_thstrm_ntpf")),
+                         rc, r.get("rcept_no")))
+        con.commit()
+        return (y, rc)
     con.commit()
+    return None
+
+
+def refresh_other_investments(con, corp_codes, bsns_year):
+    """야간: 타법인 출자현황을 최신 분기보고서 기준으로 재수집(회사당 1~3콜). 한도 도달 시 중단."""
+    import common
+    n = 0
+    for i, cc in enumerate(corp_codes, 1):
+        try:
+            if fetch_other_investments(con, cc, bsns_year, latest=True):
+                n += 1
+        except Exception as e:  # noqa
+            log(con, cc, "invest_latest", "fail", e)
+            if common.QUOTA_HIT or "한도" in str(e):
+                print(f"[invest] DART 한도 도달 — {i}/{len(corp_codes)}에서 중단", flush=True); break
+        if i % 200 == 0:
+            print(f"[invest] {i}/{len(corp_codes)} · 갱신 {n}", flush=True)
+    print(f"[invest] 완료 {i}/{len(corp_codes)} · 갱신 {n}", flush=True)
 
 
 

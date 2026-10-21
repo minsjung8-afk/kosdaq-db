@@ -325,6 +325,9 @@ async function open(code){
       const head2=`<tr><th>항목</th>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>`<th class="n col${i===0?' sep':''}${r.kind==='interim'?' cur':''}" ${r.kind==='interim'?'style="box-shadow:inset 0 -3px 0 var(--gold)"':''}>${plink(r)}${r.kind!=='annual'?'<small style="font-weight:400;color:var(--mute)"> 누적</small>':''}</th>`).join('')).join('')}</tr>`;
       const body=groups.map(([cls,cols],gi)=>cols.map(([n,k,f,sub],ri)=>`<tr class="${cls}${gi>0&&ri===0?' gs':''}"><td>${n}${sub?' <small>(유무형상각비)</small>':''}</td>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>cell(d.kpi[fs],i,k,f,sub,i===0)).join('')).join('')}</tr>`).join('')).join('');
       h+=`<div class="src" style="margin:6px 0 6px">단위 억원 · 연간 2개년 + 전년동기·최근분기(누적) · ▲▼는 전년(동기) 대비 증감(금액·배수 %, 비율 %p) · 연도 클릭 → DART 보고서</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div>`;
+      {const RN={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const fs0=bases[0]&&bases[0][0]; const rows=fs0?d.kpi[fs0]:[];
+       const srcs=rows.map(r=>`${r.label||r.bsns_year} ${RN[r.reprt_code]||''}${r.kind!=='annual'?'(누적)':''}${r.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">${r.rcept_no}</a>`:''}`);
+       if(srcs.length) h+=`<div class="src" style="margin:4px 0 2px"><b>기준 보고서</b> · ${srcs.join(' · ')}</div>`;}
     }
   }
   h+=`</section>`;
@@ -361,7 +364,8 @@ async function open(code){
     }
     h+=`</section>`;
   }
-  if((d.other_invest||[]).length){ h+=`<section><h3>3-3. 타법인 출자 (최근 사업보고서, 장부가 상위)</h3><div class="twrap"><table><tr><th>출자회사</th><th>목적</th><th>최초취득</th><th class="n">지분율</th><th class="n">장부가(억)</th><th class="n">피출자사 순이익(억)</th></tr>${d.other_invest.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.purpose||'-')}</td><td>${esc(r.acqs_de||'-')}</td><td class="n">${pct(r.trmend_qota_rt)}</td><td class="n">${억(r.trmend_book_amt)}</td><td class="n ${r.recent_ni<0?'neg':''}">${억(r.recent_ni)}</td></tr>`).join('')}</table></div></section>`;}
+  if((d.other_invest||[]).length){ const oi=d.other_invest[0]; const RN2={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const oiSrc=`${oi.bsns_year} ${RN2[oi.reprt_code||'11011']}`+(oi.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${oi.rcept_no}" target="_blank" rel="noopener" style="color:#fff;text-decoration:underline">${oi.rcept_no}</a>`:'');
+    h+=`<section><h3>3-3. 타법인 출자 <span style="font-weight:400;font-size:12px;opacity:.85">기준 ${oiSrc} · 장부가 상위</span></h3><div class="twrap"><table><tr><th>출자회사</th><th>목적</th><th>최초취득</th><th class="n">지분율</th><th class="n">장부가(억)</th><th class="n">피출자사 순이익(억)</th></tr>${d.other_invest.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.purpose||'-')}</td><td>${esc(r.acqs_de||'-')}</td><td class="n">${pct(r.trmend_qota_rt)}</td><td class="n">${억(r.trmend_book_amt)}</td><td class="n ${r.recent_ni<0?'neg':''}">${억(r.recent_ni)}</td></tr>`).join('')}</table></div></section>`;}
   // 4 주가
   h+=`<section><h3>4. 주가추이 · 담보가치 참고</h3>`;
   if(d.prices.length){
