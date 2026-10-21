@@ -34,7 +34,7 @@ def corp_pairs(con, limit=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -79,6 +79,9 @@ def main():
             mezz.debug(con, a.debug)
         else:
             mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
+    if a.job == "subst":                     # 대용가(KRX 정보데이터시스템 MDCSTAT04001) 1콜
+        import subst
+        subst.run(start=a.start, con=con)
     if a.job == "quarters":                  # 8분기·LTM 분기 손익(등급사→코스피→코스닥 순, 한도까지)
         import quarters
         quarters.run(ccs, limit=a.limit, con=con)
@@ -89,8 +92,12 @@ def main():
         import delta
         delta.run(days=a.limit)
     if a.job == "daily":                     # 평일 아침: 시세 + 수시공시 델타(전환청구·리픽싱·5%보고·주요이벤트)
-        import prices, delta
+        import prices, delta, subst
         prices.run(pairs, a.year, markets=a.market)
+        try:
+            subst.run(con=con)                   # 대용가(KRX, 전종목 1콜) → price_summary.subst_price
+        except Exception as e:  # noqa
+            print("[daily] 대용가 실패:", e)
         try:
             delta.run()
         except Exception as e:  # noqa
