@@ -145,7 +145,7 @@ def _classify(header_text):
 
 
 UNIT = {"원": 1, "천원": 1e3, "백만원": 1e6, "억원": 1e8}
-PARSER_VER = 2       # 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱
+PARSER_VER = 3       # 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱
 
 
 def _unit(text):
@@ -153,57 +153,75 @@ def _unit(text):
     return UNIT.get(m.group(1), 1) if m else 1
 
 
+def _parse_tables(seg, out, lead_extra=""):
+    """세그먼트 안의 표들을 훑어 미상환 CB/BW/EB 행을 out에 추가. 반환: 추가 행 수"""
+    n0 = len(out)
+    for tm in re.finditer(r"<TABLE[^>]*>(.*?)</TABLE>", seg, flags=re.S | re.I):
+        lead = (lead_extra + " " + _strip(seg[max(0, tm.start() - 2500):tm.start()]))[-400:]     # 표 앞 제목·기준일·단위(작은 표 포함)
+        tbl = tm.group(1)
+        rows = [[_strip(c).replace("\n", " ").strip() for c in re.findall(r"<T[DHEU]\b[^>]*>(.*?)</T[DHEU]>", tr, flags=re.S | re.I)]
+                for tr in re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I)]
+        if not rows:
+            continue
+        head = " ".join(" ".join(r) for r in rows[:3])
+        if "미상환" not in (lead + head) or not re.search(r"전환|행사|교환", head):
+            continue
+        kind = _classify(lead[-80:] + " " + head)
+        if not kind:
+            continue
+        unit = _unit(lead)
+        for cells in rows:
+            cells = [c for c in cells if c]
+            if len(cells) < 4:
+                continue
+            if any(k in cells[0] for k in ("합계", "합 계", "종류", "구분")):
+                continue
+            dates = [c for c in cells if DATE_RE.search(c) and "~" not in c]
+            if len(dates) < 1:
+                continue
+            period = next((c for c in cells if "~" in c), None)
+            nums = [to_num(c.replace(",", "")) for c in cells if NUM_RE.match(c.replace(" ", "").replace(",", "")) and c not in dates]
+            nums = [v for v in nums if v is not None]
+            if len(nums) < 3:
+                continue
+            if len(nums) >= 5:
+                face, rt, prc, rem, stock = nums[0], nums[1], nums[2], nums[-2], nums[-1]
+            elif len(nums) == 4:
+                face, rt, prc, rem, stock = nums[0], None, nums[1], nums[2], nums[3]
+            else:
+                face, rt, prc, rem, stock = nums[0], None, None, nums[1], nums[2]
+            if rt is not None and rt > 1000:          # 비율 자리에 금액이 온 경우(전환비율 열 없음) 보정
+                face, rt, prc, rem, stock = nums[0], None, nums[1], nums[-2], nums[-1]
+            name = cells[0]
+            tm_cell = next((c for c in cells[1:3] if re.search(r"\d+\s*회", c)), None)   # 회차 열이 따로 있으면 이름 앞에 붙임
+            if tm_cell and tm_cell not in name:
+                name = f"{tm_cell} {name}"
+            row = {"kind": kind, "name": name[:80], "isu_dd": _d(dates[0]), "exprd_dd": _d(dates[1]) if len(dates) > 1 else None,
+                   "face_amt": face * unit, "cv_rt": rt, "cv_prc": prc, "remndr_amt": rem * unit, "remndr_stock": stock, "period": period}
+            if not any(r["kind"] == row["kind"] and r["name"] == row["name"] and r["isu_dd"] == row["isu_dd"] for r in out):
+                out.append(row)
+    return len(out) - n0
+
+
 def extract_outstanding(xml_text):
-    """정기보고서 'III-7. 증권의 발행을 통한 자금조달에 관한 사항'(구양식: 'I-3. 자본금 변동사항')의
-    '미상환 전환사채 / 신주인수권부사채 등 / 교환사채 발행현황' 표 → [dict]. 금액은 표 단위(백만원 등)를 원으로 환산."""
+    """정기보고서의 '미상환 전환사채 / 신주인수권부사채 등 / 교환사채 발행현황' 표 → [dict]. 금액은 표 단위(백만원 등)를 원으로 환산.
+    v3: 섹션 계층(SECTION-2/3)에 의존하지 않고 소제목 '미상환 … 발행현황' 위치 기준으로 다음 소제목까지의 표를 읽는다.
+        (서진시스템 등: '7. 증권의 발행…'이 SECTION-3으로 들어가 있어 SECTION-2 첫 제목 검사에서 통째로 빠지던 문제)"""
     out = []
-    for sec in re.findall(r"<SECTION-2[^>]*>(.*?)</SECTION-2>", xml_text, flags=re.S | re.I):
+    titles = [(m.start(), m.end(), _strip(m.group(1)).replace(" ", "")) for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml_text, flags=re.S | re.I)]
+    for i, (st, en, title) in enumerate(titles):
+        if "미상환" not in title or not re.search(r"전환사채|신주인수권|교환사채", title):
+            continue
+        nxt = titles[i + 1][0] if i + 1 < len(titles) else min(len(xml_text), en + 60000)
+        _parse_tables(xml_text[en:nxt], out, lead_extra=title)
+    if out:
+        return out
+    for sec in re.findall(r"<SECTION-[23][^>]*>(.*?)</SECTION-[23]>", xml_text, flags=re.S | re.I):   # 구양식·제목 변형 대비 폴백
         m = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", sec, flags=re.S | re.I)
         title = _strip(m.group(1)).replace(" ", "") if m else ""
         if not ("자금조달" in title or "자본금" in title or "증권의발행" in title):
             continue
-        for tm in re.finditer(r"<TABLE[^>]*>(.*?)</TABLE>", sec, flags=re.S | re.I):
-            lead = _strip(sec[max(0, tm.start() - 2500):tm.start()])[-400:]     # 표 앞 제목·기준일·단위(작은 표 포함)
-            tbl = tm.group(1)
-            rows = [[_strip(c).replace("\n", " ").strip() for c in re.findall(r"<T[DHE][^>]*>(.*?)</T[DHE]>", tr, flags=re.S | re.I)]
-                    for tr in re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I)]
-            if not rows:
-                continue
-            head = " ".join(" ".join(r) for r in rows[:3])
-            if "미상환" not in (lead + head) or not re.search(r"전환|행사|교환", head):
-                continue
-            kind = _classify(lead[-80:] + " " + head)
-            if not kind:
-                continue
-            unit = _unit(lead)
-            for cells in rows:
-                cells = [c for c in cells if c]
-                if len(cells) < 4:
-                    continue
-                if any(k in cells[0] for k in ("합계", "합 계", "종류", "구분")):
-                    continue
-                dates = [c for c in cells if DATE_RE.search(c) and "~" not in c]
-                if len(dates) < 1:
-                    continue
-                period = next((c for c in cells if "~" in c), None)
-                nums = [to_num(c.replace(",", "")) for c in cells if NUM_RE.match(c.replace(" ", "").replace(",", "")) and c not in dates]
-                nums = [v for v in nums if v is not None]
-                if len(nums) < 3:
-                    continue
-                if len(nums) >= 5:
-                    face, rt, prc, rem, stock = nums[0], nums[1], nums[2], nums[-2], nums[-1]
-                elif len(nums) == 4:
-                    face, rt, prc, rem, stock = nums[0], None, nums[1], nums[2], nums[3]
-                else:
-                    face, rt, prc, rem, stock = nums[0], None, None, nums[1], nums[2]
-                if rt is not None and rt > 1000:          # 비율 자리에 금액이 온 경우(전환비율 열 없음) 보정
-                    face, rt, prc, rem, stock = nums[0], None, nums[1], nums[-2], nums[-1]
-                name = cells[0]
-                tm_cell = next((c for c in cells[1:3] if re.search(r"\d+\s*회", c)), None)   # 회차 열이 따로 있으면 이름 앞에 붙임
-                if tm_cell and tm_cell not in name:
-                    name = f"{tm_cell} {name}"
-                out.append({"kind": kind, "name": name[:80], "isu_dd": _d(dates[0]), "exprd_dd": _d(dates[1]) if len(dates) > 1 else None,
-                            "face_amt": face * unit, "cv_rt": rt, "cv_prc": prc, "remndr_amt": rem * unit, "remndr_stock": stock, "period": period})
+        _parse_tables(sec, out)
     return out
 
 

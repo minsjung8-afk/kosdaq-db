@@ -373,7 +373,21 @@ async function open(code){
         <div class="tile"><div class="k">대용가 (KRX)</div><div class="v">${sub?num(sub)+'<small>원</small>':'<span class="src" style="font-size:14px">미수집</span>'}</div><div class="kvs"><b>현재가 대비</b><span>${sub&&ps.close?rel(sub,ps.close):'-'}</span></div></div>
         <div class="tile"><div class="k">담보가 (대용가×90%)</div><div class="v">${cv?num(Math.round(cv))+'<small>원</small>':'<span class="src" style="font-size:14px">미수집</span>'}</div><div class="kvs"><b>담보가 대비 현재가</b><span>${sgn(rel(ps.close,cv))}</span><b>담보가 대비 52주 최저</b><span class="${cv&&ps.low_52w&&ps.low_52w<cv?'bad':''}">${sgn(rel(ps.low_52w,cv))}</span></div></div>
         <div class="tile"><div class="k">일평균 거래대금</div><div class="v">${억(ps.avg_value_3m)}<small>억 (3M)</small></div><div class="kvs"><b>1년 평균</b><span>${v1y?억(v1y)+'억':'-'}</span></div></div>
-        </div>`})()}`;
+        </div>`})()}
+      ${(()=>{const px=(d.prices||[]); const a60=(()=>{const q=px.slice(-60); return q.length?q.reduce((x,r)=>x+r[4],0)/q.length:null})();
+        const sub=ps.subst_price||null, cv=sub?sub*0.9:null; const pts=[['52주 최저',ps.low_52w,'#b91c1c'],['담보가',cv,'#b45309'],['대용가',sub,'#1d4ed8'],['60일 평균',a60,'#6b7280'],['현재가',ps.close,'#1a3a6b'],['52주 최고',ps.high_52w,'#15803d']].filter(x=>x[1]).sort((a,b)=>a[1]-b[1]);
+        if(pts.length<2) return '';
+        const lo=pts[0][1]*0.92, hi=pts[pts.length-1][1]*1.04; const W=1000,L=70,R=70,Y=70,X=v=>L+(v-lo)/(hi-lo)*(W-L-R);
+        const band=(a,b,c)=>`<rect x="${X(a)}" y="${Y-11}" width="${X(b)-X(a)}" height="22" rx="4" fill="${c}"/>`;
+        const bands=cv?band(lo,cv,'#fee2e2')+band(cv,sub,'#fef3c7')+band(sub,hi,'#dcfce7'):band(lo,hi,'#eef2f7');
+        const legend=cv?`<g font-size="11" fill="#64748b"><rect x="${L}" y="134" width="10" height="10" rx="2" fill="#fee2e2"/><text x="${L+14}" y="143">담보가 하회(추가담보·처분 검토 구간)</text><rect x="${L+230}" y="134" width="10" height="10" rx="2" fill="#fef3c7"/><text x="${L+244}" y="143">담보가 ~ 대용가</text><rect x="${L+360}" y="134" width="10" height="10" rx="2" fill="#dcfce7"/><text x="${L+374}" y="143">대용가 상회</text></g>`:`<text x="${L}" y="143" font-size="11" fill="#64748b">대용가 미수집 — KRX 대용가 연결 후 담보가·대용가 구간 표시</text>`;
+        const foot=cv?`현재가 → 담보가 여유 <b>${((ps.close/cv-1)*100).toFixed(0)}%</b> (담보가까지 하락 여력) · 52주 최저 ${ps.low_52w<cv?'<b style="color:var(--bad)">담보가 하회</b>':'담보가 상회'} (담보가 대비 ${((ps.low_52w/cv-1)*100).toFixed(0)}%)`:`현재가는 52주 최저 대비 +${((ps.close/ps.low_52w-1)*100).toFixed(0)}%, 60일 평균 대비 ${a60?((ps.close/a60-1)*100).toFixed(0):'-'}%`;
+        return `<div class="cap2" style="margin:14px 16px 0">담보인정 시뮬레이션 (1주당) <span class="src" style="font-weight:400">담보가 = 대용가 × 90%</span></div>
+        <div style="margin:4px 16px 0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px 10px 2px"><svg viewBox="0 0 ${W} 150" width="100%" style="display:block;font-family:inherit">
+        ${bands}
+        ${pts.map((p,i)=>{const x=X(p[1]), up=i%2===0; const ty=up?Y-34:Y+40; return `<line x1="${x}" x2="${x}" y1="${up?Y-20:Y+11}" y2="${up?Y-11:Y+22}" stroke="${p[2]}" stroke-width="2"/><circle cx="${x}" cy="${Y}" r="${p[0]==='현재가'?7:5}" fill="${p[2]}" stroke="#fff" stroke-width="2"/><text x="${x}" y="${ty}" text-anchor="middle" font-size="12" font-weight="${p[0]==='현재가'||p[0]==='담보가'?700:500}" fill="${p[2]}">${p[0]}</text><text x="${x}" y="${ty+13}" text-anchor="middle" font-size="12" fill="#334155">${num(Math.round(p[1]))}원</text>`}).join('')}
+        ${legend}
+        </svg><div class="src" style="margin:0 0 6px">${foot}</div></div>`})()}`;
     // 대주주 담보제공 · 대량보유 변동 (5% 보고)
     {const mr=d.major_reports||[];
      h+=`<div class="g2c" style="margin:10px 16px 0;grid-template-columns:1fr">
@@ -422,7 +436,7 @@ async function open(code){
      const def=['1','3','3-1','4'].includes(key); const open=key in st?st[key]:def; if(!open) sec.classList.add('fold');
      h3.addEventListener('click',()=>{sec.classList.toggle('fold'); st[key]=!sec.classList.contains('fold'); try{localStorage.setItem('fold',JSON.stringify(st))}catch(e){}});});} $('#main').scrollTop=0;
   document.querySelectorAll('[data-ng]').forEach(b=>b.onclick=()=>{const u=document.getElementById('ng'+b.dataset.ng); u.hidden=!u.hidden; b.textContent=b.textContent.replace(u.hidden?'▴':'▾',u.hidden?'▾':'▴');});
-  if(d.prices.length) initChart(d.prices);
+  if(d.prices.length) initChart(d.prices,(d.price_summary||{}).subst_price||null);
 }
 let CH=null;
 function aggregate(p,tf){ // 일봉 → 주봉/월봉 집계
@@ -433,7 +447,7 @@ function aggregate(p,tf){ // 일봉 → 주봉/월봉 집계
     if(k!==key){ if(cur) out.push(cur); cur=[dt,o,h,l,c,v]; key=k; } else { cur[2]=Math.max(cur[2],h); cur[3]=Math.min(cur[3],l); cur[4]=c; cur[5]+=v; } }
   if(cur) out.push(cur); return out;
 }
-function initChart(prices){
+function initChart(prices,sub){
   const el=$('#px'), lg=$('#pxl');
   if(CH){ try{CH.chart.remove();}catch(e){} CH=null; }
   const cs=getComputedStyle(document.documentElement), tok=k=>cs.getPropertyValue(k).trim();
@@ -446,10 +460,11 @@ function initChart(prices){
   chart.priceScale('vol').applyOptions({scaleMargins:{top:0.82,bottom:0},borderVisible:false});
   candle.priceScale().applyOptions({scaleMargins:{top:0.06,bottom:0.22}});
   const mas={}; for(const n of [5,20,60,120]) mas[n]=chart.addLineSeries({color:MAC[n],lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,visible:n!==120});
-  CH={chart,candle,vol,mas,tf:'D',per:'1y',rows:[]};
+  CH={chart,candle,vol,mas,tf:'D',per:'1y',rows:[],sub};
   function load(tf){
     const rows=aggregate(prices,tf); CH.rows=rows; CH.tf=tf;
     candle.setData(rows.map(([t,o,h,l,c])=>({time:t,open:o,high:h,low:l,close:c})));
+    if(!CH.pl){CH.pl=1; const sub=CH.sub; if(sub){ candle.createPriceLine({price:sub,color:'#1d4ed8',lineWidth:1,lineStyle:2,title:'대용가'}); candle.createPriceLine({price:Math.round(sub*0.9),color:'#b45309',lineWidth:2,lineStyle:0,title:'담보가'}); } }
     vol.setData(rows.map(([t,o,,,c,v])=>({time:t,value:v,color:(c>=o?UP:DN)+'55'})));
     for(const n of [5,20,60,120]){ const d=[]; let s=0; for(let i=0;i<rows.length;i++){ s+=rows[i][4]; if(i>=n) s-=rows[i-n][4]; if(i>=n-1) d.push({time:rows[i][0],value:s/n}); } mas[n].setData(d); }
     range(CH.per);
