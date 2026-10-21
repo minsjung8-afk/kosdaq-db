@@ -284,6 +284,23 @@ def debug(con, stock_codes):
             print(f"[mezz-debug]   '{kw}' 출현 {xml.count(kw)}회")
         rows = extract_outstanding(xml)
         print(f"[mezz-debug]   추출 행 {len(rows)}: {[(r['kind'], r['name'], r['remndr_amt']) for r in rows][:6]}")
+        # 원문 구조 덤프: '미상환 전환사채 발행현황' 제목 뒤 첫 표의 원시 XML 2,500자 + 셀 파싱 결과 → 파서 보정용
+        mpos = xml.find("미상환 전환사채")
+        if mpos < 0:
+            mpos = xml.find("미상환")
+        if mpos >= 0:
+            raw = xml[mpos:mpos + 2500]
+            print("[mezz-debug]   RAW>>> " + raw.replace("\n", "⏎")[:2500])
+            tmatch = re.search(r"<TABLE[^>]*>(.*?)</TABLE>", xml[mpos:mpos + 60000], flags=re.S | re.I)
+            if tmatch:
+                trs = re.findall(r"<TR[^>]*>(.*?)</TR>", tmatch.group(1), flags=re.S | re.I)
+                print(f"[mezz-debug]   첫 표 TR {len(trs)}개")
+                for tr in trs[:6]:
+                    cells = [_strip(c).replace("\n", " ").strip() for c in re.findall(r"<T[DHE][^>]*>(.*?)</T[DHE]>", tr, flags=re.S | re.I)]
+                    print(f"[mezz-debug]     cells={cells}")
+            # 섹션 구조: 해당 위치를 감싸는 SECTION 태그 종류
+            before = xml[:mpos]
+            print("[mezz-debug]   앞쪽 SECTION 태그:", re.findall(r"<(SECTION-\d)", before)[-5:])
         con.execute("DELETE FROM mezz_checked WHERE corp_code=?", (cc,))
         con.commit()
         n = fetch_outstanding(con, cc)
