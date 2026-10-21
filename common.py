@@ -46,7 +46,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
                                            "payables REAL", "nwc REAL", "net_margin REAL", "borrow_op REAL",
                                            "contract_assets REAL", "contract_liab REAL", "advances REAL", "nwc_proj REAL")] + \
                  [("fin_raw", "rcept_no TEXT"), ("business", "rating_text TEXT"), ("business", "full_z BLOB"),
-                  ("other_invest", "reprt_code TEXT"), ("other_invest", "rcept_no TEXT")]
+                  ("other_invest", "reprt_code TEXT"), ("other_invest", "rcept_no TEXT"), ("business", "notes_z BLOB")]
     for tbl, col in migrations:                                   # 기존 DB 마이그레이션
         try:
             con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")

@@ -150,6 +150,30 @@ def prefetch_report(corp_code, bsns_year):
     return rcept_no, fetch_document_xml(rcept_no)
 
 
+NOTE_KEYS = ("차입금", "사채", "우발", "약정", "담보", "보증", "특수관계자", "소송", "리스", "금융부채", "매입채무", "파생")
+
+
+def extract_notes(xml_text: str, max_chars=400_000) -> str:
+    """재무제표 주석 중 심사 관련 절(차입금·사채·우발채무·약정·담보·보증·특수관계자·소송·리스·파생)만 평문으로 — 3-1 차입금·우발채무·계열용.
+    원문 zip은 보관하지 않으므로(용량), 여기서 뽑은 텍스트를 business.notes_z에 압축 저장해 재파싱에 쓴다."""
+    out = []
+    matches = []
+    for lv in ("1", "2", "3", "4", "5"):                                        # 계층별로 따로 훑는다(중첩 섹션은 역참조 매칭에 먹히므로)
+        matches += [m.group(1) for m in re.finditer(rf"<SECTION-{lv}[^>]*>(.*?)</SECTION-{lv}>", xml_text, flags=re.S | re.I)]
+    for sec in matches:
+        t = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", sec, flags=re.S | re.I)
+        title = _strip(t.group(1)) if t else ""
+        if not title or not any(k in title.replace(" ", "") for k in NOTE_KEYS):
+            continue
+        if re.search(r"<SECTION-\d", sec, flags=re.I):          # 하위 섹션이 있는 상위 절은 건너뜀(하위에서 잡힘)
+            continue
+        body = _strip(sec)
+        if len(body) > 200:
+            out.append(f"### {title}\n{body}")
+    txt = "\n\n".join(out)
+    return txt[:max_chars]
+
+
 def fetch_business(con, corp_code, bsns_year, pre=None):
     rcept_no, xml_text = pre if pre else prefetch_report(corp_code, bsns_year)
     if not rcept_no:
@@ -157,16 +181,22 @@ def fetch_business(con, corp_code, bsns_year, pre=None):
         return False
     full, overview = extract_business_section(xml_text)
     rating_text = extract_rating_section(xml_text)
+    notes = extract_notes(xml_text)
+    try:
+        con.execute("ALTER TABLE business ADD COLUMN notes_z BLOB")
+    except Exception:  # noqa
+        pass
     for nm, cnt, rate in extract_major_holders(xml_text):
         con.execute("INSERT OR REPLACE INTO major_holder VALUES (?,?,?,?,?)", (corp_code, bsns_year, nm, cnt, rate))
     if not full:
         log(con, corp_code, f"biz_{bsns_year}", "fail", "사업의 내용 섹션 미검출")
         return False
     con.execute("""INSERT INTO business (corp_code, bsns_year, rcept_no, reprt_code, overview_text, full_z,
-        char_len, fetched_at, rating_text) VALUES (?,?,?,?,?,?,?,?,?)
+        char_len, fetched_at, rating_text, notes_z) VALUES (?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(corp_code, bsns_year) DO UPDATE SET rcept_no=excluded.rcept_no, overview_text=excluded.overview_text,
-        full_z=excluded.full_z, full_text=NULL, char_len=excluded.char_len, fetched_at=excluded.fetched_at, rating_text=excluded.rating_text""",
-                (corp_code, bsns_year, rcept_no, "11011", overview, zpack(full), len(full), now(), rating_text))
+        full_z=excluded.full_z, full_text=NULL, char_len=excluded.char_len, fetched_at=excluded.fetched_at, rating_text=excluded.rating_text,
+        notes_z=excluded.notes_z""",
+                (corp_code, bsns_year, rcept_no, "11011", overview, zpack(full), len(full), now(), rating_text, zpack(notes) if notes else None))
     con.commit()
     log(con, corp_code, f"biz_{bsns_year}", "ok", f"{len(full)} chars")
     return True
