@@ -15,7 +15,7 @@ on:
         description: "run.py job"
         default: "price"
         type: choice
-        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted, quarters, subst]
+        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted, quarters, subst, fin_fast]
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only / unlisted: --type 기업신용평가)"
         default: ""
@@ -78,6 +78,7 @@ jobs:
       - name: collect
         env:
           PYTHONUNBUFFERED: "1"
+          TZ: Asia/Seoul                         # 러너는 UTC — 날짜 판단(오늘·전일·공시 기간)을 한국시간으로
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

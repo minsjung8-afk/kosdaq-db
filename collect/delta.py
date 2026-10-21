@@ -59,7 +59,7 @@ def run(days=None, bgn=None, end=None):
     if not bgn:
         last = con.execute("SELECT MAX(msg) FROM fetch_log WHERE job='delta' AND status='ok'").fetchone()[0]
         if last and not days:
-            bgn = (date.fromisoformat(last) + timedelta(days=1)).strftime("%Y%m%d")
+            bgn = date.fromisoformat(last).strftime("%Y%m%d")      # 마지막 실행일부터 다시(같은 날 저녁 공시 누락 방지 — rcept_no로 중복 제거)
         else:
             bgn = (date.today() - timedelta(days=days or 3)).strftime("%Y%m%d")
     end = end or date.today().strftime("%Y%m%d")

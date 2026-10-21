@@ -23,11 +23,16 @@ cat > "$PLIST" <<EOF
   <key>Label</key><string>com.kosdaq.subst</string>
   <key>ProgramArguments</key><array><string>$PY</string><string>$REPO/tools/subst_local.py</string></array>
   <key>StartCalendarInterval</key><array>
-    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>50</integer></dict>
-    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>50</integer></dict>
-    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>50</integer></dict>
-    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>50</integer></dict>
-    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>10</integer></dict>
   </array>
   <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
   <key>StandardOutPath</key><string>$HOME/kosdaq_subst/launchd.out</string>
@@ -38,6 +43,6 @@ mkdir -p "$HOME/kosdaq_subst"
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 echo "launchd 등록 완료 (평일 06:50). 자동 깨우기 예약(관리자 비밀번호 필요):"
-sudo pmset repeat wakeorpoweron MTWRF 06:45:00
+sudo pmset repeat wakeorpoweron MTWRF 06:15:00
 echo "즉시 1회 테스트 실행:"
 "$PY" "$REPO/tools/subst_local.py"

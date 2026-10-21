@@ -265,6 +265,52 @@ def rebuild_kpi_all(con):
     return len(keys)
 
 
+def run_annual_fast(corp_codes, year, con=None):
+    """연간 재무 빠른 수집: 최근 사업보고서 1건(전체 재무제표, 연결 우선→없으면 별도)으로 당기·전기 2개년을 함께 적재.
+    회사당 1~2콜(기존 run은 8~14콜). 분기·반기는 quarters가 담당. DART 한도 도달 시 중단."""
+    import common
+    con = con or connect()
+    ensure_cum_table(con)
+    cs = list(corp_codes)
+    n = i = 0
+    for i, cc in enumerate(cs, 1):
+        try:
+            got = False
+            for fs in ("CFS", "OFS"):
+                js = dart_get("fnlttSinglAcntAll", corp_code=cc, bsns_year=str(year), reprt_code="11011", fs_div=fs)
+                lst = js.get("list", [])
+                if not lst:
+                    continue
+                for y, key in ((str(year), "thstrm_amount"), (str(year - 1), "frmtrm_amount")):
+                    con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=?", (cc, y, fs))
+                    for r in lst:
+                        con.execute("""INSERT OR REPLACE INTO fin_raw (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm,
+                            thstrm_amount, frmtrm_amount, bfefrmtrm_amount, ord, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                    (cc, y, "11011", fs, r.get("sj_div"), r.get("account_id"), r.get("account_nm"),
+                                     to_num(r.get(key)), to_num(r.get("frmtrm_amount")) if key == "thstrm_amount" else to_num(r.get("bfefrmtrm_amount")),
+                                     None, int(r.get("ord") or 0), r.get("rcept_no") if key == "thstrm_amount" else None))
+                    build_kpi(con, cc, y, "11011")
+                got = True
+                break
+            if not got:      # 올해 사업보고서가 없으면(신규 상장 등) 전년도 시도
+                for fs in ("CFS", "OFS"):
+                    if fetch_fin_raw(con, cc, str(year - 1), "11011", fs_divs=(fs,)):
+                        build_kpi(con, cc, str(year - 1), "11011")
+                        got = True
+                        break
+            log(con, cc, "fin_fast", "ok" if got else "empty")
+            n += got
+        except Exception as e:  # noqa
+            log(con, cc, "fin_fast", "fail", e)
+            if common.QUOTA_HIT or "한도" in str(e):
+                print(f"[fin] DART 한도 도달 — {i}/{len(cs)}에서 중단", flush=True); break
+        con.commit()
+        if i % 100 == 0:
+            print(f"[fin] {i}/{len(cs)} · 적재 {n}", flush=True)
+    print(f"[fin] 완료 {i}/{len(cs)} · 적재 {n}", flush=True)
+    return n
+
+
 def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):
     """years: 연간(사업보고서) 적재 연도. interim=True면 최근 분기 + 전년 동기 추가.
     오늘 기준 기본: 직전 2개년 연간 + 최근분기·전년동기 = 회사당 (2+2)×2(연결/별도) = 8호출"""

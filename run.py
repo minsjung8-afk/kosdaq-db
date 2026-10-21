@@ -34,7 +34,7 @@ def corp_pairs(con, limit=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -85,6 +85,10 @@ def main():
             mezz.debug(con, a.debug)
         else:
             mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
+    if a.job == "fin_fast":                  # 연간 재무 빠른 수집(연간 재무 없는 회사만, 회사당 1~2콜)
+        import financials
+        have = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_kpi WHERE reprt_code='11011' AND revenue IS NOT NULL")}
+        financials.run_annual_fast([c for c in ccs if c not in have], a.year - 1, con=con)
     if a.job == "subst":                     # 대용가(KRX 정보데이터시스템 MDCSTAT04001) 1콜
         import subst
         subst.run(start=a.start, con=con)
@@ -111,6 +115,8 @@ def main():
     if a.job == "catchup":                   # 야간: 미수집분을 mezz → biz → fin → kpi 순으로, DART 한도 도달 시 중단(다음날 이어서)
         import common, mezz, business, financials, quarters
         done = lambda tbl: {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
+        def done_annual(con):                      # 연간(사업보고서) 재무 지표가 있는 회사
+            return {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_kpi WHERE reprt_code='11011' AND revenue IS NOT NULL")}
         def done_notes(con):
             try:
                 return {r[0] for r in con.execute("SELECT corp_code FROM notes_latest")}
@@ -124,14 +130,14 @@ def main():
         steps = [("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
-                 ("fin", lambda: financials.run([c for c in ccs if c not in done("fin_raw")], years)),
-                 ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),
-                 ("quarters", lambda: quarters.run(ccs, con=con)),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
+                 ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
+                 ("quarters", lambda: quarters.run(ccs, con=con)),
+                 ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=600))]   # 과거 시세(최근→과거, 시장별 600콜/일): 차트 5년·전체 기간용
         for name, fn in steps:
-            if common.QUOTA_HIT and name != "price_backfill":                 # DART 한도 도달 시 DART 단계는 건너뛰고 KRX 시세 백필만 진행
+            if common.QUOTA_HIT and name not in ("price_backfill", "kpi"):      # DART 한도 도달 시 DART 단계만 건너뜀(kpi 재계산·KRX 시세 백필은 진행)
                 print(f"[catchup] DART 한도 도달 — {name} 건너뜀(내일)", flush=True); continue
             print(f"[catchup] {name} 시작", flush=True)
             try:
