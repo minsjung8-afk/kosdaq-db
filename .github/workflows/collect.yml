@@ -2,6 +2,7 @@ name: collect-and-deploy
 on:
   schedule:
     - cron: "0 22 * * 0-4"     # 평일 07:00 KST: 시세 + 대용가 + 수시공시 델타(daily)
+    - cron: "30 23 * * 0-4"    # 평일 08:30 KST: daily 재실행(07:00에 KRX 전일 시세가 아직 미집계였을 때 보완; 받은 날짜는 건너뜀)
     - cron: "10 15 * * *"      # 매일 00:10 KST: catchup(미수집분 mezz→biz→fin→kpi→quarters, 한도까지)
     - cron: "30 20 2 * *"      # 매월 2일 05:30 KST: 재무(연간+최근분기)
     - cron: "30 20 1,15 * *"   # 매월 1일·15일 05:30 KST: 신용등급

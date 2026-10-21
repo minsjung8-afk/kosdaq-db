@@ -18,18 +18,25 @@ def _ensure_fetched_table(con):
 def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=None):
     """start~end 거래일마다 해당 시장 전종목 1호출. 이미 적재된 (시장, 날짜)는 건너뜀. 반환: 호출 수"""
     _ensure_fetched_table(con)
+    # 복구: 최근 10일 중 '빈 응답'으로 적재완료 표시됐지만 실제 시세가 없는 날짜는 다시 받는다
+    #  (07:00 daily가 당일/전일을 KRX 집계 전에 조회 → 빈 응답을 휴장일로 오인해 영구 건너뛰던 문제)
+    con.execute("""DELETE FROM _price_fetched WHERE market=? AND dt >= date('now','-10 days')
+                   AND dt NOT IN (SELECT DISTINCT dt FROM price_daily WHERE dt >= date('now','-10 days'))""", (market,))
     have = {r[0] for r in con.execute("SELECT dt FROM _price_fetched WHERE market=?", (market,))}
+    today = date.today().isoformat()
     n = 0
     for d in trading_days(start, end):
         iso = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
-        if iso in have:
+        if iso in have or iso > today:
             continue
         rows = daily_all(market, d)
         n += 1
-        con.execute("INSERT OR IGNORE INTO _price_fetched VALUES (?,?)", (market, iso))
         if not rows:
+            if iso < (date.today() - timedelta(days=7)).isoformat():     # 일주일 넘게 지난 빈 날짜만 휴장일로 확정
+                con.execute("INSERT OR IGNORE INTO _price_fetched VALUES (?,?)", (market, iso))
             con.commit()
-            continue  # 휴장일
+            continue  # 휴장일 또는 아직 미집계(최근 7일은 다음 실행에서 재시도)
+        con.execute("INSERT OR IGNORE INTO _price_fetched VALUES (?,?)", (market, iso))
         if only_codes:
             rows = [r for r in rows if r["stock_code"] in only_codes]
         con.executemany("INSERT OR REPLACE INTO price_daily VALUES (?,?,?,?,?,?,?)",
