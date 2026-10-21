@@ -82,11 +82,11 @@ def _safe(fn):
         return []
 
 def _quarters(con, cc):
-    """fin_kpi의 연간·분기(누적) 행에서 분기별 손익을 복원 → 최근 최대 8분기 [{label, rev, op, nd, ltm_rev, ltm_op, ltm_ebitda}].
+    """fin_kpi의 연간·분기(누적) 행에서 분기별 손익을 복원 → 최근 최대 12분기 [{label, rev, op, cogs, nd, ltm_rev, ltm_op, ltm_cogs, ltm_ebitda}].
     1Q=1Q누적, 2Q=반기−1Q, 3Q=3Q누적−반기, 4Q=연간−3Q누적. 누락 분기는 None. LTM은 연속 4분기 합(없으면 None)."""
     out = {}
     for fs in ("CFS", "OFS"):
-        rows = q(con, "SELECT bsns_year, reprt_code, revenue, op_income, ebitda, net_borrowings FROM fin_kpi WHERE corp_code=? AND fs_div=? ORDER BY bsns_year, reprt_code", cc, fs)
+        rows = q(con, "SELECT bsns_year, reprt_code, revenue, op_income, ebitda, net_borrowings, cogs FROM fin_kpi WHERE corp_code=? AND fs_div=? ORDER BY bsns_year, reprt_code", cc, fs)
         if not rows:
             continue
         by = {(r["bsns_year"], r["reprt_code"]): r for r in rows}
@@ -99,7 +99,7 @@ def _quarters(con, cc):
                 r = cum[qn]
                 if r is None:
                     prevc = None if qn != "1" else prevc
-                    qs.append({"label": f"{y[2:]}.{qn}Q", "rev": None, "op": None, "ebitda": None, "nd": None, "_y": y, "_q": qn})
+                    qs.append({"label": f"{y[2:]}.{qn}Q", "rev": None, "op": None, "ebitda": None, "cogs": None, "nd": None, "_y": y, "_q": qn})
                     continue
                 def diff(k):
                     if r[k] is None:
@@ -109,19 +109,22 @@ def _quarters(con, cc):
                     if prevc is None or prevc[k] is None:
                         return None
                     return r[k] - prevc[k]
-                qs.append({"label": f"{y[2:]}.{qn}Q", "rev": diff("revenue"), "op": diff("op_income"), "ebitda": diff("ebitda"), "nd": r["net_borrowings"], "_y": y, "_q": qn})
+                qs.append({"label": f"{y[2:]}.{qn}Q", "rev": diff("revenue"), "op": diff("op_income"), "ebitda": diff("ebitda"), "cogs": diff("cogs"), "nd": r["net_borrowings"], "_y": y, "_q": qn})
                 prevc = r
-        # 뒤에서부터 값 있는 분기만 남기되 순서 유지, 최근 8개
+        # 뒤에서부터 값 있는 분기만 남기되 순서 유지, 최근 12개
         while qs and qs[-1]["rev"] is None:
             qs.pop()
-        qs = qs[-8:]
+        qs = qs[-12:]
+        while qs and qs[0]["rev"] is None:
+            qs.pop(0)
         for i, qx in enumerate(qs):
             win = qs[i - 3:i + 1] if i >= 3 else []
             if len(win) == 4 and all(w["rev"] is not None and w["op"] is not None for w in win):
                 qx["ltm_rev"] = sum(w["rev"] for w in win); qx["ltm_op"] = sum(w["op"] for w in win)
                 qx["ltm_ebitda"] = sum(w["ebitda"] for w in win) if all(w["ebitda"] is not None for w in win) else None
+                qx["ltm_cogs"] = sum(w["cogs"] for w in win) if all(w["cogs"] is not None for w in win) else None
             else:
-                qx["ltm_rev"] = qx["ltm_op"] = qx["ltm_ebitda"] = None
+                qx["ltm_rev"] = qx["ltm_op"] = qx["ltm_ebitda"] = qx["ltm_cogs"] = None
             qx.pop("_y", None); qx.pop("_q", None)
         if any(qx["rev"] is not None for qx in qs):
             out[fs] = qs

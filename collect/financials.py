@@ -7,6 +7,7 @@ REPRT = {"11011": "사업", "11012": "반기", "11013": "1Q", "11014": "3Q"}
 KPI_MAP = {
     "revenue":      (["ifrs-full_Revenue"], ["매출액", "수익(매출액)", "영업수익"]),
     "op_income":    (["dart_OperatingIncomeLoss"], ["영업이익"]),
+    "cogs":         (["ifrs-full_CostOfSales"], ["매출원가", "영업원가"]),
     "net_income":   (["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)"]),
     "total_assets": (["ifrs-full_Assets"], ["자산총계"]),
     "total_liab":   (["ifrs-full_Liabilities"], ["부채총계"]),
@@ -33,19 +34,37 @@ BORROW_KEYS = ["단기차입금", "장기차입금", "유동성장기부채", "�
                "리스부채", "유동리스부채", "비유동리스부채", "장기사채"]
 
 
-def fetch_fin_raw(con, corp_code, bsns_year, reprt_code="11011"):
+def _cum(r, key):
+    """분기·반기보고서 손익계산서는 thstrm_amount=3개월, thstrm_add_amount=누적 → 누적을 쓴다(사업보고서·BS·CF는 그대로)"""
+    add = r.get(key.replace("_amount", "_add_amount"))
+    if r.get("sj_div") in ("IS", "CIS") and add not in (None, "", "-"):
+        return to_num(add)
+    return to_num(r.get(key))
+
+
+def ensure_cum_table(con):
+    con.execute("CREATE TABLE IF NOT EXISTS fin_cum_ok (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code))")
+
+
+def fetch_fin_raw(con, corp_code, bsns_year, reprt_code="11011", fs_divs=("CFS", "OFS")):
     n = 0
-    for fs_div in ("CFS", "OFS"):
+    ensure_cum_table(con)
+    for fs_div in fs_divs:
         js = dart_get("fnlttSinglAcntAll", corp_code=corp_code, bsns_year=bsns_year,
                       reprt_code=reprt_code, fs_div=fs_div)
-        for r in js.get("list", []):
+        lst = js.get("list", [])
+        if lst:
+            con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, bsns_year, reprt_code, fs_div))
+        for r in lst:
             con.execute("""INSERT OR REPLACE INTO fin_raw (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm,
                 thstrm_amount, frmtrm_amount, bfefrmtrm_amount, ord, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (corp_code, bsns_year, reprt_code, fs_div, r.get("sj_div"),
                          r.get("account_id"), r.get("account_nm"),
-                         to_num(r.get("thstrm_amount")), to_num(r.get("frmtrm_amount")),
+                         _cum(r, "thstrm_amount"), _cum(r, "frmtrm_amount"),
                          to_num(r.get("bfefrmtrm_amount")), int(r.get("ord") or 0), r.get("rcept_no")))
             n += 1
+    if n:
+        con.execute("INSERT OR IGNORE INTO fin_cum_ok VALUES (?,?,?)", (corp_code, str(bsns_year), reprt_code))   # 누적 기준으로 받은 보고서 표시
     con.commit()
     return n
 
@@ -116,6 +135,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         eq, rev = k.get("equity"), k.get("revenue")
         k["debt_ratio"] = round(k["total_liab"] / eq * 100, 1) if k.get("total_liab") and eq else None
         k["op_margin"] = round(k["op_income"] / rev * 100, 1) if k.get("op_income") is not None and rev else None
+        k["cogs_ratio"] = round(k["cogs"] / rev * 100, 1) if k.get("cogs") is not None and rev else None
         k["net_borrow_ratio"] = round((k["borrowings"] - (k.get("cash") or 0)) / eq * 100, 1) \
             if k.get("borrowings") is not None and eq else None
         k["net_borrowings"] = (k["borrowings"] - (k.get("cash") or 0)) if k.get("borrowings") is not None else None
@@ -145,8 +165,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             total_assets, total_liab, equity, cash, borrowings, cfo, debt_ratio, op_margin, net_borrow_ratio,
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
             cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
-            payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
@@ -155,7 +175,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("cur_assets"), k.get("cur_liab"), k.get("receivables"), k.get("inventory"), k.get("capital"),
                      k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda"),
                      k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op"),
-                     k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj")))
+                     k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio")))
     con.commit()
 
 

@@ -1,4 +1,4 @@
-"""분기 손익 수집(LTM·8분기 추이용): DART 주요계정 API(fnlttSinglAcnt)로 최근 8분기를 복원하는 데 필요한 보고서를 채운다.
+"""분기 손익 수집(LTM·12분기 추이용): DART 전체 재무제표 API(fnlttSinglAcntAll, 주 재무제표 1콜)로 최근 8분기를 복원하는 데 필요한 보고서를 채운다.
 - 보고서 1개 = 1콜(연결·별도 행이 같이 옴). 매출액·영업이익·당기순이익(누적)과 자산·부채·자본만 → fin_kpi에 '빈 열 많은' 행으로 적재.
   이미 fin(전체계정)으로 채워진 (연도,보고서,fs_div) 행은 건드리지 않음.
 - 분기별 값은 build_site._quarters가 누적 차감(2Q=반기−1Q, 4Q=연간−3Q)으로 복원하므로 누적금액(thstrm_add_amount)을 저장.
@@ -20,7 +20,7 @@ NM = {"매출액": "revenue", "수익(매출액)": "revenue", "영업수익": "r
       "자산총계": "total_assets", "부채총계": "total_liab", "자본총계": "equity"}
 
 
-def needed_reports(today=None, n_q=8):
+def needed_reports(today=None, n_q=12):
     """오늘 기준 제출된 최신 분기부터 거꾸로 n_q+1개 분기(차감 복원에 직전 분기 필요) → [(year, reprt_code)] 최신순"""
     d = today or date.today()
     y = d.year
@@ -48,36 +48,33 @@ def _ensure(con):
                    PRIMARY KEY (corp_code, bsns_year, reprt_code))""")
 
 
+def _fs_of(con, cc):
+    """회사의 주 재무제표 구분(연결 있으면 CFS) — 연간 데이터로 판단, 모르면 둘 다"""
+    r = con.execute("SELECT fs_div FROM fin_kpi WHERE corp_code=? AND reprt_code='11011' AND revenue IS NOT NULL ORDER BY fs_div='CFS' DESC LIMIT 1", (cc,)).fetchone()
+    return (r[0],) if r else ("CFS", "OFS")
+
+
 def fetch_report(con, cc, year, rc):
-    """1콜 → fin_kpi 행(CFS/OFS) 삽입(기존 행 보존). 반환 저장 fs_div 수"""
-    js = dart_get("fnlttSinglAcnt", corp_code=cc, bsns_year=year, reprt_code=rc)
-    acc = {}
-    for r in js.get("list", []):
-        fs = r.get("fs_div")
-        key = NM.get((r.get("account_nm") or "").replace(" ", ""))
-        if not fs or not key:
-            continue
-        v = to_num(r.get("thstrm_add_amount")) if r.get("sj_div") == "IS" and r.get("thstrm_add_amount") not in (None, "", "-") else to_num(r.get("thstrm_amount"))
-        acc.setdefault(fs, {}).setdefault(key, v)        # 같은 계정 복수행이면 첫 행
+    """전체 재무제표 API(fnlttSinglAcntAll) 1콜(주 재무제표만) → fin_raw(손익은 누적) → build_kpi. 매출원가·감가상각까지 확보. 반환 저장 행 수"""
+    from financials import fetch_fin_raw, build_kpi
     n = 0
-    for fs, k in acc.items():
-        if k.get("revenue") is None and k.get("op_income") is None:
-            continue
-        con.execute("""INSERT OR IGNORE INTO fin_kpi (corp_code, bsns_year, reprt_code, fs_div, revenue, op_income, net_income, total_assets, total_liab, equity,
-                       debt_ratio, op_margin, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (cc, year, rc, fs, k.get("revenue"), k.get("op_income"), k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
-                     (k["total_liab"] / k["equity"] * 100) if k.get("total_liab") is not None and k.get("equity") else None,
-                     (k["op_income"] / k["revenue"] * 100) if k.get("op_income") is not None and k.get("revenue") else None,
-                     next((r.get("rcept_no") for r in js.get("list", []) if r.get("rcept_no")), None)))
-        n += 1
+    for fs in _fs_of(con, cc):
+        n = fetch_fin_raw(con, cc, year, rc, fs_divs=(fs,))
+        if n:
+            break
+    if n:
+        build_kpi(con, cc, year, rc)
     return n
 
 
 def plan_for(con, cc, reports):
-    """이 회사에 아직 없는 (year, rc) 목록 — fin_kpi에 매출 있는 행이 있거나 quarters_done에 기록되면 제외"""
-    have = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM fin_kpi WHERE corp_code=? AND revenue IS NOT NULL", (cc,))}
-    done = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM quarters_done WHERE corp_code=?", (cc,))}
-    return [(y, rc) for (y, rc) in reports if (y, rc) not in have and (y, rc) not in done]
+    """아직 '누적 기준'으로 받지 않은 (year, rc) — 연간은 fin_raw 있으면 완료, 분기·반기는 fin_cum_ok 표시가 있어야 완료"""
+    from financials import ensure_cum_table
+    ensure_cum_table(con)
+    ann = {(r[0], r[1]) for r in con.execute("SELECT DISTINCT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND reprt_code='11011'", (cc,))}
+    ok = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM fin_cum_ok WHERE corp_code=?", (cc,))}
+    empty = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM quarters_done WHERE corp_code=? AND status='empty'", (cc,))}
+    return [(y, rc) for (y, rc) in reports if (y, rc) not in ann and (y, rc) not in ok and (y, rc) not in empty]
 
 
 def priority(con, corp_codes):
