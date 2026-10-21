@@ -6,12 +6,14 @@
 #   R2_ACCESS_KEY_ID=...
 #   R2_SECRET_ACCESS_KEY=...
 #   R2_BUCKET=kosdaq-db
+#   KRX_ID=KRX Data Marketplace 아이디
+#   KRX_PW=비밀번호   (전종목 대용가 조회는 로그인 필요)
 set -e
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 [ -f "$HOME/.kosdaq_r2.env" ] || { echo "~/.kosdaq_r2.env 가 없습니다. 먼저 만들어 주세요."; exit 1; }
+grep -q "^KRX_ID=" "$HOME/.kosdaq_r2.env" || echo "경고: KRX_ID/KRX_PW 가 ~/.kosdaq_r2.env 에 없습니다 — 로그인 없이는 400(LOGOUT)으로 실패합니다."
 chmod 600 "$HOME/.kosdaq_r2.env"
-command -v aws >/dev/null || { echo "aws cli 설치 중..."; brew install awscli; }
-python3 -c "import requests" 2>/dev/null || python3 -m pip install --user requests
+python3 -c "import requests, boto3" 2>/dev/null || { echo "파이썬 패키지(requests, boto3) 설치 중..."; python3 -m pip install --user --quiet requests boto3 || python3 -m pip install --user --quiet --break-system-packages requests boto3; }
 PY="$(command -v python3)"
 PLIST="$HOME/Library/LaunchAgents/com.kosdaq.subst.plist"
 cat > "$PLIST" <<EOF

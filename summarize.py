@@ -107,6 +107,8 @@ def run_rating(corp_codes=None, force=False, model="claude-sonnet-4-5"):
                           CASE WHEN r.target_type LIKE '%기업신용평가%' THEN 0 ELSE 1 END AS pri
                           FROM credit_rating r WHERE r.file_url IS NOT NULL
                           AND (r.target_type LIKE '%기업신용평가%' OR r.target_type LIKE '%사채%')
+                          AND COALESCE(r.grade,'') NOT IN ('취소','철회','WD','NR','-')          -- 등급취소 공시(평가서에 심사정보 없음)는 요약 대상에서 제외
+                          AND COALESCE(r.eval_kind,'') NOT LIKE '%취소%' AND COALESCE(r.eval_kind,'') NOT LIKE '%철회%'
                           ORDER BY r.corp_code, pri, r.disc_dt DESC""").fetchall()
     latest = {}
     for r in rows:

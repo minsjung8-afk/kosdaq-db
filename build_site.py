@@ -269,7 +269,7 @@ def company_detail(con, c):
         "prices": [[p["dt"], p["open"], p["high"], p["low"], p["close"], p["volume"]] for p in prices],
         "rating_text": b.get("rating_text"),
         "rating_summary": (lambda rs: {**rs[0], "summary": json.loads(rs[0]["summary_json"])} if rs else None)(
-            q(con, "SELECT agency, disc_dt, grade, file_url, summary_json, summary_md FROM rating_summary WHERE corp_code=?", cc)),
+            q(con, "SELECT agency, disc_dt, grade, file_url, summary_json, summary_md FROM rating_summary WHERE corp_code=? AND COALESCE(grade,'') NOT IN ('취소','철회','WD','NR','-')", cc)),   # 등급취소 요약은 사용 안 함(사업보고서 요약/원문으로 대체)
         "ratings": q(con, "SELECT agency, target_type, eval_kind, disc_dt, grade, watch, outlook, file_url FROM credit_rating WHERE corp_code=? ORDER BY disc_dt DESC", cc),
         "events": q(con, "SELECT rcept_dt, flag, report_nm, rcept_no FROM disclosure_event WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 20", cc),
         "reports": q(con, """SELECT m.pub_dt, m.source, m.publisher, m.analyst, m.title, m.url, m.opinion, m.target_price, m.old_target_price,
