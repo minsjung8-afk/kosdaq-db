@@ -114,10 +114,11 @@ def main():
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("fin", lambda: financials.run([c for c in ccs if c not in done("fin_raw")], years)),
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),
-                 ("quarters", lambda: quarters.run(ccs, con=con))]                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
+                 ("quarters", lambda: quarters.run(ccs, con=con)),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
+                 ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=600))]   # 과거 시세(최근→과거, 시장별 600콜/일): 차트 5년·전체 기간용
         for name, fn in steps:
-            if common.QUOTA_HIT:
-                print(f"[catchup] DART 한도 도달 — {name} 이후 단계는 내일로", flush=True); break
+            if common.QUOTA_HIT and name != "price_backfill":                 # DART 한도 도달 시 DART 단계는 건너뛰고 KRX 시세 백필만 진행
+                print(f"[catchup] DART 한도 도달 — {name} 건너뜀(내일)", flush=True); continue
             print(f"[catchup] {name} 시작", flush=True)
             try:
                 fn()

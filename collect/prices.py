@@ -15,8 +15,9 @@ def _ensure_fetched_table(con):
         con.commit()
 
 
-def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=None):
-    """start~end 거래일마다 해당 시장 전종목 1호출. 이미 적재된 (시장, 날짜)는 건너뜀. 반환: 호출 수"""
+def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=None, newest_first=False, max_calls=None):
+    """start~end 거래일마다 해당 시장 전종목 1호출. 이미 적재된 (시장, 날짜)는 건너뜀. 반환: 호출 수
+    newest_first: 최근 날짜부터 거슬러 받음(과거 백필 시 3년→5년→10년 순으로 차트가 먼저 길어짐). max_calls: 호출 상한(KRX 일일 한도 대비)"""
     _ensure_fetched_table(con)
     # 복구: 최근 10일 중 '빈 응답'으로 적재완료 표시됐지만 실제 시세가 없는 날짜는 다시 받는다
     #  (07:00 daily가 당일/전일을 KRX 집계 전에 조회 → 빈 응답을 휴장일로 오인해 영구 건너뛰던 문제)
@@ -25,10 +26,15 @@ def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=
     have = {r[0] for r in con.execute("SELECT dt FROM _price_fetched WHERE market=?", (market,))}
     today = date.today().isoformat()
     n = 0
-    for d in trading_days(start, end):
+    days = list(trading_days(start, end))
+    if newest_first:
+        days.reverse()
+    for d in days:
         iso = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
         if iso in have or iso > today:
             continue
+        if max_calls and n >= max_calls:
+            print(f"[price] {market} 호출 상한 {max_calls} 도달 — 다음 실행에서 이어서", flush=True); break
         rows = daily_all(market, d)
         n += 1
         if not rows:
@@ -131,6 +137,29 @@ def build_summary(con, stock_code, shares_out=None, asof=None):
                  chg(30), chg(91), chg(365), avg_vol, avg_val, vol, chg(7), chg(182), chg(730), chg(1095)))
     con.commit()
     return asof
+
+
+def backfill(pairs, start="2016-01-01", max_calls=600, markets=None):
+    """과거 시세 백필(야간): 최근 날짜부터 거슬러 시장별 max_calls까지. KRX 오류(한도)면 그 시장은 중단하고 다음 시장."""
+    con = connect()
+    con.execute("CREATE TABLE IF NOT EXISTS _krx_latest (stock_code TEXT, dt TEXT, shares REAL, mcap REAL, PRIMARY KEY(stock_code, dt))")
+    markets = markets or [r[0] for r in con.execute("SELECT DISTINCT market FROM company WHERE market IS NOT NULL")] or ["KOSDAQ"]
+    total = 0
+    for market in markets:
+        try:
+            n = fetch_prices_range(con, date.fromisoformat(start), date.today(), market, newest_first=True, max_calls=max_calls)
+            total += n
+            print(f"[price-backfill] {market} {n} calls", flush=True)
+        except Exception as e:  # noqa
+            log(con, "-", "price_backfill", "fail", f"{market}: {e}")
+            print(f"[price-backfill] {market} 중단: {str(e)[:120]}", flush=True)
+    if total:
+        for cc, sc in pairs:
+            try:
+                build_summary(con, sc)
+            except Exception as e:  # noqa
+                log(con, cc, "price", "fail", e)
+    return total
 
 
 def run(pairs, bsns_year=None, start=None, markets=None):
