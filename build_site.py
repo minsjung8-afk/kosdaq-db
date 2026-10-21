@@ -236,7 +236,7 @@ def company_detail(con, c):
     for fs in ("CFS", "OFS"):
         ann = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' ORDER BY bsns_year DESC LIMIT 2", cc, fs)
         ann = sorted(ann, key=lambda r: r["bsns_year"])
-        latest = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code!='11011' ORDER BY bsns_year DESC, reprt_code DESC LIMIT 1", cc, fs)
+        latest = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code!='11011' ORDER BY bsns_year DESC, CASE reprt_code WHEN '11014' THEN 3 WHEN '11012' THEN 2 ELSE 1 END DESC LIMIT 1", cc, fs)   # 3Q>반기>1Q (코드 순서와 다름)
         rows = []
         for r in ann:
             rows.append({**r, "label": r["bsns_year"], "kind": "annual"})

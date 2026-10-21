@@ -2,7 +2,7 @@ name: collect-and-deploy
 on:
   schedule:
     - cron: "0 22 * * 0-4"     # 평일 07:00 KST: 시세 + 수시공시 델타(daily)
-    - cron: "10 15 * * *"      # 매일 00:10 KST: catchup(미수집분 mezz→biz→fin→kpi, 한도까지)
+    - cron: "10 15 * * *"      # 매일 00:10 KST: catchup(미수집분 mezz→biz→fin→kpi→quarters, 한도까지)
     - cron: "30 20 2 * *"      # 매월 2일 05:30 KST: 재무(연간+최근분기)
     - cron: "30 20 1,15 * *"   # 매월 1일·15일 05:30 KST: 신용등급
     - cron: "0 19 * * 1,4"     # 매주 화·금 04:00 KST: 뉴스
@@ -13,7 +13,7 @@ on:
         description: "run.py job"
         default: "price"
         type: choice
-        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted]
+        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted, quarters]
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only / unlisted: --type 기업신용평가)"
         default: ""

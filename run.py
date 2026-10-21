@@ -34,7 +34,7 @@ def corp_pairs(con, limit=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -56,7 +56,7 @@ def main():
     con = connect()
     pairs = corp_pairs(con, a.limit)
     if a.new_only and a.job in ("fin", "biz", "rating", "news"):   # mezz는 모듈 내부에서 처리
-        tbl = {"fin": "fin_kpi", "biz": "business", "rating": "credit_rating", "news": "news"}.get(a.job)
+        tbl = {"fin": "fin_raw", "biz": "business", "rating": "credit_rating", "news": "news"}.get(a.job)   # fin은 fin_raw 기준(quarters가 fin_kpi에 요약행을 먼저 넣을 수 있음)
         done = {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
         pairs = [p for p in pairs if p[0] not in done]
         print(f"[{a.job}] --new-only: 미수집 {len(pairs)}사", flush=True)
@@ -79,6 +79,9 @@ def main():
             mezz.debug(con, a.debug)
         else:
             mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
+    if a.job == "quarters":                  # 8분기·LTM 분기 손익(등급사→코스피→코스닥 순, 한도까지)
+        import quarters
+        quarters.run(ccs, limit=a.limit, con=con)
     if a.job == "unlisted":                  # 비상장 등급사 드라이런(명단 xlsx, DB 변경 없음)
         import unlisted
         unlisted.run(years=(a.years[0] if a.years else 3), max_pages=a.max_pages, ttype=a.type)
@@ -93,13 +96,14 @@ def main():
         except Exception as e:  # noqa
             print("[daily] delta 실패:", e)
     if a.job == "catchup":                   # 야간: 미수집분을 mezz → biz → fin → kpi 순으로, DART 한도 도달 시 중단(다음날 이어서)
-        import common, mezz, business, financials
+        import common, mezz, business, financials, quarters
         done = lambda tbl: {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
         steps = [("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
-                 ("fin", lambda: financials.run([c for c in ccs if c not in done("fin_kpi")], years)),
-                 ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건"))]
+                 ("fin", lambda: financials.run([c for c in ccs if c not in done("fin_raw")], years)),
+                 ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),
+                 ("quarters", lambda: quarters.run(ccs, con=con))]                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
         for name, fn in steps:
             if common.QUOTA_HIT:
                 print(f"[catchup] DART 한도 도달 — {name} 이후 단계는 내일로", flush=True); break
