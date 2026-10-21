@@ -103,7 +103,7 @@ table.fin th.col.cur{color:var(--gold-soft)}table.fin th.col small{color:#c5d0e4
 .src{font-size:11.5px;color:var(--mute)} .src a{color:var(--navy2)}
 section>h3{cursor:pointer;user-select:none}section>h3::after{content:'▾';float:right;opacity:.7;font-size:12px}section.fold>h3::after{content:'▸'}section.fold>*:not(h3){display:none}section.fold{padding-bottom:0}section.fold>h3{margin-bottom:0}
 .mat{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px}.mat .c{background:#fbfcfe;border:1px solid var(--line);border-radius:8px;padding:8px 10px;text-align:center}.mat .c b{display:block;font-size:11px;color:var(--ink2);font-weight:600}.mat .c span{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}.mat .c small{display:block;font-size:10.5px;color:var(--mute)}.mat .c.hot{border-color:#f0c9ae;background:var(--warn-bg)}.mat .c.hot span{color:var(--warn)}
-.ltv{display:grid;grid-template-columns:130px 1fr 80px;gap:4px 10px;align-items:center;font-size:12px;margin-top:6px}.ltv .bar2{height:14px;background:var(--nbg);border-radius:4px;position:relative;overflow:hidden}.ltv .bar2 i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}.ltv b{font-weight:600;color:var(--ink2)}.ltv span{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}.ltv span.bad{color:var(--bad)}
+.ltv{display:grid;grid-template-columns:130px minmax(200px,560px) 80px;gap:4px 10px;align-items:center;font-size:12px;margin-top:6px}.ltv .bar2{height:14px;background:var(--nbg);border-radius:4px;position:relative;overflow:hidden}.ltv .bar2 i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}.ltv b{font-weight:600;color:var(--ink2)}.ltv span{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}.ltv span.bad{color:var(--bad)}
 .g2c{display:grid;grid-template-columns:1fr 1fr;gap:12px}.g2c .full{grid-column:1/-1}.g2c>div{margin:0}@media (max-width:1100px){.g2c{grid-template-columns:1fr}}
 .cap2{font-size:12px;font-weight:800;color:var(--navy);margin:0 0 6px;display:flex;align-items:center;gap:7px}.cap2::before{content:'';width:14px;height:2px;background:var(--gold)}
 .warn{color:var(--warn);font-weight:700}
@@ -372,7 +372,7 @@ async function open(code){
       <div class="c"><b>일평균 거래대금 (3M)</b><span>${억(ps.avg_value_3m)}억</span><small>${days?'1억주 환가 소요 ≈ '+num(days)+'거래일':''}</small></div>
       <div class="c ${ps.vol_60d>70?'hot':''}"><b>변동성 (60일 연율)</b><span>${pct(ps.vol_60d)}</span><small>${ps.vol_60d>70?'고변동':''}</small></div>
       <div class="c"><b>52주 고 / 저</b><span>${num(ps.high_52w)} / ${num(ps.low_52w)}</span><small>${ps.high_52w?'현재가는 고점 대비 '+((ps.close/ps.high_52w-1)*100).toFixed(0)+'%':''}</small></div></div>
-     <div class="g2c" style="margin:10px 16px 0"><div><div class="cap2">담보인정 시뮬레이션 (1주당)</div><div class="ltv">
+     <div class="g2c" style="margin:10px 16px 0;grid-template-columns:1fr"><div><div class="cap2">담보인정 시뮬레이션 (1주당)</div><div class="ltv">
       ${bar('현재가',ps.close,ps.close/base*100,'var(--navy2)')}${bar('60일 평균가',avg60,(avg60||0)/base*100,'var(--navy2)')}
       ${bar('대용가 (KRX)',sub,(sub||0)/base*100,'var(--mute)')}${bar('담보가 (대용가×90%)',colv,(colv||0)/base*100,'var(--gold)')}
       ${bar('52주 최저',ps.low_52w,(ps.low_52w||0)/base*100,'var(--bad)','bad')}</div>${sub?'':'<div class="src" style="margin-top:4px">대용가는 KRX 일별 공표값 — 수집 연결 전</div>'}</div>
