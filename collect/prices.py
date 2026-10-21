@@ -69,6 +69,9 @@ def adjusted_rows(con, stock_code, since=None):
     """수정주가 적용 일봉. since: 'YYYY-MM-DD' 이상만."""
     rows = [dict(r) for r in con.execute(
         "SELECT dt, open, high, low, close, volume FROM price_daily WHERE stock_code=? ORDER BY dt", (stock_code,))]
+    for x in rows:                                       # 거래정지일: KRX가 시·고·저=0, 거래량 0으로 줌 → 종가로 평탄화(0까지 내려가는 긴 캔들 방지)
+        if x["close"] and not (x["open"] and x["high"] and x["low"]):
+            x["open"] = x["high"] = x["low"] = x["close"]; x["volume"] = 0
     for dt, r in split_factors(con, stock_code):
         for x in rows:
             if x["dt"] < dt:

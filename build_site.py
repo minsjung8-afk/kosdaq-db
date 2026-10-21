@@ -286,6 +286,13 @@ def company_detail(con, c):
         "other_invest": q(con, "SELECT * FROM other_invest WHERE corp_code=? AND bsns_year=(SELECT MAX(bsns_year) FROM other_invest WHERE corp_code=?) ORDER BY trmend_book_amt DESC LIMIT 8", cc, cc),
     }
     d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], d["ratings"])
+    halt = [r for r in prices[-60:] if r["close"] and not r["volume"] and r["open"] == r["high"] == r["low"] == r["close"]]   # 거래정지일(시·고·저 평탄화된 행)
+    if prices and prices[-1] in halt:
+        n = 0
+        for r in reversed(prices):
+            if r in halt: n += 1
+            else: break
+        d["flags"].insert(0, ("거래정지", "red", f"{prices[-n]['dt']}부터 {n}거래일 연속 거래 없음(종가 {prices[-1]['close']:,.0f}원 고정)"))
     cb_tot = sum(r["remndr_amt"] or 0 for r in d["mezz_out"])
     ps0 = d["price_summary"] or {}
     if cb_tot and ps0.get("mcap") and cb_tot > ps0["mcap"] * 0.2:
