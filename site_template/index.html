@@ -101,6 +101,7 @@ table.fin th.col.cur{color:var(--gold-soft)}table.fin th.col small{color:#c5d0e4
 .summary{max-width:80ch;white-space:pre-wrap;background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:11px 15px;line-height:1.7;font-size:12.5px}
 .summary ul{margin:6px 0;padding-left:18px}
 .src{font-size:11.5px;color:var(--mute)} .src a{color:var(--navy2)}
+table.kv8{table-layout:fixed}table.kv8 td:nth-child(odd){width:11%}table.kv8 td:nth-child(even){width:14%;font-variant-numeric:tabular-nums}table.kv8 td small{display:block;font-size:10.5px;line-height:1.3}
 section>h3{cursor:pointer;user-select:none}section>h3::after{content:'▾';float:right;opacity:.7;font-size:12px}section.fold>h3::after{content:'▸'}section.fold>*:not(h3){display:none}section.fold{padding-bottom:0}section.fold>h3{margin-bottom:0}
 .mat{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px}.mat .c{background:#fbfcfe;border:1px solid var(--line);border-radius:8px;padding:8px 10px;text-align:center}.mat .c b{display:block;font-size:11px;color:var(--ink2);font-weight:600}.mat .c span{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}.mat .c small{display:block;font-size:10.5px;color:var(--mute)}.mat .c.hot{border-color:#f0c9ae;background:var(--warn-bg)}.mat .c.hot span{color:var(--warn)}
 .ltv{display:grid;grid-template-columns:130px minmax(200px,560px) 80px;gap:4px 10px;align-items:center;font-size:12px;margin-top:6px}.ltv .bar2{height:14px;background:var(--nbg);border-radius:4px;position:relative;overflow:hidden}.ltv .bar2 i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}.ltv b{font-weight:600;color:var(--ink2)}.ltv span{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}.ltv span.bad{color:var(--bad)}
@@ -109,7 +110,7 @@ section>h3{cursor:pointer;user-select:none}section>h3::after{content:'▾';float
 .warn{color:var(--warn);font-weight:700}
 tr.lnk{cursor:pointer}tr.lnk:hover td{background:var(--nbg2)!important}
 .biz{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 16px}.biz .full{grid-column:1/-1}.biz>div{margin:0}
-table.lbl td:first-child{width:130px;font-weight:600;color:var(--navy2);background:var(--nbg)!important;white-space:nowrap}table.lbl td{line-height:1.6;vertical-align:top}
+table.lbl td:first-child,table.lbl td:nth-child(odd){width:130px;font-weight:600;color:var(--navy2);background:var(--nbg)!important;white-space:nowrap}table.lbl td:nth-child(even){width:auto}table.lbl td{line-height:1.6;vertical-align:top}
 .prod{display:grid;grid-template-columns:max-content 1fr max-content;gap:3px 10px;align-items:center;font-size:12.5px}.prod .pb{height:7px;background:var(--nbg);border-radius:4px;overflow:hidden}.prod .pb i{display:block;height:100%;background:var(--navy2)}.prod span:last-child{font-variant-numeric:tabular-nums;font-weight:700;color:var(--navy)}
 th.up{background:var(--good)}th.dn{background:var(--bad)}
 table.num td:first-child{width:28px;text-align:center;font-weight:700;color:var(--gold);background:#fff!important}
@@ -356,22 +357,19 @@ async function open(code){
     const rc=v=>v==null?'-':`<span style="color:${v<0?'var(--bad)':v>0?'var(--good)':'inherit'}">${(v>0?'+':'')+v.toFixed(1)}%</span>`;
     h+=`<div class="ptb"><button class="pbtn on" data-tf="D">일봉</button><button class="pbtn" data-tf="W">주봉</button><button class="pbtn" data-tf="M">월봉</button><span class="sp"></span><button class="pbtn" data-p="3m">3개월</button><button class="pbtn" data-p="6m">6개월</button><button class="pbtn on" data-p="1y">1년</button><button class="pbtn" data-p="3y">3년</button><button class="pbtn" data-p="5y">5년</button><button class="pbtn" data-p="all">전체</button><span class="sp"></span><span class="lbl">이평</span><button class="pbtn on" data-ma="5">5</button><button class="pbtn on" data-ma="20">20</button><button class="pbtn on" data-ma="60">60</button><button class="pbtn" data-ma="120">120</button><span class="lbl">휠 확대·축소 / 드래그 이동 / 더블클릭 초기화 · 3년 이전은 주봉</span></div><div id="px"><div id="pxl"></div></div>
       <div class="twrap" style="margin-top:10px"><table><tr><th>수익률</th>${rets.map(([n])=>`<th class="n">${n}</th>`).join('')}</tr><tr><td>기준일 ${ps.asof||'-'}</td>${rets.map(([,k])=>`<td class="n">${rc(ps[k])}</td>`).join('')}</tr></table></div>
-      <div class="kv" style="margin-top:10px">
-      <b>종가</b><span>${num(ps.close)}원</span><b>액면가</b><span>${c.parval?num(c.parval)+'원':'-'}</span>
-      <b>52주 최고</b><span>${num(ps.high_52w)}원</span><b>52주 최저</b><span>${num(ps.low_52w)}원</span>
-      <b>시가총액</b><span>${억(ps.mcap)}억</span><b>발행주식수</b><span>${num(ps.shares_out)}주</span>
-      <b>3M 평균거래량</b><span>${num(Math.round(ps.avg_vol_3m||0))}주 <span class="src">(거래대금 ${억(ps.avg_value_3m)}억/일)</span></span><b>변동성 (60일, 연율)</b><span>${pct(ps.vol_60d)}</span></div>`;
+      <div class="twrap" style="margin-top:10px"><table class="lbl kv8"><tr>
+        <td>종가</td><td>${num(ps.close)}원 <small style="color:var(--mute)">(${ps.asof||'-'})</small></td><td>60일 평균가</td><td>${(()=>{const px=(d.prices||[]).slice(-60); const a=px.length?px.reduce((x,r)=>x+r[4],0)/px.length:null; return a?num(Math.round(a))+'원 <small style="color:var(--mute)">현재가 '+((ps.close/a-1)*100).toFixed(1)+'%</small>':'-'})()}</td>
+        <td>시가총액</td><td>${억(ps.mcap)}억</td><td>발행주식수</td><td>${num(ps.shares_out)}주</td></tr><tr>
+        <td>52주 최고</td><td>${num(ps.high_52w)}원${ps.high_52w?` <small style="color:var(--mute)">현재가 ${((ps.close/ps.high_52w-1)*100).toFixed(0)}%</small>`:''}</td><td>52주 최저</td><td>${num(ps.low_52w)}원${ps.low_52w?` <small style="color:var(--mute)">현재가 +${((ps.close/ps.low_52w-1)*100).toFixed(0)}%</small>`:''}</td>
+        <td>3M 평균거래량</td><td>${num(Math.round(ps.avg_vol_3m||0))}주</td><td>3M 평균거래대금</td><td>${억(ps.avg_value_3m)}억/일${ps.avg_vol_3m?` <small style="color:var(--mute)">1억주 환가 ≈ ${num(Math.ceil(1e8/ps.avg_vol_3m))}거래일</small>`:''}</td></tr><tr>
+        <td>변동성 (60일 연율)</td><td>${pct(ps.vol_60d)}${ps.vol_60d>70?' <span class="warn">고변동</span>':''}</td><td>액면가</td><td>${c.parval?num(c.parval)+'원':'-'}</td>
+        <td>EV/EBITDA</td><td>${d.valuation&&d.valuation.ev_ebitda!=null?d.valuation.ev_ebitda.toFixed(1)+'x':'-'}</td><td>시가총액 순위</td><td>${d.industry_pos&&d.industry_pos.mcap?d.industry_pos.mcap.rank+'위 / '+d.industry_pos.mcap.n+'개사 (업종)':'-'}</td></tr></table></div>`;
     // 담보 · 주식담보 참고치
     {const px=(d.prices||[]).slice(-60); const avg60=px.length?px.reduce((a,r)=>a+r[4],0)/px.length:null; const sub=ps.subst_price; const colv=sub?sub*0.9:null;
      const days=ps.avg_vol_3m?Math.ceil(100000000/ps.avg_vol_3m):null; const mr=d.major_reports||[];
      const bar=(lb,v,w,col,cls)=>`<b>${lb}</b><div class="bar2"><i style="width:${Math.max(0,Math.min(100,w)).toFixed(0)}%;background:${col}"></i></div><span class="${cls||''}">${v==null?'미수집':num(Math.round(v))}</span>`;
      const base=Math.max(ps.close||0,avg60||0,ps.high_52w||0)||1;
      h+=`<div class="cap2" style="margin:14px 16px 6px">담보 · 주식담보 참고치 <span class="src" style="font-weight:400">시세 ${ps.asof||''} · KRX 대용가 · DART 대량보유 보고</span></div>
-     <div class="mat">
-      <div class="c"><b>현재가 / 60일 평균</b><span>${num(ps.close)} / ${avg60?num(Math.round(avg60)):'-'}원</span><small>${avg60?'평균 대비 '+((ps.close/avg60-1)*100).toFixed(1)+'%':''}</small></div>
-      <div class="c"><b>일평균 거래대금 (3M)</b><span>${억(ps.avg_value_3m)}억</span><small>${days?'1억주 환가 소요 ≈ '+num(days)+'거래일':''}</small></div>
-      <div class="c ${ps.vol_60d>70?'hot':''}"><b>변동성 (60일 연율)</b><span>${pct(ps.vol_60d)}</span><small>${ps.vol_60d>70?'고변동':''}</small></div>
-      <div class="c"><b>52주 고 / 저</b><span>${num(ps.high_52w)} / ${num(ps.low_52w)}</span><small>${ps.high_52w?'현재가는 고점 대비 '+((ps.close/ps.high_52w-1)*100).toFixed(0)+'%':''}</small></div></div>
      <div class="g2c" style="margin:10px 16px 0;grid-template-columns:1fr"><div><div class="cap2">담보인정 시뮬레이션 (1주당)</div><div class="ltv">
       ${bar('현재가',ps.close,ps.close/base*100,'var(--navy2)')}${bar('60일 평균가',avg60,(avg60||0)/base*100,'var(--navy2)')}
       ${bar('대용가 (KRX)',sub,(sub||0)/base*100,'var(--mute)')}${bar('담보가 (대용가×90%)',colv,(colv||0)/base*100,'var(--gold)')}
