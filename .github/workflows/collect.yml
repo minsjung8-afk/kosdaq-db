@@ -13,7 +13,7 @@ on:
         description: "run.py job"
         default: "price"
         type: choice
-        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup]
+        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted]
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only)"
         default: ""
@@ -90,6 +90,10 @@ jobs:
           else
             timeout --signal=INT 170m python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }} || echo "::warning::수집 종료 코드 $? (170분 제한 또는 오류) — 저장된 범위까지 보관"
           fi
+      - name: keep dry-run outputs      # unlisted 드라이런 명단 등 산출물
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: outputs, path: "unlisted_candidates.*", if-no-files-found: ignore, retention-days: 30 }
       - name: pack db
         if: always()
         run: |

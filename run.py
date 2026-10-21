@@ -34,7 +34,7 @@ def corp_pairs(con, limit=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -43,6 +43,7 @@ def main():
     ap.add_argument("--no-pdf", action="store_true")
     ap.add_argument("--no-interim", action="store_true", help="fin: 분기보고서 생략")
     ap.add_argument("--market", nargs="*", default=["KOSDAQ", "KOSPI", "KONEX"], help="init/price 대상 시장")
+    ap.add_argument("--debug", nargs="*", help="mezz: 종목코드 지정 진단·강제 재추출 (예: --debug 178320)")
     ap.add_argument("--start", help="price: 시세 수집 시작일 YYYY-MM-DD (기본 3년 전). 과거 백필 시 예: --start 2016-01-01")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
@@ -73,7 +74,13 @@ def main():
         business.run(ccs, a.years[-1] if a.years else a.year - 1)   # 최신 사업보고서 = 직전 연도
     if a.job in ("mezz", "all"):
         import mezz
-        mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
+        if a.debug:
+            mezz.debug(con, a.debug)
+        else:
+            mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
+    if a.job == "unlisted":                  # 비상장 등급사 드라이런(명단 xlsx, DB 변경 없음)
+        import unlisted
+        unlisted.run(years=(a.years[0] if a.years else 3), max_pages=a.max_pages)
     if a.job == "delta":
         import delta
         delta.run(days=a.limit)
@@ -89,6 +96,7 @@ def main():
         done = lambda tbl: {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
         steps = [("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
+                 ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("fin", lambda: financials.run([c for c in ccs if c not in done("fin_kpi")], years)),
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건"))]
         for name, fn in steps:

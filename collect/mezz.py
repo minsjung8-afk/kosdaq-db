@@ -264,5 +264,31 @@ def run(corp_codes=None, years=3, new_only=False):
     return con
 
 
+def debug(con, stock_codes):
+    """특정 종목의 미상환 표 추출 진단: 어떤 정기보고서를 골랐는지, 섹션 후보·추출 행 수를 출력하고 강제 재추출"""
+    for sc in stock_codes:
+        row = con.execute("SELECT corp_code, corp_name FROM company WHERE stock_code=?", (sc,)).fetchone()
+        if not row:
+            print(f"[mezz-debug] {sc}: company 없음"); continue
+        cc, nm = row["corp_code"], row["corp_name"]
+        rcept, rnm = latest_periodic_report(cc)
+        print(f"[mezz-debug] {nm}({sc}) 최신 정기보고서: {rnm} rcept={rcept}")
+        if not rcept:
+            continue
+        xml = fetch_document_xml(rcept)
+        print(f"[mezz-debug]   원문 {len(xml):,}자 · 단위 추정: {_unit(xml) if '_unit' in globals() else '-'}")
+        titles = re.findall(r"<TITLE[^>]*>(.*?)</TITLE>", xml, flags=re.S | re.I)
+        hits = [re.sub(r"<[^>]+>", "", t).strip() for t in titles if re.search(r"자금조달|자본금|증권의\s*발행|미상환|전환사채|신주인수권", t)]
+        print(f"[mezz-debug]   관련 제목 {len(hits)}개: {hits[:8]}")
+        for kw in ("미상환", "전환사채", "신주인수권부사채", "교환사채"):
+            print(f"[mezz-debug]   '{kw}' 출현 {xml.count(kw)}회")
+        rows = extract_outstanding(xml)
+        print(f"[mezz-debug]   추출 행 {len(rows)}: {[(r['kind'], r['name'], r['remndr_amt']) for r in rows][:6]}")
+        con.execute("DELETE FROM mezz_checked WHERE corp_code=?", (cc,))
+        con.commit()
+        n = fetch_outstanding(con, cc)
+        print(f"[mezz-debug]   강제 재추출 저장: {n}행")
+
+
 if __name__ == "__main__":
     print(extract_outstanding(open(sys.argv[1], encoding="utf-8").read()))
