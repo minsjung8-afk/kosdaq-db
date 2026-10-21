@@ -51,7 +51,20 @@ def run(start=None, con=None):
         pass
     d0 = date.fromisoformat(start) if start else date.today()
     rows, used = [], None
+    # 0) 국내에서 받아 R2에 올린 파일(subst/latest.json → 워크플로가 subst_latest.json으로 내려줌)이 있으면 우선 사용 — 러너(해외 IP)는 KRX가 400으로 막음
+    import json, os
+    lf = os.environ.get("SUBST_FILE", "subst_latest.json")
+    if os.path.exists(lf):
+        try:
+            js = json.load(open(lf, encoding="utf-8"))
+            rows = js.get("rows") or []
+            used = js.get("trd_dd") or (rows[0]["trd_dd"] if rows else None)
+            print(f"[subst] R2 파일 사용: 기준 {used} · {len(rows):,}종목 (수집 {js.get('fetched_at')})", flush=True)
+        except Exception as e:  # noqa
+            print(f"[subst] 로컬 파일 읽기 실패: {e}", flush=True); rows = []
     for back in range(0, 8):
+        if rows:
+            break
         d = d0 - timedelta(days=back)
         if d.weekday() >= 5:
             continue

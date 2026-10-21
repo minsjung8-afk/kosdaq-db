@@ -99,7 +99,7 @@ table.fin th.col.cur{color:var(--gold-soft)}table.fin th.col small{color:#c5d0e4
 .pill.good{color:var(--good);border-color:transparent;background:var(--good-bg)} .pill.warn{color:var(--warn);border-color:transparent;background:var(--warn-bg)} .pill.bad{color:var(--bad);border-color:transparent;background:var(--bad-bg)}
 .neg{color:var(--bad)}
 .summary{max-width:80ch;white-space:pre-wrap;background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:11px 15px;line-height:1.7;font-size:12.5px}
-.summary.wide{max-width:none;white-space:normal;column-count:2;column-gap:32px;column-rule:1px solid var(--line);padding:12px 18px}.summary.wide p{margin:0 0 7px;break-inside:avoid;text-align:justify}.summary.wide .twrap{column-span:all;margin:8px 0}.summary.wide table{font-size:12px}@media (max-width:1100px){.summary.wide{column-count:1}}
+.summary.wide{max-width:none;white-space:normal;padding:12px 18px}.summary.wide p{margin:0 0 7px;max-width:140ch}.summary.wide .twrap{margin:8px 0 12px}.summary.wide h5{font-size:12.5px;margin:12px 0 4px}.summary.wide table{font-size:12px}
 .summary ul{margin:6px 0;padding-left:18px}
 .src{font-size:11.5px;color:var(--mute)} .src a{color:var(--navy2)}
 table.kv8{table-layout:fixed}table.kv8 td:nth-child(odd){width:11%}table.kv8 td:nth-child(even){width:14%;font-variant-numeric:tabular-nums}table.kv8 td small{display:block;font-size:10.5px;line-height:1.3}
@@ -262,11 +262,16 @@ async function open(code){
   // 2 사업내용
   const b=d.business, rs=d.rating_summary, s=rs?rs.summary:b.summary;
   h+=`<section><h3>2. 사업내용 ${rs?`(${esc(rs.agency)} 신용평가서 ${rs.disc_dt}, ${esc(rs.grade)})`:b.year?`(${b.year} 사업보고서)`:''}</h3>`;
-  const rawBiz=t=>{ // 사업보고서 평문(표는 'a | b | c' 행) → 문단 + 표 복원
-    const lines=t.split('\n'); let out='', tbl=[];
-    const flush=()=>{ if(tbl.length){ out+='<div class="twrap"><table>'+tbl.map((r,i)=>'<tr>'+r.map(c=>`<t${i===0?'h':'d'}>${esc(c.trim())}</t${i===0?'h':'d'}>`).join('')+'</tr>').join('')+'</table></div>'; tbl=[]; } };
-    for(const ln of lines){ const s=ln.trim(); if(!s){ flush(); continue; }
-      if(s.includes(' | ')){ tbl.push(s.replace(/\s*\|\s*$/,'').split(' | ')); } else { flush(); out+=`<p style="margin:4px 0">${esc(s)}</p>`; } }
+  const rawBiz=t=>{ // 사업보고서 평문 → 문단 + 표 복원. 표는 두 형태: ① 'a | b | c' 한 줄  ② 셀이 'a |' 한 줄씩, 행 사이 빈 줄
+    t=t.replace(/([다음요됨임함])\.(?=[가-힣(])/g,'$1. ');                    // '합니다.지주회사' → 문장 사이 공백
+    const blocks=t.split(/\n\s*\n/).map(b=>b.trim()).filter(Boolean); let out='', tbl=[], seen=new Set();
+    const flush=()=>{ if(tbl.length){ const w=Math.max(...tbl.map(r=>r.length)), firstFull=tbl.findIndex(r=>r.length===w); out+='<div class="twrap"><table>'+tbl.map((r,i)=>{const pad=w-r.length, rr=(i===0&&i<firstFull)?[...r,...Array(pad).fill('')]:[...Array(pad).fill(''),...r]; return '<tr>'+rr.map(c=>`<t${i===0?'h':'d'}>${esc((c||'').trim())}</t${i===0?'h':'d'}>`).join('')+'</tr>'}).join('')+'</table></div>'; tbl=[]; } };   // 병합셀(rowspan)로 짧은 행은 앞쪽을 비움
+    for(const b of blocks){ const lines=b.split('\n').map(s=>s.trim()).filter(Boolean);
+      if(lines.length===1&&lines[0].includes(' | ')){ tbl.push(lines[0].replace(/\s*\|\s*$/,'').split(' | ')); continue; }   // ① 한 줄 행
+      if(lines.length>=2&&lines.every(s=>/\|$/.test(s))){ tbl.push(lines.map(s=>s.replace(/\s*\|$/,''))); continue; }            // ② 셀별 줄
+      flush();
+      for(const s of lines){ const key=s.replace(/\s/g,''); if(/^\d+\.\s*\S/.test(s)&&s.length<40){ if(seen.has(key)) continue; seen.add(key); out+=`<h5 style="margin:10px 0 4px;color:var(--navy)">${esc(s.replace(/\s*\|$/,''))}</h5>`; }
+        else out+=`<p style="margin:0 0 7px">${esc(s.replace(/\s*\|$/,''))}</p>`; } }
     flush(); return out; };
   const mdHtml=t=>{ // 간이 마크다운: **[제목]**/## 제목 → h5, **x** → b, 빈 줄 → 문단
     const lines=String(t||'').replace(/\r/g,'').split('\n'); let out='',para=[];

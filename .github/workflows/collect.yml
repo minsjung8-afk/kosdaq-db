@@ -57,6 +57,8 @@ jobs:
             done
           fi
           if [ -f kosdaq.db.gz ] && [ ! -f kosdaq.db ]; then gunzip -f kosdaq.db.gz; fi
+          # 대용가: 자택 Mac(국내 IP)이 올린 subst/latest.json (러너는 KRX 직접 호출이 400으로 막힘)
+          [ -n "$AWS_ACCESS_KEY_ID" ] && aws s3 cp "s3://$R2_BUCKET/subst/latest.json" subst_latest.json --endpoint-url "$R2_EP" --only-show-errors 2>/dev/null || echo "subst/latest.json 없음"
           echo "복원 출처: ${SRC:-없음(새 DB)}"; ls -la kosdaq.db* || true
           # 무결성 점검 → 손상 시 .recover 복구 → 그래도 실패면 R2 일자별 백업(최신순) → 아티팩트 순으로 대체
           if [ -f kosdaq.db ] && ! python dbcheck.py recover kosdaq.db; then
