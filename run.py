@@ -46,6 +46,7 @@ def main():
     ap.add_argument("--debug", nargs="*", help="mezz: 종목코드 지정 진단·강제 재추출 (예: --debug 178320)")
     ap.add_argument("--start", help="price: 시세 수집 시작일 YYYY-MM-DD (기본 3년 전). 과거 백필 시 예: --start 2016-01-01")
     ap.add_argument("--type", default="기업신용평가", help="unlisted: 금감원 평가대상종류 필터(기본 기업신용평가, \"\"=전수)")
+    ap.add_argument("--codes", nargs="*", help="대상 종목코드 지정 (예: --codes 060310 006840) — 모든 작업 공통")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
 
@@ -55,6 +56,9 @@ def main():
             listing.run(limit=a.limit, market=m, skip_existing=a.new_only)
     con = connect()
     pairs = corp_pairs(con, a.limit)
+    if a.codes:
+        want = set(a.codes); pairs = [p for p in corp_pairs(con) if p[1] in want]
+        print(f"[run] 대상 종목 지정: {len(pairs)}사", flush=True)
     if a.new_only and a.job in ("fin", "biz", "rating", "news"):   # mezz는 모듈 내부에서 처리
         tbl = {"fin": "fin_raw", "biz": "business", "rating": "credit_rating", "news": "news"}.get(a.job)   # fin은 fin_raw 기준(quarters가 fin_kpi에 요약행을 먼저 넣을 수 있음)
         done = {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
@@ -124,8 +128,9 @@ def main():
         prices.run(pairs, a.year, start=a.start, markets=a.market)
     if a.job in ("summarize", "all"):
         import summarize
-        summarize.run_rating(set(ccs) if a.limit else None)                  # 등급 보유사: 신용평가서 기반 요약(우선)
-        summarize.run(ccs, a.years[-1] if a.years else a.year - 1)           # 나머지: 사업보고서 기반
+        if not a.codes:
+            summarize.run_rating(set(ccs) if a.limit else None)              # 등급 보유사: 신용평가서 기반 요약(우선)
+        summarize.run(ccs, a.years[-1] if a.years else a.year - 1)           # 나머지(또는 --codes 지정분): 사업보고서 기반
     if a.job in ("rating", "all"):
         import fss_rating
         fss_rating.run(set(ccs) if (a.limit or a.new_only) else None)
