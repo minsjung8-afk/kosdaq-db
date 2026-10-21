@@ -1,5 +1,6 @@
 """비상장 등급사 드라이런: 금감원 신용평가서 공시 전체 목록(최근 N년) → 회사별 집계 → 상장사 제외 → SPC 필터 → 후보 명단(xlsx)
-  python run.py unlisted --years 3            # 드라이런(명단만, DB 변경 없음) → unlisted_candidates.xlsx + 콘솔 요약
+  python run.py unlisted --years 3            # 드라이런(명단만, DB 변경 없음) → unlisted_candidates.xlsx + 콘솔 요약 (기본: 평가대상종류=기업신용평가)
+  python run.py unlisted --type ""           # 전수(28만건·78시간 — 실행 금지 수준) / --type 회사채 등 다른 종류
 판정 규칙:
   ① 평가대상 종류: 기업신용평가(ICR) 보유 = 1군, 회사채·사모사채·기업어음만 = 2군, 유동화(ABS·ABSTB·ABCP 등)만 = SPC 추정
   ② 회사명 패턴: 제N차/제N호/유동화/에스피씨/SPC/PFV/피에프브이/자산관리/신탁/투자목적/제일차…  → SPC 추정
@@ -28,10 +29,10 @@ ICR_TYPE = re.compile(r"기업신용평가|ICR|기업신용등급", re.I)
 BOND_TYPE = re.compile(r"사채|기업어음|CP|채권", re.I)
 
 
-def fetch_page(years, page):
+def fetch_page(years, page, ttype=""):
     today = date.today()
     params = {"menuNo": "200411", "pageIndex": page, "searchCompany": "", "searchAssGbn": "", "searchTargetCoNm": "",
-              "searchTargetTypeKor": "", "searchCnd": "1", "sdate": (today - timedelta(days=365 * years)).isoformat(), "edate": today.isoformat()}
+              "searchTargetTypeKor": ttype, "searchCnd": "1", "sdate": (today - timedelta(days=365 * years)).isoformat(), "edate": today.isoformat()}
     r = requests.get(URL + "?" + urlencode(params), headers=UA, timeout=(15, 60))
     r.raise_for_status()
     return r.text
@@ -48,7 +49,8 @@ def dart_names():
     return out
 
 
-def run(years=3, max_pages=None, out_path="unlisted_candidates.xlsx"):
+def run(years=3, max_pages=None, out_path="unlisted_candidates.xlsx", ttype="기업신용평가"):
+    """ttype: 금감원 평가대상종류 필터. 기본 '기업신용평가'(3년 ≈1.7천건·174p·30분). 빈 문자열이면 전수(3년 ≈28만건 — 비현실적)"""
     con = connect()
     listed = {norm(r[0]) for r in con.execute("SELECT corp_name FROM company")} | {norm(r[0]) for r in con.execute("SELECT corp_name_full FROM company WHERE corp_name_full IS NOT NULL")}
     comp = {}
@@ -56,7 +58,7 @@ def run(years=3, max_pages=None, out_path="unlisted_candidates.xlsx"):
     t0 = time.time()
     while True:
         try:
-            html = fetch_page(years, page)
+            html = fetch_page(years, page, ttype)
             rows, total = parse(html)
             fails = 0
         except Exception as e:  # noqa
@@ -67,7 +69,7 @@ def run(years=3, max_pages=None, out_path="unlisted_candidates.xlsx"):
             time.sleep(20); continue
         if total_pages is None:
             total_pages = max(1, (total + 9) // 10)
-            print(f"[unlisted] 전체 {total:,}건 · {total_pages}페이지 · {years}년", flush=True)
+            print(f"[unlisted] 전체 {total:,}건 · {total_pages}페이지 · {years}년 · 종류='{ttype or '전체'}'", flush=True)
         for r in rows:
             d = comp.setdefault(norm(r["target"]), {"name": r["target"], "n": 0, "icr": 0, "bond": 0, "abs": 0, "agencies": set(), "last": "", "grade": "", "types": set()})
             d["n"] += 1; d["agencies"].add(r["agency"]); d["types"].add(r["ttype"])

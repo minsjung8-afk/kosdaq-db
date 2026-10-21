@@ -15,13 +15,14 @@ on:
         type: choice
         options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted]
       args:
-        description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only)"
+        description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only / unlisted: --type 기업신용평가)"
         default: ""
       restore_run:
         description: "이전 실행의 DB 아티팩트로 복원 (run id, 선택)"
         default: ""
 concurrency:
-  group: kosdaq-db            # DB를 공유하므로 동시 실행 금지(뒤 실행은 대기)
+  # DB를 쓰는 작업은 한 번에 하나(뒤 실행은 대기). unlisted(드라이런, DB 읽기만)는 별도 그룹이라 병렬 실행 가능
+  group: ${{ github.event.inputs.job == 'unlisted' && 'kosdaq-ro' || 'kosdaq-db' }}
   cancel-in-progress: false
 jobs:
   run:
@@ -95,7 +96,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: outputs, path: "unlisted_candidates.*", if-no-files-found: ignore, retention-days: 30 }
       - name: pack db
-        if: always()
+        if: always() && github.event.inputs.job != 'unlisted'
         run: |
           if python dbcheck.py pack kosdaq.db; then
             rm -f kosdaq.db.gz; gzip -6 -c kosdaq.db > kosdaq.db.gz; ls -la kosdaq.db.gz; echo "DB_OK=1" >> $GITHUB_ENV
@@ -103,7 +104,7 @@ jobs:
             echo "::error::DB 무결성 실패 — 이번 실행 결과는 업로드하지 않음(이전 본 유지)"; echo "DB_OK=0" >> $GITHUB_ENV
           fi
       - name: keep db (R2)           # 최신본 kosdaq.db.gz + 일자별 백업(backup/, 14일 보관). R2 미설정 시 아티팩트로 대체
-        if: always()
+        if: always() && github.event.inputs.job != 'unlisted'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -128,14 +129,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: kosdaq-db, path: kosdaq.db.gz, retention-days: 90, compression-level: 0 }
       - name: prune old db artifacts   # R2 전환 후 남은 아티팩트 정리(최신 1개만)
-        if: always()
+        if: always() && github.event.inputs.job != 'unlisted'
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           gh api --paginate "repos/${{ github.repository }}/actions/artifacts?name=kosdaq-db&per_page=100" -q '.artifacts[] | "\(.id) \(.created_at)"' \
             | sort -k2 -r | tail -n +2 | while read id dt; do gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "삭제 $id ($dt)"; done || true
       - name: build site
+        if: github.event.inputs.job != 'unlisted'
         run: python run.py site
       - name: ensure pages project
+        if: github.event.inputs.job != 'unlisted'
         continue-on-error: true
         uses: cloudflare/wrangler-action@v3
         with:
@@ -143,6 +146,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages project create kosdaq-db --production-branch=main
       - name: deploy
+        if: github.event.inputs.job != 'unlisted'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
