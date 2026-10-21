@@ -113,7 +113,7 @@ def main():
         done = lambda tbl: {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
         def done_notes(con):
             try:
-                return {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM business WHERE notes_z IS NOT NULL")}
+                return {r[0] for r in con.execute("SELECT corp_code FROM notes_latest")}
             except Exception:  # noqa
                 return set()
         def done_invest_latest(con):               # 이미 분기보고서(11012/11013/11014) 기준으로 받은 회사
@@ -128,7 +128,7 @@ def main():
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),
                  ("quarters", lambda: quarters.run(ccs, con=con)),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
-                 ("notes", lambda: business.run([c for c in ccs if c in done("business") and c not in done_notes(con)][:400], a.year - 1)),   # 주석(차입금·우발채무·특수관계자) 미보관 회사 재수집 — 하루 400사씩
+                 ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=600))]   # 과거 시세(최근→과거, 시장별 600콜/일): 차트 5년·전체 기간용
         for name, fn in steps:
             if common.QUOTA_HIT and name != "price_backfill":                 # DART 한도 도달 시 DART 단계는 건너뛰고 KRX 시세 백필만 진행

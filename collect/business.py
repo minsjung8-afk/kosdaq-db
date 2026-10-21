@@ -174,6 +174,43 @@ def extract_notes(xml_text: str, max_chars=400_000) -> str:
     return txt[:max_chars]
 
 
+def fetch_notes_latest(con, corp_code):
+    """최신 정기보고서(분기·반기·사업 중 가장 최근) 원문에서 주석(차입금·우발채무·특수관계자 등)만 뽑아 보관 — 회사당 2콜(목록 1 + 원문 1).
+    3-1 차입금·우발채무·계열 블록의 원천. 반환 (rcept_no, report_nm) 또는 None"""
+    from mezz import latest_periodic_report
+    con.execute("""CREATE TABLE IF NOT EXISTS notes_latest (corp_code TEXT PRIMARY KEY, rcept_no TEXT, report_nm TEXT,
+                   notes_z BLOB, char_len INTEGER, fetched_at TEXT)""")
+    rcept, nm = latest_periodic_report(corp_code)
+    if not rcept:
+        return None
+    old = con.execute("SELECT rcept_no FROM notes_latest WHERE corp_code=?", (corp_code,)).fetchone()
+    if old and old[0] == rcept:
+        return rcept, nm                                   # 이미 같은 보고서 — 호출 1콜로 끝
+    notes = extract_notes(fetch_document_xml(rcept))
+    con.execute("INSERT OR REPLACE INTO notes_latest VALUES (?,?,?,?,?,?)",
+                (corp_code, rcept, nm, zpack(notes) if notes else None, len(notes or ""), now()))
+    con.commit()
+    return rcept, nm
+
+
+def run_notes(con, corp_codes, limit=None):
+    """야간: 주석을 최신 정기보고서 기준으로 보관(새 보고서가 나온 회사만 원문 재다운로드). DART 한도 도달 시 중단."""
+    import common
+    cs = list(corp_codes)[:limit] if limit else list(corp_codes)
+    n = i = 0
+    for i, cc in enumerate(cs, 1):
+        try:
+            if fetch_notes_latest(con, cc):
+                n += 1
+        except Exception as e:  # noqa
+            log(con, cc, "notes", "fail", e)
+            if common.QUOTA_HIT or "한도" in str(e):
+                print(f"[notes] DART 한도 도달 — {i}/{len(cs)}에서 중단", flush=True); break
+        if i % 200 == 0:
+            print(f"[notes] {i}/{len(cs)} · 보관 {n}", flush=True)
+    print(f"[notes] 완료 {i}/{len(cs)} · 보관 {n}", flush=True)
+
+
 def fetch_business(con, corp_code, bsns_year, pre=None):
     rcept_no, xml_text = pre if pre else prefetch_report(corp_code, bsns_year)
     if not rcept_no:
