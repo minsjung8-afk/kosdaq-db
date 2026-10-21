@@ -258,7 +258,7 @@ def company_detail(con, c):
         "minor": (q(con, "SELECT * FROM minor_shareholder WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc) or [None])[0],
         "business": {"year": b.get("bsns_year"), "rcept_no": b.get("rcept_no"),
                      "dart_url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={b['rcept_no']}" if b.get("rcept_no") else None,
-                     "overview": (b.get("overview_text") or "")[:4000], "summary": json.loads(b["summary_json"]) if b.get("summary_json") else None},
+                     "overview": (b.get("overview_text") or "")[:12000], "summary": json.loads(b["summary_json"]) if b.get("summary_json") else None},
         "kpi": kpi,
         "quarters": _quarters(con, cc),
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),

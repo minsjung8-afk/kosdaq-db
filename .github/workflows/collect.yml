@@ -117,9 +117,9 @@ jobs:
           if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "R2 미설정 — 아티팩트만 사용"; echo "R2=0" >> $GITHUB_ENV; exit 0; fi
           if [ "$DB_OK" != "1" ]; then echo "무결성 실패분은 올리지 않음"; echo "R2=1" >> $GITHUB_ENV; exit 0; fi
           aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/kosdaq.db.gz" --endpoint-url "$R2_EP" --only-show-errors
-          D=$(date -u +%Y%m%d-%H%M)
+          D=$(TZ=Asia/Seoul date +%Y%m%d)                      # 하루 1개(같은 날은 덮어씀) × 14일 보관 → 용량 상한 ≈ 14 × DB 크기
           aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/backup/kosdaq-$D.db.gz" --endpoint-url "$R2_EP" --only-show-errors
-          CUT=$(date -u -d '14 days ago' +%Y%m%d)
+          CUT=$(TZ=Asia/Seoul date -d '14 days ago' +%Y%m%d)
           aws s3 ls "s3://$R2_BUCKET/backup/" --endpoint-url "$R2_EP" | awk '{print $4}' | while read f; do
             d=$(echo "$f" | sed -E 's/kosdaq-([0-9]{8}).*/\1/'); if [ -n "$d" ] && [ "$d" -lt "$CUT" ]; then aws s3 rm "s3://$R2_BUCKET/backup/$f" --endpoint-url "$R2_EP"; fi
           done || true

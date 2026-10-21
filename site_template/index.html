@@ -261,6 +261,12 @@ async function open(code){
   // 2 사업내용
   const b=d.business, rs=d.rating_summary, s=rs?rs.summary:b.summary;
   h+=`<section><h3>2. 사업내용 ${rs?`(${esc(rs.agency)} 신용평가서 ${rs.disc_dt}, ${esc(rs.grade)})`:b.year?`(${b.year} 사업보고서)`:''}</h3>`;
+  const rawBiz=t=>{ // 사업보고서 평문(표는 'a | b | c' 행) → 문단 + 표 복원
+    const lines=t.split('\n'); let out='', tbl=[];
+    const flush=()=>{ if(tbl.length){ out+='<div class="twrap"><table>'+tbl.map((r,i)=>'<tr>'+r.map(c=>`<t${i===0?'h':'d'}>${esc(c.trim())}</t${i===0?'h':'d'}>`).join('')+'</tr>').join('')+'</table></div>'; tbl=[]; } };
+    for(const ln of lines){ const s=ln.trim(); if(!s){ flush(); continue; }
+      if(s.includes(' | ')){ tbl.push(s.replace(/\s*\|\s*$/,'').split(' | ')); } else { flush(); out+=`<p style="margin:4px 0">${esc(s)}</p>`; } }
+    flush(); return out; };
   const mdHtml=t=>{ // 간이 마크다운: **[제목]**/## 제목 → h5, **x** → b, 빈 줄 → 문단
     const lines=String(t||'').replace(/\r/g,'').split('\n'); let out='',para=[];
     const flush=()=>{ if(para.length){ out+=`<p>${para.join(' ')}</p>`; para=[]; } };
@@ -286,7 +292,7 @@ async function open(code){
     ${row('경쟁환경',esc(s.competition))}${row('생산·가동률',esc(s.capacity_utilization))}${row('신규사업·투자',esc(s.new_business))}</table></div></div>
     ${numTable('심사상 유의 리스크',s.key_risks).replace('<div>','<div class="full">')}
     ${memo(s.summary_md)}</div>`;}
-  else if(b.overview) h+=`<div class="src">요약 미생성 · 사업보고서 '사업의 개요' 원문 발췌</div><div class="summary">${esc(b.overview)}</div>`;
+  else if(b.overview) h+=`<div class="src">요약 미생성(AI 구조화 전) · 사업보고서 '1. 사업의 개요' 원문 — 표는 복원, 나머지 절(제품·원재료·생산·매출 등)은 요약 생성 시 반영</div><div class="summary" style="white-space:normal;max-width:none">${rawBiz(b.overview)}</div>`;
   else h+=`<div class="src">사업내용 미수집</div>`;
   if(b.dart_url) h+=`<div class="src" style="margin-top:8px">원문: <a href="${b.dart_url}" target="_blank" rel="noopener">DART ${b.rcept_no}</a></div>`;
   h+=`</section>`;
