@@ -1,8 +1,9 @@
 name: collect-and-deploy
 on:
   schedule:
-    - cron: "0 22 * * 0-4"     # 평일 07:00 KST: 시세 + 대용가 + 수시공시 델타(daily)
-    - cron: "30 23 * * 0-4"    # 평일 08:30 KST: daily 재실행(07:00에 KRX 전일 시세가 아직 미집계였을 때 보완; 받은 날짜는 건너뜀)
+    - cron: "0 21 * * 0-4"     # 평일 06:00 KST: 시세 + 수시공시 델타(daily, 대용가 포함)
+    - cron: "30 21 * * 0-4"    # 평일 06:30 KST: 대용가(subst) 재조회 — 당일 대용가 확정분
+    - cron: "30 23 * * 0-4"    # 평일 08:30 KST: daily 보완 실행(06:00에 KRX 전일 시세가 미집계였을 때; 받은 날짜는 건너뜀)
     - cron: "10 15 * * *"      # 매일 00:10 KST: catchup(미수집분 mezz→biz→fin→kpi→quarters, 한도까지)
     - cron: "30 20 2 * *"      # 매월 2일 05:30 KST: 재무(연간+최근분기)
     - cron: "30 20 1,15 * *"   # 매월 1일·15일 05:30 KST: 신용등급
@@ -90,6 +91,7 @@ jobs:
               "0 19 * * 1,4") JOB=news ;;
               "0 20 5 4 *")  JOB=biz ;;
               "10 15 * * *")  JOB=catchup ;;
+              "30 21 * * 0-4") JOB=subst ;;
               *)             JOB=daily ;;
             esac
             timeout --signal=INT 170m python run.py $JOB || echo "::warning::수집 종료 코드 $? (170분 제한 또는 오류) — 저장된 범위까지 보관"
