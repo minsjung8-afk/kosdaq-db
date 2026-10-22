@@ -21,13 +21,27 @@
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--fg);font:13px/1.55 var(--font);letter-spacing:-.01em;-webkit-font-smoothing:antialiased;display:grid;grid-template-columns:340px 1fr;grid-template-rows:auto 1fr}
+body{background:var(--bg);color:var(--fg);font:13px/1.55 var(--font);letter-spacing:-.01em;-webkit-font-smoothing:antialiased;display:grid;grid-template-columns:340px 1fr;grid-template-rows:auto auto 1fr}
 /* 상단 네이비 헤더 */
-header{grid-column:1/-1;display:flex;align-items:flex-end;justify-content:space-between;gap:14px;padding:16px 24px 14px;color:#fff;position:relative;overflow:hidden;
-  background:linear-gradient(120deg,var(--navy) 0%,var(--navy-deep) 100%);box-shadow:0 6px 20px -14px rgba(15,37,71,.6)}
-header::after{content:"";position:absolute;right:-40px;top:-60px;width:220px;height:220px;background:radial-gradient(circle,rgba(184,134,47,.28),transparent 70%);pointer-events:none}
-header h1{font-size:20px;font-weight:800;margin:0;letter-spacing:-.01em}
-header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6;position:relative;z-index:1}
+header{grid-column:1/-1;position:relative;overflow:hidden;color:#fff;padding:16px 24px 15px;
+  background:radial-gradient(1100px 300px at 10% -50%,rgba(44,95,141,.55),transparent 70%),linear-gradient(180deg,#143454 0%,#0F2942 100%)}
+header::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,transparent 0%,var(--gold) 14%,var(--gold) 58%,transparent 100%);opacity:.6}
+header .hin{position:relative;z-index:1;display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}
+header .eyebrow{font-size:9.5px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;color:var(--gold-soft)}
+header h1{font-size:20px;font-weight:800;margin:5px 0 0;letter-spacing:-.4px}
+header .lead{margin:5px 0 0;font-size:12px;line-height:1.6;color:#B7CADC}header .lead b{color:#F0F6FC;font-weight:800}
+header .srcline{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center}
+header .srcline .lbl{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:#8FA9C2;margin-right:2px}
+header .srcline .chip{font-size:10.5px;font-weight:700;color:#D3E3F2;white-space:nowrap;border:1px solid rgba(201,162,39,.42);background:rgba(255,255,255,.055);border-radius:999px;padding:3px 10px}
+header .srcline .chip small{font-weight:500;color:#9fb6cc;margin-left:4px}
+header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6}
+#band{grid-column:1/-1;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;padding:11px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
+#band .bc{padding:8px 12px 9px;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 2px rgba(15,41,66,.05),0 4px 14px rgba(15,41,66,.05)}
+#band .bc:first-child{border-left:3px solid var(--gold)}
+#band .k{font-size:10px;letter-spacing:.06em;color:var(--ink2);font-weight:700;white-space:nowrap}
+#band .v{font-size:15.5px;font-weight:800;color:var(--navy-deep);font-variant-numeric:tabular-nums;margin-top:2px;letter-spacing:-.3px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#band .s{font-size:10.5px;color:var(--mute);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:1300px){header .lead{display:none}header .srcline .chip small{display:none}#band{gap:7px;padding:9px 16px}#band .bc{padding:7px 10px}#band .v{font-size:14px}#band .s{display:none}header .meta{font-size:10.5px}}
 /* 좌측 패널 */
 aside{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
 aside .search{padding:12px;border-bottom:1px solid var(--line);background:#fafbfd}
@@ -138,7 +152,18 @@ a{color:var(--navy2)}
 </style>
 </head>
 <body>
-<header><h1>상장사 심사참고 DB</h1><span class="meta" id="meta">불러오는 중</span></header>
+<header><div class="hin"><div>
+  <div class="eyebrow">Listed Company Credit Review · Financials · Market · Ratings</div>
+  <h1>상장사 심사참고 DB</h1>
+  <div class="lead" id="lead">코스피·코스닥·코넥스 상장사의 재무·차입·메자닌·주가·신용등급을 한 화면에 — 심사 참고용 요약이며, 원문은 각 항목의 DART·금감원 링크로 확인하세요.</div>
+  <div class="srcline"><span class="lbl">SOURCE</span>
+    <span class="chip">DART 전자공시 OpenAPI<small>재무·사업보고서·주석·지분·주요사항</small></span>
+    <span class="chip">KRX 정보데이터시스템<small>일별시세·대용가</small></span>
+    <span class="chip">금융감독원<small>신용평가서 공시</small></span>
+    <span class="chip">Google News<small>헤드라인</small></span>
+    <span class="chip">Claude AI<small>사업내용 요약</small></span></div>
+ </div><div class="meta" id="meta">불러오는 중</div></div></header>
+<div id="band"></div>
 <aside>
   <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div></div>
   <div id="list"></div>
@@ -153,9 +178,23 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 let items=[],cur=null;
 
 fetch('data/companies.json').then(r=>r.json()).then(j=>{
-  items=j.items; $('#meta').textContent=`${j.meta.count}개사 · 빌드 ${j.meta.built_at}` + (j.meta.price_asof?` · 시세 ${j.meta.price_asof}`:'');
+  items=j.items; renderBand(j.meta);
   render(items); const h=location.hash.slice(1); if(/^\d{6}$/.test(h)) open(h);
 });
+function renderBand(m){
+  const n=v=>v==null?'-':Number(v).toLocaleString('ko-KR'), bm=m.by_market||{};
+  $('#meta').innerHTML=`빌드 ${esc(m.built_at||'-')}<br>매일 06:00 시세 · 06:30 대용가 · 00:10 미수집분 보충`;
+  const qn={'03':'1분기','06':'반기','09':'3분기'};
+  const lq=m.latest_q?`${m.latest_q.slice(0,4)} ${qn[m.latest_q.slice(5)]||''}보고서`:'';
+  const cells=[
+    ['수록 회사',`${n(m.count)}개사`,['KOSPI','KOSDAQ','KONEX'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준'],
+    ['재무 기준',m.fin_year?`${m.fin_year} 사업보고서`:'-',(lq?`최신 ${lq.replace('보고서','')} · `:'')+`${n(m.fin_annual)}사 · DART`],
+    ['분기 손익 (12분기)',`${n(m.fin_q)}사`,'누적 차감 복원 · LTM · DART'],
+    ['주가 기준일',m.price_asof||'-','종가·거래량·시총 · KRX 일별시세'],
+    ['대용가 기준일',m.subst_dd||'-','담보가 = 대용가 × 90% · KRX'],
+    ['신용등급 보유',`${n(m.rated)}사`,(m.rating_asof?`최근 ${m.rating_asof} · `:'')+'금감원 공시']];
+  $('#band').innerHTML=cells.map(([k,v,s])=>`<div class="bc"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s" title="${esc(s)}">${esc(s)}</div></div>`).join('');
+}
 let mkt='',sortKey='name',sortDesc=false;
 const MK={KOSDAQ:0,KOSPI:1,KONEX:2};
 // 신용등급 → 서열 점수(높을수록 우량). AAA=22 … D=1. 표기 변형(A+ / A1 등 CP·기업어음 등급, 감시·전망 꼬리표) 정리

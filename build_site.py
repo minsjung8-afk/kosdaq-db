@@ -417,6 +417,39 @@ def _flags(c, kpi, ps, audit, events, ratings):
     return out
 
 
+def _site_meta(con, index):
+    """상단 기준·출처 띠용 집계(실패해도 빌드는 계속)"""
+    m = {}
+    def one(sql, *a):
+        try:
+            r = con.execute(sql, a).fetchone(); return r[0] if r else None
+        except Exception:  # noqa
+            return None
+    try:
+        m["by_market"] = {}
+        for it in index:
+            m["by_market"][it.get("market") or "-"] = m["by_market"].get(it.get("market") or "-", 0) + 1
+    except Exception:  # noqa
+        pass
+    m["fin_annual"] = one("SELECT COUNT(DISTINCT corp_code) FROM fin_kpi WHERE reprt_code='11011' AND (revenue IS NOT NULL OR total_assets IS NOT NULL)")
+    m["fin_year"] = one("SELECT MAX(bsns_year) FROM fin_kpi WHERE reprt_code='11011'")
+    m["fin_q"] = one("SELECT COUNT(*) FROM (SELECT corp_code FROM fin_cum_ok GROUP BY corp_code HAVING COUNT(*)>=10)")
+    try:
+        lq = con.execute("""SELECT bsns_year, reprt_code, COUNT(DISTINCT corp_code) n FROM fin_kpi WHERE reprt_code<>'11011'
+                            GROUP BY 1,2 HAVING n>=100 ORDER BY 1 DESC,
+                            CASE reprt_code WHEN '11014' THEN 3 WHEN '11012' THEN 2 ELSE 1 END DESC LIMIT 1""").fetchone()
+        if lq:
+            m["latest_q"] = lq[0] + "." + {"11013": "03", "11012": "06", "11014": "09"}.get(lq[1], "")
+    except Exception:  # noqa
+        pass
+    m["rated"] = one("SELECT COUNT(DISTINCT corp_code) FROM credit_rating")
+    m["rating_asof"] = one("SELECT MAX(disc_dt) FROM credit_rating")
+    m["subst_dd"] = one("SELECT MAX(subst_dd) FROM price_summary")
+    m["mezz"] = one("SELECT COUNT(DISTINCT corp_code) FROM mezz_outstanding") or one("SELECT COUNT(DISTINCT corp_code) FROM mezzanine")
+    m["disc_asof"] = one("SELECT MAX(rcept_dt) FROM disclosure_event")
+    return {k: v for k, v in m.items() if v is not None}
+
+
 def build():
     con = connect()
     if SITE.exists():
@@ -447,6 +480,7 @@ def build():
                       "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber")})
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
             "price_asof": max((r["asof"] for r in q(con, "SELECT asof FROM price_summary")), default=None)}
+    meta.update(_site_meta(con, index))
     (SITE / "data" / "companies.json").write_text(json.dumps({"meta": meta, "items": index}, ensure_ascii=False), encoding="utf-8")
     print(f"site/ 생성: {len(index)}개사")
 
