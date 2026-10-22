@@ -445,6 +445,61 @@ def run_ofs(corp_codes, year, con=None, workers=4):
     return n
 
 
+def run_yoy(corp_codes, con=None, workers=4):
+    """전년동기 열 재무상태표 보강: 최신 분기보고서의 '전년 같은 분기'가 전기 열 재사용(손익만)이라 BS가 빈 경우,
+    그 분기보고서를 직접 받아 BS 포함 전체로 교체. 연결·별도 각각 1콜."""
+    import common
+    from concurrent.futures import ThreadPoolExecutor
+    con = con or connect()
+    ensure_cum_table(con)
+    cs = set(corp_codes)
+    todo = []
+    latest = {}
+    for r in con.execute("""SELECT corp_code, fs_div, bsns_year, reprt_code FROM fin_raw
+                            WHERE reprt_code<>'11011' AND (rcept_no IS NULL OR rcept_no NOT LIKE '%:전기')
+                            GROUP BY corp_code, fs_div, bsns_year, reprt_code"""):
+        k = (r[0], r[1]); o = {"11013": 1, "11012": 2, "11014": 3}[r[3]]
+        if k not in latest or (r[2], o) > (latest[k][0], latest[k][2]):
+            latest[k] = (r[2], r[3], o)
+    for (cc, fs), (y, rc, _) in latest.items():
+        if cc not in cs:
+            continue
+        py = str(int(y) - 1)
+        has_bs = con.execute("SELECT 1 FROM fin_raw WHERE corp_code=? AND fs_div=? AND bsns_year=? AND reprt_code=? AND sj_div='BS' LIMIT 1",
+                             (cc, fs, py, rc)).fetchone()
+        if not has_bs:
+            todo.append((cc, fs, py, rc))
+    tried = {(r[0], r[1]) for r in con.execute("SELECT corp_code, msg FROM fetch_log WHERE job='fin_yoy' AND status IN ('ok','empty')")}
+    todo = [t for t in todo if (t[0], f"{t[1]} {t[2]} {t[3]}") not in tried]
+    print(f"[fin-yoy] 전년동기 재무상태표 보강 대상 {len(todo)}건(연결·별도) · 병렬 {workers}", flush=True)
+    n = i = 0
+    with ThreadPoolExecutor(workers) as ex:
+        for b in range(0, len(todo), workers * 5):
+            batch = todo[b:b + workers * 5]
+            futs = [(t, ex.submit(_fetch_list, t[0], t[2], t[3], t[1])) for t in batch]
+            stop = False
+            for (cc, fs, py, rc), f in futs:
+                i += 1
+                try:
+                    lst = f.result()
+                    if lst:
+                        store_raw(con, cc, py, rc, fs, lst, prev=False)
+                        build_kpi(con, cc, py, rc)
+                        n += 1
+                    log(con, cc, "fin_yoy", "ok" if lst else "empty", f"{fs} {py} {rc}")
+                except Exception as e:  # noqa
+                    log(con, cc, "fin_yoy", "fail", e)
+                    if common.QUOTA_HIT or "한도" in str(e):
+                        stop = True
+            con.commit()
+            if i % 200 < workers * 5:
+                print(f"[fin-yoy] {i}/{len(todo)} · 보강 {n} · DART {common.CALLS}콜", flush=True)
+            if stop:
+                print(f"[fin-yoy] DART 한도 도달 — {i}/{len(todo)}에서 중단", flush=True); break
+    print(f"[fin-yoy] 완료 {i}/{len(todo)} · 보강 {n}", flush=True)
+    return n
+
+
 def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):
     """years: 연간(사업보고서) 적재 연도. interim=True면 최근 분기 + 전년 동기 추가.
     오늘 기준 기본: 직전 2개년 연간 + 최근분기·전년동기 = 회사당 (2+2)×2(연결/별도) = 8호출"""
