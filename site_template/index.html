@@ -73,6 +73,7 @@ section>.twrap{margin-left:16px;margin-right:16px}
 .bar i{position:absolute;top:-3px;width:3px;height:13px;background:var(--gold);border-radius:2px}
 /* 표 공통 */
 .twrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+.twrap.stick tr>*:first-child{position:sticky;left:0;z-index:1;background:#fff;box-shadow:1px 0 0 var(--line)}.twrap.stick tr:nth-child(even)>td:first-child{background:#f9fafc}.twrap.stick tr>th:first-child{background:var(--navy)}
 table{border-collapse:collapse;width:100%;font-size:12.5px}
 th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{background:var(--navy);color:#fff;font-weight:600;font-size:11.5px;white-space:nowrap}
@@ -480,11 +481,12 @@ async function open(code){
   else h+=`<div class="src">수집된 뉴스 없음</div>`;
   h+=`</section>`;
   $('#main').innerHTML=h;
+  fitTables();
   // 섹션 접기/펼치기 — 기본 펼침: 1, 3, 3-1, 4 (나머지는 접힘), 상태는 브라우저에 기억
   {let st={}; try{st=JSON.parse(localStorage.getItem('fold')||'{}')}catch(e){}
    document.querySelectorAll('#main section').forEach(sec=>{const h3=sec.querySelector('h3'); if(!h3) return; const key=(h3.textContent.match(/^\s*([0-9]+(?:-[0-9]+)?)/)||[])[1]||h3.textContent.slice(0,6);
      const def=['1','3','3-1','4'].includes(key); const open=key in st?st[key]:def; if(!open) sec.classList.add('fold');
-     h3.addEventListener('click',()=>{sec.classList.toggle('fold'); st[key]=!sec.classList.contains('fold'); try{localStorage.setItem('fold',JSON.stringify(st))}catch(e){}});});} $('#main').scrollTop=0;
+     h3.addEventListener('click',()=>{sec.classList.toggle('fold'); if(!sec.classList.contains('fold')) fitTables(); st[key]=!sec.classList.contains('fold'); try{localStorage.setItem('fold',JSON.stringify(st))}catch(e){}});});} $('#main').scrollTop=0; fitTables();
   document.querySelectorAll('[data-ng]').forEach(b=>b.onclick=()=>{const u=document.getElementById('ng'+b.dataset.ng); u.hidden=!u.hidden; b.textContent=b.textContent.replace(u.hidden?'▴':'▾',u.hidden?'▾':'▴');});
   if(d.prices.length) initChart(d.prices,(d.price_summary||{}).subst_price||null);
 }
@@ -497,6 +499,17 @@ function aggregate(p,tf){ // 일봉 → 주봉/월봉 집계
     if(k!==key){ if(cur) out.push(cur); cur=[dt,o,h,l,c,v]; key=k; } else { cur[2]=Math.max(cur[2],h); cur[3]=Math.min(cur[3],l); cur[4]=c; cur[5]+=v; } }
   if(cur) out.push(cur); return out;
 }
+/* 표가 화면 폭을 넘으면 글자·여백을 단계적으로 줄여 한 화면에 맞춤(최소 10.5px — 그 이하로는 가독성 저하).
+   그래도 넘치면 가로 스크롤 유지 + 첫 열(항목명) 고정 */
+function fitTables(){
+  document.querySelectorAll('#main .twrap').forEach(w=>{ const t=w.querySelector('table'); if(!t) return;
+    t.style.fontSize=''; t.querySelectorAll('th,td').forEach(c=>{c.style.paddingLeft=c.style.paddingRight='';}); w.classList.remove('stick');
+    if(w.scrollWidth<=w.clientWidth+1) return;
+    const base=parseFloat(getComputedStyle(t).fontSize)||12.5, cells=[...t.querySelectorAll('th,td')], pad0=parseFloat(getComputedStyle(cells[0]||t).paddingLeft)||8;
+    for(let f=base-0.5, k=1; f>=10.5; f-=0.5, k++){ const pd=Math.max(3, pad0-k*1); t.style.fontSize=f+'px'; cells.forEach(c=>{c.style.paddingLeft=c.style.paddingRight=pd+'px';}); if(w.scrollWidth<=w.clientWidth+1) return; }
+    w.classList.add('stick'); });
+}
+let _fitT; window.addEventListener('resize',()=>{clearTimeout(_fitT); _fitT=setTimeout(fitTables,150)});
 function initChart(prices,sub){
   try{ const g=document.getElementById('pxgap'); if(g&&prices&&prices.length){ const ym=t=>t.slice(0,7).replace('-','.'); const gaps=[];
       for(let i=1;i<prices.length;i++){ const a=new Date(prices[i-1][0]), b=new Date(prices[i][0]); if((b-a)/864e5>21) gaps.push(`${ym(prices[i-1][0])}~${ym(prices[i][0])}`); }

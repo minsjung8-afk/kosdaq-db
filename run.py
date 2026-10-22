@@ -54,7 +54,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -172,6 +172,9 @@ def main():
         if not a.codes:
             summarize.run_rating(set(ccs) if a.limit else None)              # 등급 보유사: 신용평가서 기반 요약(우선)
         summarize.run(ccs, a.years[-1] if a.years else a.year - 1, force=a.force, model=a.model)   # 나머지(또는 --codes 지정분): 사업보고서 기반
+    if a.job == "rating_fix":                 # 신용등급 계열사 혼입 정정(완전일치 재조회, 등급 보유사만 ~10분)
+        import fss_rating
+        fss_rating.fix_mismatch(con)
     if a.job in ("rating", "all"):
         import fss_rating
         fss_rating.run(set(ccs) if (a.limit or a.new_only) else None)

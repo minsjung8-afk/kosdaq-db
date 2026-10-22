@@ -77,18 +77,64 @@ def fetch_company_rows(c, years=3):
     return rows
 
 
-def store_rows(con, c, rows):
-    key = norm(search_name(c))
-    n = 0
-    for r in rows:
-        if norm(r["target"]) != key and key not in norm(r["target"]):
-            continue
-        con.execute("""INSERT OR REPLACE INTO credit_rating (corp_code, agency, target_type, eval_kind, disc_dt, grade, watch, outlook, fetched_at, file_url)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (c["corp_code"], r["agency"], r["ttype"], r["kind"], r["disc_dt"], r["grade"], r["watch"], r["outlook"], now(), r["file_url"]))
-        n += 1
+def _ensure_target(con):
+    try:
+        con.execute("ALTER TABLE credit_rating ADD COLUMN target TEXT")
+    except Exception:  # noqa
+        pass
+
+
+def store_rows(con, c, rows, replace=False):
+    """평가대상회사명이 정확히 같은 행만(정규화 후). 예전 '부분일치' 허용 때문에 CJ ← CJ푸드빌·CJ대한통운, SK ← SK하이닉스 등
+    계열사 등급이 섞이던 문제(2026-10-22) → 완전일치로 변경. replace=True면 그 회사의 기존 행을 지우고 다시 넣음."""
+    _ensure_target(con)
+    keys = {norm(search_name(c)), norm(c.get("corp_name"))} - {""}
+    ok = [r for r in rows if norm(r["target"]) in keys]
+    if replace:
+        con.execute("DELETE FROM credit_rating WHERE corp_code=?", (c["corp_code"],))
+    for r in ok:
+        con.execute("""INSERT OR REPLACE INTO credit_rating (corp_code, agency, target_type, eval_kind, disc_dt, grade, watch, outlook, fetched_at, file_url, target)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (c["corp_code"], r["agency"], r["ttype"], r["kind"], r["disc_dt"], r["grade"], r["watch"], r["outlook"], now(), r["file_url"], r["target"]))
     con.commit()
-    return n
+    return len(ok)
+
+
+def fix_mismatch(con=None, years=3):
+    """기존 등급 보유사만 다시 조회해 완전일치 행으로 교체 → 바뀐 회사 목록 출력 + 잘못된 평가서로 만든 요약(rating_summary) 삭제"""
+    con = con or connect()
+    _ensure_target(con)
+    cs = [dict(r) for r in con.execute("""SELECT c.corp_code, c.corp_name, c.corp_name_full FROM company c
+                                          WHERE c.corp_code IN (SELECT DISTINCT corp_code FROM credit_rating)""")]
+    before = {r[0]: r[1] for r in con.execute("SELECT corp_code, COUNT(*) FROM credit_rating GROUP BY corp_code")}
+    print(f"[rating-fix] 등급 보유 {len(cs)}사 재조회(완전일치)", flush=True)
+    changed = []
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futs = [(c, ex.submit(fetch_company_rows, c, years)) for c in cs]
+        for i, (c, f) in enumerate(futs, 1):
+            try:
+                n = store_rows(con, c, f.result(), replace=True)
+                if n != before.get(c["corp_code"], 0):
+                    changed.append((c["corp_name"], before.get(c["corp_code"], 0), n))
+            except Exception as e:  # noqa
+                log(con, c["corp_code"], "rating_fix", "fail", e)
+            if i % 50 == 0:
+                print(f"[rating-fix] {i}/{len(cs)} · 변경 {len(changed)}사", flush=True)
+    # 요약의 근거 평가서가 더 이상 그 회사 등급 목록에 없으면 삭제(다음 요약 실행에서 올바른 평가서로 재생성)
+    try:
+        bad = [r[0] for r in con.execute("""SELECT s.corp_code FROM rating_summary s WHERE s.file_url IS NOT NULL AND NOT EXISTS
+                     (SELECT 1 FROM credit_rating r WHERE r.corp_code=s.corp_code AND r.file_url=s.file_url)""")]
+        for cc in bad:
+            con.execute("DELETE FROM rating_summary WHERE corp_code=?", (cc,))
+        con.commit()
+        print(f"[rating-fix] 잘못된 평가서 기반 요약 삭제 {len(bad)}사", flush=True)
+    except Exception as e:  # noqa
+        print("[rating-fix] 요약 정리 실패:", e)
+    print(f"[rating-fix] 등급 행 수가 바뀐 회사 {len(changed)}사:", flush=True)
+    for nm, a, b in sorted(changed, key=lambda x: x[1] - x[2], reverse=True):
+        print(f"  {nm}: {a} → {b}건", flush=True)
+    log(con, "-", "rating_fix", "ok", f"{len(cs)} checked / {len(changed)} changed")
+    return changed
 
 
 def collect_company(con, c, years=3):
