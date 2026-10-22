@@ -97,7 +97,7 @@ td.sep,th.sep{border-left:2px solid var(--line2)}th.sep{border-left-color:rgba(2
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top}
 /* 재무현황 표 */
 table.fin{font-size:12.5px}table.fin th,table.fin td{padding:5px 8px;vertical-align:middle;line-height:1.35;white-space:nowrap}
-table.fin td:first-child{font-weight:600;color:var(--navy2);background:var(--nbg)!important;white-space:nowrap}table.fin tr.g1>td:first-child{background:#dfe8f6!important}table.fin tr.g2>td:first-child{background:#f2e7cc!important}table.fin tr.g3>td:first-child{background:#d9eee1!important}table.fin tr.g4>td:first-child{background:#f6e0d0!important}table.fin tr.g5>td:first-child{background:#e6ddf5!important}table.fin tr.g6>td:first-child{background:#d6edf1!important}table.fin tr.g7>td:first-child{background:#e3e9cc!important}table.fin td:first-child small{font-weight:400;color:var(--ink2)}
+table.fin td:first-child{font-weight:600;color:var(--navy2);background:var(--nbg)!important;white-space:nowrap}table.fin tr.g1>td:first-child{background:#dfe8f6!important}table.fin tr.g2>td:first-child{background:#f2e7cc!important}table.fin tr.g3>td:first-child{background:#d9eee1!important}table.fin tr.g4>td:first-child{background:#f6e0d0!important}table.fin tr.g5>td:first-child{background:#e6ddf5!important}table.fin tr.g6>td:first-child{background:#d6edf1!important}table.fin tr.g7>td:first-child{background:#e3e9cc!important}table.fin td:first-child small{display:block;font-weight:400;color:var(--ink2);font-size:10px;line-height:1.25;white-space:normal;max-width:190px}
 table.fin td .val{display:inline-block;min-width:3.2em;text-align:right;font-weight:600}table.fin td .val.neg{color:var(--bad)}
 table.fin td .chg{display:inline-block;min-width:4.4em;text-align:right;font-size:10px;color:var(--mute);margin-left:4px}table.fin td .chg.up{color:var(--good)}table.fin td .chg.dn{color:var(--bad)}
 table.fin tr.g4>td,table.fin tr.g4>th{background:var(--g4)}table.fin tr.g5>td,table.fin tr.g5>th{background:var(--g5)}table.fin tr.g6>td,table.fin tr.g6>th{background:var(--g6)}table.fin tr.g4>td:first-child{border-left:3px solid #c2662d}table.fin tr.g5>td:first-child{border-left:3px solid #6d4fb0}table.fin tr.g6>td:first-child{border-left:3px solid #1f7f8f}table.fin tr.g7>td,table.fin tr.g7>th{background:var(--g7)}table.fin tr.g7>td:first-child{border-left:3px solid #6b7d1f}
@@ -398,11 +398,11 @@ async function open(code){
     const groups=[
       ['g1', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da','유무형상각비'],['당기순이익','net_income',억]]],
       ['g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억]]],
-      ['g7', [['영업활동CF','cfo',억],['└ 법인세 납부 <small>(영업활동CF에 이미 차감됨)</small>','tax_paid',억,null,null,1],['투자활동CF','cfi',억],['└ Capex 순액 <small>(유·무형자산 취득 − 처분, 투자활동CF에 포함)</small>','capex',억,null,null,1],['재무활동CF','cff',억],['FCF <small>(영업활동CF − Capex 순액 · 세후)</small>','fcf',억]]],
+      ['g7', [['영업활동CF','cfo',억],['└ 법인세 납부 <small>영업활동CF에 이미 차감</small>','tax_paid',억,null,null,1],['투자활동CF','cfi',억],['└ Capex 순액 <small>유·무형자산 취득−처분 (투자활동CF 포함)</small>','capex',억,null,null,1],['재무활동CF','cff',억],['FCF <small>영업활동CF − Capex 순액 (세후)</small>','fcf',억]]],
       ['g4', [['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억]]],
       ['g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['유동비율','cur_ratio',pct],['순차입금/EBITDA','nd_ebitda',x],['EBITDA/이자비용','interest_cover',x]]],
       ['g5', [['영업이익률','op_margin',pct],['당기순이익률','net_margin',pct]]],
-      ['g6', [['매출채권회전율','recv_turn',x],['재고자산회전율','inv_turn',x],...(isProj?[['순운전자본 <small>(수주형: 매출채권+미청구공사+재고−매입채무−초과청구−선수금)</small>','nwc_proj',억],['미청구공사(계약자산)','contract_assets',억],['초과청구공사(계약부채)','contract_liab',억],['선수금','advances',억]]:isFin?[]:[['순운전자본 <small>(매출채권+재고−매입채무)</small>','nwc',억]])]],
+      ['g6', [['매출채권회전율','recv_turn',x],['재고자산회전율','inv_turn',x],...(isProj?[['순운전자본 <small>(수주형: 매출채권+미청구공사+재고−매입채무−초과청구−선수금)</small>','nwc_proj',억],['미청구공사(계약자산)','contract_assets',억],['초과청구공사(계약부채)','contract_liab',억],['선수금','advances',억]]:isFin?[]:[['순운전자본 <small>매출채권+재고−매입채무</small>','nwc',억]])]],
     ];
     const bases=[['OFS','별도'],['CFS','연결']].filter(([fs])=>d.kpi[fs]&&d.kpi[fs].length);
     if(!bases.length) h+=`<div class="src">재무 미수집</div>`;
@@ -412,8 +412,8 @@ async function open(code){
       const cell=(rows,i,k,f,sub,first)=>{const r=rows[i],p=prevOf(rows,i); return `<td class="n${first?' sep':''}"><span class="val ${r[k]<0?'neg':''}">${f(r[k])}</span>${sub?`<span class="chg">(${f(r[sub]==null?null:Math.abs(r[sub]))})</span>`:(p?chg(r[k],p[k],f):'')}</td>`;};
       const head1=`<tr><th></th>${bases.map(([fs,nm])=>`<th class="sep top" colspan="${d.kpi[fs].length}">${nm}</th>`).join('')}</tr>`;
       const plink=r=>r.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener" title="DART 보고서 열기">${r.label||r.bsns_year}</a>`:(r.label||r.bsns_year);
-      const head2=`<tr><th>항목</th>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>`<th class="n col${i===0?' sep':''}${r.kind==='interim'?' cur':''}" ${r.kind==='interim'?'style="box-shadow:inset 0 -3px 0 var(--gold)"':''}>${plink(r)}${r.kind!=='annual'?'<small style="font-weight:400;color:var(--mute)"> 누적</small>':''}</th>`).join('')).join('')}</tr>`;
-      const body=groups.map(([cls,cols],gi)=>cols.map(([n,k,f,sub,sl,isSub],ri)=>`<tr class="${cls}${gi>0&&ri===0?' gs':''}${isSub?' subr':''}"><td>${n}${sub?` <small>(${sl||'유무형상각비'})</small>`:''}</td>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>cell(d.kpi[fs],i,k,f,sub,i===0)).join('')).join('')}</tr>`).join('')).join('');
+      const head2=`<tr><th>항목</th>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>`<th class="n col${i===0?' sep':''}${r.kind==='interim'?' cur':''}" ${r.kind==='interim'?'style="box-shadow:inset 0 -3px 0 var(--gold)"':''}>${plink(r)}${r.kind!=='annual'?'<br><small style="font-weight:400;color:#c9d6ea;font-size:10px">누적</small>':''}</th>`).join('')).join('')}</tr>`;
+      const body=groups.map(([cls,cols],gi)=>cols.map(([n,k,f,sub,sl,isSub],ri)=>`<tr class="${cls}${gi>0&&ri===0?' gs':''}${isSub?' subr':''}"><td>${n}${sub?` <small>괄호: ${sl||'유무형상각비'}</small>`:''}</td>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>cell(d.kpi[fs],i,k,f,sub,i===0)).join('')).join('')}</tr>`).join('')).join('');
       h+=`<div class="src" style="margin:6px 0 6px">단위 억원 · 연간 2개년 + 전년동기·최근분기(누적) · ▲▼는 전년(동기) 대비 증감(금액·배수 %, 비율 %p) · 연도 클릭 → DART 보고서 <span style="margin-left:8px">${[['손익','var(--g1)','var(--navy2)'],['자산·부채·자본','var(--g2)','var(--gold)'],['현금창출력','var(--g7)','#6b7d1f'],['차입·현금','var(--g4)','#c2662d'],['안정성','var(--g3)','var(--good)'],['수익성','var(--g5)','#6d4fb0'],['활동성·운전자본','var(--g6)','#1f7f8f']].map(([n,bg,bd])=>`<span style="display:inline-block;background:${bg};border-left:3px solid ${bd};padding:0 6px;margin-right:4px;border-radius:2px">${n}</span>`).join('')}</span></div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div>`;
       {const RN={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const fs0=bases[0]&&bases[0][0]; const rows=fs0?d.kpi[fs0]:[];
        const srcs=rows.map(r=>`${r.label||r.bsns_year} ${RN[r.reprt_code]||''}${r.kind!=='annual'?'(누적)':''}${r.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">${r.rcept_no}</a>`:''}`);
@@ -557,12 +557,14 @@ function aggregate(p,tf){ // 일봉 → 주봉/월봉 집계
 /* 표가 화면 폭을 넘으면 글자·여백을 단계적으로 줄여 한 화면에 맞춤(최소 10.5px — 그 이하로는 가독성 저하).
    그래도 넘치면 가로 스크롤 유지 + 첫 열(항목명) 고정 */
 function fitTables(){
+  // ① 글자·여백 단계 축소(최소 11px) → ② 그래도 넘치면 표 전체 배율 축소(zoom, 최소 72%) → ③ 그래도 넘치면 가로 스크롤 + 첫 열 고정
   document.querySelectorAll('#main .twrap').forEach(w=>{ const t=w.querySelector('table'); if(!t) return;
-    t.style.fontSize=''; t.querySelectorAll('th,td').forEach(c=>{c.style.paddingLeft=c.style.paddingRight='';}); w.classList.remove('stick');
-    if(w.scrollWidth<=w.clientWidth+1) return;
+    t.style.fontSize=''; t.style.zoom=''; t.querySelectorAll('th,td').forEach(c=>{c.style.paddingLeft=c.style.paddingRight='';}); w.classList.remove('stick');
+    if(!w.clientWidth||w.scrollWidth<=w.clientWidth+1) return;
     const base=parseFloat(getComputedStyle(t).fontSize)||12.5, cells=[...t.querySelectorAll('th,td')], pad0=parseFloat(getComputedStyle(cells[0]||t).paddingLeft)||8;
-    for(let f=base-0.5, k=1; f>=10.5; f-=0.5, k++){ const pd=Math.max(3, pad0-k*1); t.style.fontSize=f+'px'; cells.forEach(c=>{c.style.paddingLeft=c.style.paddingRight=pd+'px';}); if(w.scrollWidth<=w.clientWidth+1) return; }
-    w.classList.add('stick'); });
+    for(let f=base-0.5, k=1; f>=11; f-=0.5, k++){ const pd=Math.max(4, pad0-k*1); t.style.fontSize=f+'px'; cells.forEach(c=>{c.style.paddingLeft=c.style.paddingRight=pd+'px';}); if(w.scrollWidth<=w.clientWidth+1) return; }
+    const z=(w.clientWidth-2)/w.scrollWidth; if(z>=0.72){ t.style.zoom=z.toFixed(3); if(w.scrollWidth<=w.clientWidth+1) return; }
+    t.style.zoom=''; w.classList.add('stick'); });
 }
 let _fitT; window.addEventListener('resize',()=>{clearTimeout(_fitT); _fitT=setTimeout(fitTables,150)});
 function initChart(prices,sub){
