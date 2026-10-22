@@ -30,6 +30,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    permissions: { contents: read, actions: write }   # chain 자동 이어하기(gh workflow run)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -162,3 +163,9 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy site --project-name kosdaq-db
+      - name: auto-continue chain        # 170분 제한으로 끊긴 chain의 남은 단계를 자동으로 다시 실행(최대 8회)
+        if: "!cancelled() && hashFiles('continue.txt') != ''"
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          ARGS=$(cat continue.txt); echo "이어하기: $ARGS"
+          gh workflow run collect.yml --ref "${{ github.ref_name }}" -f job=chain -f args="$ARGS"

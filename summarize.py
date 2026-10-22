@@ -214,7 +214,7 @@ def _latest_ratings(con):
     return out
 
 
-def run_all(corp_codes=None, model="haiku", force=False, workers=6, limit=None):
+def run_all(corp_codes=None, model="haiku", force=False, workers=10, limit=None):
     """전 종목 요약. force=True여도 '같은 모델·같은 근거'로 이미 만든 건 건너뜀(타임아웃 후 재개)."""
     import time
     import requests

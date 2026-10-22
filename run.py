@@ -84,6 +84,7 @@ def main():
     ap.add_argument("--model", default="sonnet", help="summarize: sonnet(기본)/haiku/opus 또는 모델 ID")
     ap.add_argument("--force", action="store_true", help="summarize: 이미 요약된 회사도 다시 생성")
     ap.add_argument("--codes", nargs="*", help="대상 종목코드 지정 (예: --codes 060310 006840) — 모든 작업 공통")
+    ap.add_argument("--hop", type=int, default=0, help="chain: 자동 이어하기 횟수(무한 반복 방지, 8회까지)")
     ap.add_argument("--steps", nargs="*", help="chain: 순서대로 실행할 작업 (예: --steps da quarters \"price:--start 2016-01-01\")")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
@@ -217,7 +218,15 @@ def main():
         import subprocess, shlex, time, os
         me = str(Path(__file__).resolve())
         EVERY = int(os.environ.get("CHAIN_PUBLISH_MIN", "40")) * 60     # 긴 단계는 40분마다 중간 반영
-        for st in (a.steps or []):
+        steps = list(a.steps or [])
+        def save_continue(remaining):
+            """170분 제한으로 끊기면 남은 단계를 continue.txt에 남김 → 워크플로 마지막 단계가 같은 chain을 자동으로 다시 실행"""
+            if not remaining or a.hop >= 8:
+                return
+            arg = "--hop " + str(a.hop + 1) + " --steps " + " ".join(shlex.quote(x) for x in remaining)
+            Path(me).with_name("continue.txt").write_text(arg, encoding="utf-8")
+            print(f"[chain] 제한 시간 도달 — 남은 단계 자동 이어하기 예약: {remaining}", flush=True)
+        for si, st in enumerate(steps):
             nm, _, rest = st.partition(":")
             print(f"[chain] ▶ {nm} {rest}", flush=True)
             p = subprocess.Popen([sys.executable, me, nm] + shlex.split(rest))
@@ -228,6 +237,7 @@ def main():
                     if time.time() - last >= EVERY:
                         publish(f"{nm} 진행 중"); last = time.time()
             except KeyboardInterrupt:          # 170분 제한(timeout INT) → 하위 작업도 정리하고 종료(이후 단계는 워크플로가 저장·배포)
+                save_continue(steps[si:])
                 p.send_signal(__import__("signal").SIGINT)
                 try:
                     p.wait(timeout=120)
