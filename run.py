@@ -37,6 +37,13 @@ def publish(tag):
     """사이트 중간 반영: 빌드 → Cloudflare Pages 배포(토큰 없으면 건너뜀). 실패해도 수집은 계속"""
     if not os.environ.get("CLOUDFLARE_API_TOKEN"):
         return
+    try:   # 안전장치: 회사 수 1,000 미만(빈·손상 DB)이면 중간 배포하지 않음
+        import sqlite3
+        n = sqlite3.connect(str(Path(__file__).resolve().with_name("kosdaq.db"))).execute("SELECT COUNT(*) FROM company").fetchone()[0]
+        if n < 1000:
+            print(f"[chain] 사이트 반영 생략({tag}): 회사 수 {n} — 비정상 DB", flush=True); return
+    except Exception as e:  # noqa
+        print(f"[chain] 사이트 반영 생략({tag}): DB 확인 실패 {e}", flush=True); return
     t0 = time.time()
     try:
         subprocess.run([sys.executable, str(Path(__file__).resolve()), "site"], check=True, stdout=subprocess.DEVNULL, timeout=900)
