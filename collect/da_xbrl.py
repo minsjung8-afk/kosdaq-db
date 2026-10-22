@@ -136,7 +136,21 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
         # 사용권자산상각비는 '감가상각비'에 이미 포함된 경우가 많아, 현금흐름 조정 항목(AdjustmentsFor…)으로 따로 공시된 경우만 더함(이중계상 방지)
         if r and d and "AdjustmentsFor" not in r[1]:
             r = None
-        if not (d or a or r):
+        if not d:
+            # 표준 태그가 없으면 주석 '유형·무형자산 변동내역' 확장 태그(…Depreciation…/…Amortization…, 자산종류 구분 없는 합계 행)에서
+            # 기간 말에 끝나는 누적값 중 '가장 큰 값'을 각각 채택(합계 행 = 최대) — 표가 여럿이면 이중계상 방지 위해 합산하지 않음
+            def best(rx):
+                c = []
+                for local in facts:
+                    if re.search(rx, local) and not re.search(r"Rightofuse|RightOfUse|InvestmentProperty|Goodwill", local, re.I):
+                        p = pick(local)
+                        if p:
+                            c.append((p[0], local, p[1]))
+                return max(c) if c else None
+            d2, a2 = best(r"Depreciation"), (a or best(r"Amorti[sz]ation"))
+            if d2:
+                d, a, r, ip = d2, a2, None, None
+        if not d:                     # 감가상각비를 못 찾으면(사용권·무형만 있는 경우 포함) 채택하지 않음 → 과소계상 방지
             if debug:
                 print("   후보 태그:", sorted(facts)[:30], flush=True)
             return None
@@ -180,6 +194,15 @@ def run(corp_codes=None, limit=None, con=None, workers=4, debug=False):
     from concurrent.futures import ThreadPoolExecutor
     from financials import build_kpi
     con = con or connect()
+    ensure(con)
+    # 정정(2026-10-22 v2): 사용권자산상각비만 잡힌 과소 결과 삭제·재계산, 표준 태그 없던 건은 변동내역 태그 보강 로직으로 1회 재시도
+    bad = con.execute("""SELECT corp_code, bsns_year, reprt_code FROM da_xbrl WHERE status='ok' AND dep IS NULL
+                         AND tag NOT LIKE '%DepreciationAndAmortisation%'""").fetchall()
+    con.execute("""DELETE FROM da_xbrl WHERE (status='ok' AND dep IS NULL AND tag NOT LIKE '%DepreciationAndAmortisation%')
+                   OR (status='notag' AND fetched_at < '2026-10-22 11:45')""")
+    for b in bad:
+        build_kpi(con, b[0], b[1], b[2])
+    con.commit()
     ts = targets(con, set(corp_codes) if corp_codes else None)
     try:   # 우선순위: 신용등급 보유 → 코스피 → 코스닥
         rated = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM credit_rating")}

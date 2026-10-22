@@ -33,9 +33,9 @@ def search_name(c) -> str:
     return s or c["corp_name"]
 
 
-def fetch(name: str, years=3, page=1) -> str:
+def fetch(name: str, years=3, page=1, unit=100) -> str:
     today = date.today()
-    params = {"menuNo": "200411", "pageIndex": page, "searchCompany": "", "searchAssGbn": "", "searchTargetCoNm": name,
+    params = {"menuNo": "200411", "pageIndex": page, "pageUnit": unit, "searchCompany": "", "searchAssGbn": "", "searchTargetCoNm": name,
               "searchTargetTypeKor": "", "searchCnd": "1", "sdate": (today - timedelta(days=365 * years)).isoformat(),
               "edate": today.isoformat()}
     r = requests.get(URL + "?" + urlencode(params), headers=UA, timeout=30)
@@ -62,19 +62,37 @@ def parse(html: str):
     return out, (int(m.group(1)) if m else len(out))
 
 
-def fetch_company_rows(c, years=3):
-    """네트워크만: 회사 1곳의 공시 행 전부(페이지 순회). 스레드에서 호출."""
-    name = search_name(c)
-    rows, total = [], 0
-    page = 1
+def _all_pages(term, years, max_pages):
+    rows, page = [], 1
     while True:
-        r, total = parse(fetch(name, years, page))
+        r, total = parse(fetch(term, years, page))
         rows += r
-        if len(rows) >= total or not r or page >= 10:
-            break
+        if len(rows) >= total or not r or page >= max_pages:
+            return rows, total
         page += 1
         time.sleep(PAUSE)
-    return rows
+
+
+def fetch_company_rows(c, years=3):
+    """네트워크만: 회사 1곳의 공시 행(페이지당 100행). 스레드에서 호출.
+    금감원 검색은 부분일치라 '한화'로 찾으면 계열사 포함 수천 건 → 평가대상명 표기 그대로 '(주)한화'·'한화(주)'로 먼저 좁혀 찾고,
+    둘 다 없을 때만 회사명 자체로 찾는다(최대 30페이지=3,000행). 최종 거르기는 store_rows의 완전일치."""
+    name = search_name(c)
+    key = norm(name)
+    rows = []
+    for term in (f"(주){name}", f"{name}(주)"):
+        r, _ = _all_pages(term, years, 10)
+        rows += [x for x in r if norm(x["target"]) == key]
+        time.sleep(PAUSE)
+    if not rows:
+        r, _ = _all_pages(name, years, 30)
+        rows = r
+    seen, out = set(), []
+    for x in rows:                                    # 두 검색어 결과 중복 제거
+        k = (x["agency"], x["ttype"], x["disc_dt"], x["grade"], x["target"])
+        if k not in seen:
+            seen.add(k); out.append(x)
+    return out
 
 
 def _ensure_target(con):
