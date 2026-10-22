@@ -135,6 +135,12 @@ def build_summary(con, stock_code, shares_out=None, asof=None):
                 (stock_code, asof, last["close"], shares_out, mcap,
                  max(r["close"] for r in y1) if y1 else None, min(r["close"] for r in y1) if y1 else None,
                  chg(30), chg(91), chg(365), avg_vol, avg_val, vol, chg(7), chg(182), chg(730), chg(1095)))
+    try:   # 새 asof 행에도 최신 대용가를 이어 붙임(INSERT OR REPLACE가 대용가 열을 비우는 문제 방지)
+        con.execute("""UPDATE price_summary SET subst_price=(SELECT sb_prc FROM subst_price s WHERE s.stock_code=? ORDER BY trd_dd DESC LIMIT 1),
+                       subst_dd=(SELECT trd_dd FROM subst_price s WHERE s.stock_code=? ORDER BY trd_dd DESC LIMIT 1)
+                       WHERE stock_code=? AND asof=?""", (stock_code, stock_code, stock_code, asof))
+    except Exception:  # noqa
+        pass
     con.commit()
     return asof
 

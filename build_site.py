@@ -255,6 +255,13 @@ def company_detail(con, c):
     from prices import adjusted_rows  # noqa  수정주가(분할·병합 반영)
     prices = _compact_prices(adjusted_rows(con, sc), con.execute("SELECT date('now','-3 years')").fetchone()[0])   # 최근 3년 일봉 + 그 이전 주봉
     ps = q(con, "SELECT * FROM price_summary WHERE stock_code=? ORDER BY asof DESC LIMIT 1", sc)
+    # 대용가는 subst_price(적용일별 이력)에서 최신값 — price_summary는 시세 수집 때 새 asof 행이 생기며 대용가가 비는 문제(2026-10-22) 방지
+    try:
+        sp = con.execute("SELECT sb_prc, trd_dd FROM subst_price WHERE stock_code=? ORDER BY trd_dd DESC LIMIT 1", (sc,)).fetchone()
+        if ps and sp:
+            ps[0] = dict(ps[0]); ps[0]["subst_price"], ps[0]["subst_dd"] = sp[0], sp[1]
+    except Exception:  # noqa
+        pass
     d = {
         "company": {**c, "adres": re.sub(r"&nbsp;?|\s+", " ", c.get("adres") or "").strip()},   # DART 주소의 &nbsp 제거
         "audit": q(con, "SELECT bsns_year, adtor, adt_opinion, emphs_matter, core_adt_matter FROM audit_opinion WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 3", cc),
@@ -445,7 +452,7 @@ def _site_meta(con, index):
         pass
     m["rated"] = one("SELECT COUNT(DISTINCT corp_code) FROM credit_rating")
     m["rating_asof"] = one("SELECT MAX(disc_dt) FROM credit_rating")
-    m["subst_dd"] = one("SELECT MAX(subst_dd) FROM price_summary")
+    m["subst_dd"] = one("SELECT MAX(trd_dd) FROM subst_price") or one("SELECT MAX(subst_dd) FROM price_summary")
     m["mezz"] = one("SELECT COUNT(DISTINCT corp_code) FROM mezz_outstanding") or one("SELECT COUNT(DISTINCT corp_code) FROM mezzanine")
     m["disc_asof"] = one("SELECT MAX(rcept_dt) FROM disclosure_event")
     return {k: v for k, v in m.items() if v is not None}
