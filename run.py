@@ -69,7 +69,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -167,6 +167,7 @@ def main():
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
+                 ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),   # 별도 재무 보강(연결만 있는 회사)
                  ("da", lambda: __import__("da_xbrl").run(con=con)),   # 상각비(XBRL 주석) — EBITDA 산출 불가 회사 보강
                  ("quarters", lambda: quarters.run(ccs, con=con)),
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
@@ -181,7 +182,7 @@ def main():
                 fn()
             except Exception as e:  # noqa
                 print(f"[catchup] {name} 오류: {e}", flush=True)
-            if name in ("biz", "fin", "da", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
+            if name in ("biz", "fin", "fin_ofs", "da", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
                 con.commit(); publish(f"catchup {name}")
     if a.job in ("price", "all"):
         import prices
@@ -190,6 +191,9 @@ def main():
         import summarize
         # 등급 보유사 = 신용평가서+사업보고서 통합(항목별 근거), 나머지 = 사업보고서 — 병렬·재개 가능
         summarize.run_all(set(ccs) if a.codes else None, model=a.model, force=a.force, limit=a.limit)
+    if a.job == "fin_ofs":                    # 연결만 있는 회사의 별도 재무 보강(회사당 2콜)
+        import financials
+        financials.run_ofs(ccs, a.year - 1, con=con)
     if a.job == "da":                         # 상각비 보강(XBRL 주석) — da 빈 회사의 최신 연간·분기, 1콜/보고서
         import da_xbrl
         da_xbrl.run(ccs if a.codes else None, limit=a.limit, con=con, debug=a.debug is not None)

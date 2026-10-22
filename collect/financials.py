@@ -383,6 +383,68 @@ def run_annual_fast(corp_codes, year, con=None, workers=4):
     return n
 
 
+def _ofs_worker(cc, year, interim_rc):
+    """스레드(HTTP만): 별도(OFS) 연간 최신 1건 + 최신 분기 1건(각 보고서의 전기 열로 전년도·전년동기 보충)"""
+    out = []
+    for y in (year, year - 1):
+        lst = _fetch_list(cc, y, "11011", "OFS")
+        if lst:
+            out.append((y, "11011", lst)); break
+    if interim_rc:
+        y, rc = interim_rc
+        lst = _fetch_list(cc, y, rc, "OFS")
+        if lst:
+            out.append((y, rc, lst))
+    return out
+
+
+def run_ofs(corp_codes, year, con=None, workers=4):
+    """연결만 있고 별도가 없는 회사의 별도 재무 보강(심사는 연결·별도 병기). 회사당 2콜(연간+최신분기, 전기 열 재사용)."""
+    import common
+    from concurrent.futures import ThreadPoolExecutor
+    con = con or connect()
+    ensure_cum_table(con)
+    have_ofs = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_raw WHERE fs_div='OFS' AND reprt_code='11011'")}
+    has_cfs = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_raw WHERE fs_div='CFS' AND reprt_code='11011'")}
+    tried = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fetch_log WHERE job='fin_ofs' AND status IN ('ok','empty')")}
+    cs = [c for c in corp_codes if c in has_cfs and c not in have_ofs and c not in tried]
+    # 최신 분기: 연결 기준으로 가장 최근에 받은 분기보고서와 같은 보고서
+    def latest_q(cc):
+        r = con.execute("""SELECT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND fs_div='CFS' AND reprt_code<>'11011'
+                           AND (rcept_no IS NULL OR rcept_no NOT LIKE '%:전기') GROUP BY 1,2
+                           ORDER BY bsns_year DESC, CASE reprt_code WHEN '11014' THEN 3 WHEN '11012' THEN 2 ELSE 1 END DESC LIMIT 1""", (cc,)).fetchone()
+        return (r[0], r[1]) if r else None
+    print(f"[fin-ofs] 별도 재무 보강 대상 {len(cs)}사 · 회사당 2콜 · 병렬 {workers}", flush=True)
+    n = i = 0
+    with ThreadPoolExecutor(workers) as ex:
+        for b in range(0, len(cs), workers * 5):
+            batch = cs[b:b + workers * 5]
+            futs = [(cc, ex.submit(_ofs_worker, cc, year, latest_q(cc))) for cc in batch]
+            stop = False
+            for cc, f in futs:
+                i += 1
+                try:
+                    got = f.result()
+                    for y, rc, lst in got:
+                        _, filled = store_raw(con, cc, y, rc, "OFS", lst, prev=True)
+                        build_kpi(con, cc, str(y), rc)
+                        if filled:
+                            build_kpi(con, cc, str(int(y) - 1), rc)
+                    log(con, cc, "fin_ofs", "ok" if got else "empty")
+                    n += bool(got)
+                except Exception as e:  # noqa
+                    log(con, cc, "fin_ofs", "fail", e)
+                    if common.QUOTA_HIT or "한도" in str(e):
+                        stop = True
+            con.commit()
+            if i % 100 < workers * 5:
+                print(f"[fin-ofs] {i}/{len(cs)} · 적재 {n} · DART {common.CALLS}콜", flush=True)
+            if stop:
+                print(f"[fin-ofs] DART 한도 도달 — {i}/{len(cs)}에서 중단", flush=True); break
+    print(f"[fin-ofs] 완료 {i}/{len(cs)} · 적재 {n}", flush=True)
+    return n
+
+
 def run(corp_codes, years, reprt_code="11011", interim=True, annual_years=None):
     """years: 연간(사업보고서) 적재 연도. interim=True면 최근 분기 + 전년 동기 추가.
     오늘 기준 기본: 직전 2개년 연간 + 최근분기·전년동기 = 회사당 (2+2)×2(연결/별도) = 8호출"""
