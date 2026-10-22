@@ -140,6 +140,46 @@ def _da_from_rows(rows, k):
             return
 
 
+import re as _re
+_BOR_NM = _re.compile(r"(차입금|사채|리스부채|유동성장기부채|금융리스|어음|전자단기사채|기업어음)")
+_BOR_EX = _re.compile(r"(할인발행차금|전환권조정|교환권조정|신주인수권조정|상환할증금|할증금|이자|미지급|충당|파생|평가|조정|매입채무|미수|대여|보증|선급|이연|자산|수익|비용|손익|지급어음|매출채권)")
+_BOR_ID = _re.compile(r"(Borrowing|BondsIssued|Debenture|LeaseLiabilit|ConvertibleBond|ExchangeableBond|BondsWithWarrant|CommercialPaper|ShortTermBond)", _re.I)
+_BOR_ID_EX = _re.compile(r"(Interest|Discount|Premium|Adjust|Conversion|Payable|Receivable|Proceeds|Repayment|Asset|Expense|Cost|Gain|Loss)", _re.I)
+_BOR_AGG = _re.compile(r"(및|합계|총계)")
+
+
+def _borrowings(rows):
+    """총차입금(근사) v2: 재무상태표에서 차입성 부채를 모은다.
+    ① account_id(Borrowing·BondsIssued·LeaseLiabilities 등) 또는 ② 계정명(차입금·사채·리스부채·유동성장기부채 등)으로 후보를 찾고,
+    조정·할인·이자 등 차감/부수 계정은 제외. 합산 행(차입금 및 사채, 차입금 합계 등)이 세부 행과 같이 있으면 세부만 사용(이중계상 방지).
+    반환 (금액 or None, 근거 문자열)"""
+    cand = []
+    for r in rows:
+        if r.get("sj_div") != "BS" or not r.get("thstrm_amount"):
+            continue
+        nm = _norm_nm(r.get("account_nm")); aid = r.get("account_id") or ""
+        by_id = bool(_BOR_ID.search(aid)) and not _BOR_ID_EX.search(aid)
+        by_nm = bool(_BOR_NM.search(nm)) and not _BOR_EX.search(nm)
+        if by_id or by_nm:
+            cand.append((nm, r["thstrm_amount"], aid))
+    if not cand:
+        return None, ""
+    agg = [c for c in cand if _BOR_AGG.search(c[0])]
+    detail = [c for c in cand if not _BOR_AGG.search(c[0])]
+    # 합산 행(차입금 및 사채 등)은 같은 종류의 세부 행(차입금·사채)이 있을 때만 버림 — 리스부채만 따로 있는 경우는 합산 행 유지
+    if agg and any(_re.search(r"(차입금|사채|유동성장기부채)", c[0]) for c in detail):
+        use = detail
+    else:
+        use = cand
+    seen, tot = set(), 0.0
+    for nm, v, aid in use:
+        key = (nm, v)
+        if key in seen:                           # 같은 이름·같은 금액 중복 행 제거
+            continue
+        seen.add(key); tot += v
+    return tot, "+".join(sorted({c[0] for c in use}))[:300]
+
+
 def _norm_nm(nm):
     """계정명 정규화: 공백·주석표시 '(주석15)'·앞 번호 'Ⅰ.','1.','(1)' 제거 — 정확 일치 매칭 누락 방지"""
     import re
@@ -177,15 +217,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         # 상각비: 계정명 패턴으로 재탐색 (합산 계정 '감가상각비와무형자산상각비' 우선, 없으면 감가+무형+사용권 합)
         _da_from_rows(rows, k)
         # 차입금 근사: BS 계정명 키워드 합(중복 방지: 정확 일치만)
-        bor = 0.0
-        hit = False
-        bk = {x.replace(" ", "") for x in BORROW_KEYS}
-        for r in rows:
-            an = _norm_nm(r["account_nm"])
-            if r["sj_div"] == "BS" and an in bk and r["thstrm_amount"]:
-                bor += r["thstrm_amount"]
-                hit = True
-        k["borrowings"] = bor if hit else None
+        k["borrowings"], k["_bor_src"] = _borrowings(rows)
         eq, rev = k.get("equity"), k.get("revenue")
         k["debt_ratio"] = round(k["total_liab"] / eq * 100, 1) if k.get("total_liab") and eq else None
         k["op_margin"] = round(k["op_income"] / rev * 100, 1) if k.get("op_income") is not None and rev else None

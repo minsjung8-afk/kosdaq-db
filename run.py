@@ -111,6 +111,18 @@ def main():
     if a.job == "kpi":
         import financials
         print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")
+        try:   # 진단: 이자비용은 있는데 총차입금이 비는 연간 행 수와, 그 회사들의 재무상태표 부채 계정명 상위
+            miss = con.execute("""SELECT COUNT(*) FROM fin_kpi WHERE reprt_code='11011' AND borrowings IS NULL AND COALESCE(int_exp,0)<>0""").fetchone()[0]
+            tot = con.execute("SELECT COUNT(*) FROM fin_kpi WHERE reprt_code='11011'").fetchone()[0]
+            print(f"[kpi] 총차입금 미산출(이자비용 있음) 연간 {miss}/{tot}행", flush=True)
+            top = con.execute("""SELECT r.account_nm, COUNT(*) n FROM fin_raw r JOIN fin_kpi k ON k.corp_code=r.corp_code AND k.bsns_year=r.bsns_year
+                                 AND k.reprt_code=r.reprt_code AND k.fs_div=r.fs_div
+                                 WHERE k.reprt_code='11011' AND k.borrowings IS NULL AND COALESCE(k.int_exp,0)<>0 AND r.sj_div='BS'
+                                 AND (r.account_nm LIKE '%부채%' OR r.account_nm LIKE '%차입%' OR r.account_nm LIKE '%채무%')
+                                 GROUP BY r.account_nm ORDER BY n DESC LIMIT 30""").fetchall()
+            print("[kpi] 미산출 회사의 부채 계정명 상위:", ", ".join(f"{a}({n})" for a, n in top), flush=True)
+        except Exception as e:  # noqa
+            print("[kpi] 진단 실패:", e)
         print("접수번호 보충:", financials.backfill_rcept(con), "건")
     if a.job in ("biz", "all"):
         import business
