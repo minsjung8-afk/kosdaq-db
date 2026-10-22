@@ -23,7 +23,12 @@ def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=
     #  (07:00 daily가 당일/전일을 KRX 집계 전에 조회 → 빈 응답을 휴장일로 오인해 영구 건너뛰던 문제)
     con.execute("""DELETE FROM _price_fetched WHERE market=? AND dt >= date('now','-10 days')
                    AND dt NOT IN (SELECT DISTINCT dt FROM price_daily WHERE dt >= date('now','-10 days'))""", (market,))
-    have = {r[0] for r in con.execute("SELECT dt FROM _price_fetched WHERE market=?", (market,))}
+    # 2026-10-22 수정: 예전 백필에서 KRX가 빈 응답(한도·장애)을 준 날짜가 '휴장일'로 굳어져 2021.10~2023.10 등 구간이 영구 누락됨.
+    #  → '적재 완료'는 실제 시세 행이 있는 날짜만 인정. 빈 날짜는 _price_empty에 시도 횟수를 두고 2회까지 재시도 후 휴장일로 확정.
+    con.execute("CREATE TABLE IF NOT EXISTS _price_empty (market TEXT, dt TEXT, tries INTEGER, PRIMARY KEY(market, dt))")
+    have = {r[0] for r in con.execute("""SELECT DISTINCT p.dt FROM price_daily p JOIN company c ON c.stock_code=p.stock_code
+                                          WHERE c.market=?""", (market,))}
+    empty = {r[0]: r[1] for r in con.execute("SELECT dt, tries FROM _price_empty WHERE market=?", (market,))}
     today = date.today().isoformat()
     n = 0
     days = list(trading_days(start, end))
@@ -31,15 +36,15 @@ def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=
         days.reverse()
     for d in days:
         iso = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
-        if iso in have or iso > today:
+        if iso in have or iso > today or empty.get(iso, 0) >= 2:
             continue
         if max_calls and n >= max_calls:
             print(f"[price] {market} 호출 상한 {max_calls} 도달 — 다음 실행에서 이어서", flush=True); break
         rows = daily_all(market, d)
         n += 1
         if not rows:
-            if iso < (date.today() - timedelta(days=7)).isoformat():     # 일주일 넘게 지난 빈 날짜만 휴장일로 확정
-                con.execute("INSERT OR IGNORE INTO _price_fetched VALUES (?,?)", (market, iso))
+            if iso < (date.today() - timedelta(days=7)).isoformat():     # 일주일 넘게 지난 빈 날짜: 시도 횟수 +1(2회면 휴장일 확정)
+                con.execute("INSERT INTO _price_empty VALUES (?,?,1) ON CONFLICT(market, dt) DO UPDATE SET tries=tries+1", (market, iso))
             con.commit()
             continue  # 휴장일 또는 아직 미집계(최근 7일은 다음 실행에서 재시도)
         con.execute("INSERT OR IGNORE INTO _price_fetched VALUES (?,?)", (market, iso))
