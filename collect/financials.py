@@ -15,6 +15,12 @@ KPI_MAP = {
     "equity":       (["ifrs-full_Equity"], ["자본총계"]),
     "cash":         (["ifrs-full_CashAndCashEquivalents"], ["현금및현금성자산"]),
     "cfo":          (["ifrs-full_CashFlowsFromUsedInOperatingActivities"], ["영업활동현금흐름", "영업활동으로 인한 현금흐름"]),
+    "cfi":          (["ifrs-full_CashFlowsFromUsedInInvestingActivities"], ["투자활동현금흐름", "투자활동으로 인한 현금흐름", "투자활동으로인한현금흐름"]),
+    "cff":          (["ifrs-full_CashFlowsFromUsedInFinancingActivities"], ["재무활동현금흐름", "재무활동으로 인한 현금흐름", "재무활동으로인한현금흐름"]),
+    "capex_ppe":    (["ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", "ifrs-full_PurchaseOfPropertyPlantAndEquipment"],
+                     ["유형자산의 취득", "유형자산의취득", "유형자산 취득", "유형자산취득"]),
+    "capex_int":    (["ifrs-full_PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities", "ifrs-full_PurchaseOfIntangibleAssets"],
+                     ["무형자산의 취득", "무형자산의취득", "무형자산 취득", "무형자산취득"]),
     "dep":          (["ifrs-full_DepreciationExpense", "ifrs-full_AdjustmentsForDepreciationExpense"], ["감가상각비", "유형자산감가상각비", "감가상각"]),
     "amort":        (["ifrs-full_AmortisationExpense", "ifrs-full_AdjustmentsForAmortisationExpense"], ["무형자산상각비", "무형자산상각"]),
     "rou_dep":      ([], ["사용권자산상각비", "사용권자산감가상각비"]),
@@ -160,7 +166,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k = {}
         for key, (ids, names) in KPI_MAP.items():
             sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash", "cur_assets", "cur_liab", "receivables", "inventory", "capital", "payables", "contract_assets", "contract_liab", "advances") else \
-                 ("CF",) if key in ("cfo", "dep", "amort", "rou_dep") else ("IS", "CIS")
+                 ("CF",) if key in ("cfo", "dep", "amort", "rou_dep", "cfi", "cff", "capex_ppe", "capex_int") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
         # 상각비: 계정명 패턴으로 재탐색 (합산 계정 '감가상각비와무형자산상각비' 우선, 없으면 감가+무형+사용권 합)
         _da_from_rows(rows, k)
@@ -206,6 +212,10 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             if any(k.get(x) is not None for x in ("receivables", "inventory", "payables")) else None      # 순운전자본 근사(매출채권+재고−매입채무)
         k["nwc_proj"] = (k["nwc"] + (k.get("contract_assets") or 0) - (k.get("contract_liab") or 0) - (k.get("advances") or 0)) \
             if k.get("nwc") is not None else None        # 수주산업형: +미청구공사 −초과청구공사 −선수금
+        # 현금흐름: CAPEX = 유형+무형자산 취득(절대값), FCF = 영업활동CF − CAPEX
+        cp = [abs(k[x]) for x in ("capex_ppe", "capex_int") if k.get(x) is not None]
+        k["capex"] = sum(cp) if cp else None
+        k["fcf"] = (k["cfo"] - k["capex"]) if k.get("cfo") is not None and k["capex"] is not None else None
         rcept = next((r["rcept_no"] for r in rows if r.get("rcept_no")), None)
         if rcept is None:   # 기존 행에 저장된 접수번호 유지
             old = con.execute("SELECT rcept_no FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
@@ -215,8 +225,9 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             total_assets, total_liab, equity, cash, borrowings, cfo, debt_ratio, op_margin, net_borrow_ratio,
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
             cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
-            payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio,
+            cfi, cff, capex, capex_ppe, capex_int, fcf)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
@@ -225,7 +236,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("cur_assets"), k.get("cur_liab"), k.get("receivables"), k.get("inventory"), k.get("capital"),
                      k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda"),
                      k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op"),
-                     k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio")))
+                     k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio"),
+                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf")))
     con.commit()
 
 
