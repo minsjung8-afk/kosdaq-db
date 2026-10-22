@@ -146,6 +146,8 @@ _BOR_EX = _re.compile(r"(할인발행차금|전환권조정|교환권조정|신�
 _BOR_ID = _re.compile(r"(Borrowing|BondsIssued|Debenture|LeaseLiabilit|ConvertibleBond|ExchangeableBond|BondsWithWarrant|CommercialPaper|ShortTermBond)", _re.I)
 _BOR_ID_EX = _re.compile(r"(Interest|Discount|Premium|Adjust|Conversion|Payable|Receivable|Proceeds|Repayment|Asset|Expense|Cost|Gain|Loss)", _re.I)
 _BOR_AGG = _re.compile(r"(및|합계|총계)")
+# '금융부채'로만 표시하는 회사(LG디스플레이 등: 유동 금융부채·비유동금융부채 = 차입금·사채). '기타금융부채'·파생은 제외
+_BOR_FIN = _re.compile(r"^(유동|비유동|단기|장기)?금융부채$")
 
 
 def _borrowings(rows):
@@ -159,7 +161,7 @@ def _borrowings(rows):
             continue
         nm = _norm_nm(r.get("account_nm")); aid = r.get("account_id") or ""
         by_id = bool(_BOR_ID.search(aid)) and not _BOR_ID_EX.search(aid)
-        by_nm = bool(_BOR_NM.search(nm)) and not _BOR_EX.search(nm)
+        by_nm = (bool(_BOR_NM.search(nm)) and not _BOR_EX.search(nm)) or bool(_BOR_FIN.match(nm))
         if by_id or by_nm:
             cand.append((nm, r["thstrm_amount"], aid))
     if not cand:
