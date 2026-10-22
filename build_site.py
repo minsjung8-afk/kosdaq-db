@@ -6,6 +6,7 @@
 import json
 import re
 import shutil
+import sys
 from pathlib import Path
 
 from common import ROOT, connect
@@ -482,6 +483,14 @@ def build():
             "price_asof": max((r["asof"] for r in q(con, "SELECT asof FROM price_summary")), default=None)}
     meta.update(_site_meta(con, index))
     (SITE / "data" / "companies.json").write_text(json.dumps({"meta": meta, "items": index}, ensure_ascii=False), encoding="utf-8")
+    try:   # 데이터 품질 점검 결과(site/data/dq.json) + 점검 페이지(dq.html)
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "collect"))
+        import dq
+        dq.run(con)
+        if (TEMPLATE.parent / "dq.html").exists():
+            shutil.copy(TEMPLATE.parent / "dq.html", SITE / "dq.html")
+    except Exception as e:  # noqa
+        print("[site] 품질 점검 실패:", e)
     print(f"site/ 생성: {len(index)}개사")
 
 

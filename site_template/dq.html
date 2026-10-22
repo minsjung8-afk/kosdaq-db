@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>데이터 품질 점검</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root{--bg:#f4f6fa;--panel:#fff;--fg:#16233d;--ink2:#4a5570;--mute:#6b7488;--line:#dbe1ea;--navy:#1a3a6b;--navy-deep:#0f2547;--gold:#b8862f;--bad:#b91c1c;--warn:#c2410c}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.55 "Pretendard Variable",Pretendard,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+header{padding:16px 24px;color:#fff;background:linear-gradient(180deg,#143454,#0F2942);position:relative}
+header::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold) 14%,var(--gold) 58%,transparent);opacity:.6}
+header h1{margin:0;font-size:19px}header .s{color:#B7CADC;font-size:12px;margin-top:4px}header a{color:#E8D9A0}
+main{padding:16px 24px 40px;max-width:1400px}
+table{border-collapse:collapse;width:100%;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{background:var(--navy);color:#fff;font-size:12px}
+td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.ex a{color:var(--navy);text-decoration:none;margin-right:10px;white-space:nowrap}.ex small{color:var(--mute)}
+.bar{height:6px;background:#eef1f6;border-radius:3px;min-width:80px}.bar i{display:block;height:6px;border-radius:3px;background:var(--warn)}
+.src{color:var(--mute);font-size:11.5px;margin:8px 0}
+</style></head><body>
+<header><h1>데이터 품질 점검</h1><div class="s" id="s">불러오는 중</div></header>
+<main>
+<div class="src">사이트 빌드 때마다 자동 점검(DART 호출 없음) · 최신 연간은 주 재무제표(연결 우선) 기준 · 예시는 항목당 최대 12개 · 회사명 클릭 → 해당 종목 화면</div>
+<table><thead><tr><th style="width:24%">점검 항목</th><th style="width:8%">회사 수</th><th style="width:12%">비율</th><th>예시</th></tr></thead><tbody id="b"></tbody></table>
+</main>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+fetch('data/dq.json',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+  document.getElementById('s').innerHTML=`전체 ${d.companies.toLocaleString()}사 · 점검 ${d.checks.length}개 항목 · <a href="./">← 심사참고 DB</a>`;
+  document.getElementById('b').innerHTML=d.checks.map(c=>{const p=c.companies/d.companies*100;
+    return `<tr><td><b>${esc(c.check)}</b></td><td class="n">${c.companies.toLocaleString()}</td><td><div class="bar"><i style="width:${Math.min(100,p).toFixed(1)}%"></i></div><small>${p.toFixed(1)}%</small></td>
+    <td class="ex">${c.examples.map(e=>`<a href="./#${esc(e.code)}" target="_blank">${esc(e.name)}${e.detail?` <small>${esc(e.detail)}</small>`:''}</a>`).join('')}</td></tr>`}).join('');
+}).catch(()=>{document.getElementById('s').textContent='점검 결과 없음(다음 빌드 후 생성)'});
+</script></body></html>
