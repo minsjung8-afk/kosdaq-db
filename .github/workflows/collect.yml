@@ -22,6 +22,9 @@ on:
       restore_run:
         description: "이전 실행의 DB 아티팩트로 복원 (run id, 선택)"
         default: ""
+      restore_key:
+        description: "R2 백업 키로 복원 (예: backup/kosdaq-20261022.db.gz, 선택) — 복원 후 최신본으로 다시 올림"
+        default: ""
 concurrency:
   # DB를 쓰는 작업은 한 번에 하나(뒤 실행은 대기). unlisted(드라이런, DB 읽기만)는 별도 그룹이라 병렬 실행 가능
   group: ${{ github.event.inputs.job == 'unlisted' && 'kosdaq-ro' || 'kosdaq-db' }}
@@ -49,17 +52,28 @@ jobs:
           R2_EP: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
-          RID="${{ github.event.inputs.restore_run }}"; SRC=""
-          if [ -n "$RID" ]; then
+          RID="${{ github.event.inputs.restore_run }}"; RKEY="${{ github.event.inputs.restore_key }}"; SRC=""
+          r2get() { for i in 1 2 3 4; do aws s3 cp "s3://$R2_BUCKET/$1" kosdaq.db.gz --endpoint-url "$R2_EP" --only-show-errors && return 0; echo "R2 다운로드 실패($i/4): $1 — 20초 후 재시도"; rm -f kosdaq.db.gz; sleep 20; done; return 1; }
+          if [ -n "$RKEY" ]; then
+            r2get "$RKEY" && SRC="R2 $RKEY" || { echo "::error::지정 백업($RKEY) 복원 실패"; exit 1; }
+          elif [ -n "$RID" ]; then
             gh run download $RID -n kosdaq-db -D . && SRC="artifact $RID"
-          elif [ -n "$AWS_ACCESS_KEY_ID" ] && aws s3 cp "s3://$R2_BUCKET/kosdaq.db.gz" . --endpoint-url "$R2_EP" --only-show-errors; then
-            SRC="R2"
+          elif [ -n "$AWS_ACCESS_KEY_ID" ]; then
+            if r2get kosdaq.db.gz; then SRC="R2"
+            else
+              echo "::warning::최신본 복원 실패 — 일자별 백업(최신순)으로 대체"
+              for key in $(aws s3 ls "s3://$R2_BUCKET/backup/" --endpoint-url "$R2_EP" 2>/dev/null | awk '{print $4}' | sort -r | head -5); do
+                r2get "backup/$key" && { SRC="R2 backup/$key"; break; }
+              done
+            fi
           else
             for id in $(gh run list -w collect.yml -s success -L 15 --json databaseId -q '.[].databaseId'); do
               if gh run download $id -n kosdaq-db -D . 2>/dev/null; then SRC="artifact $id"; break; fi
             done
           fi
           if [ -f kosdaq.db.gz ] && [ ! -f kosdaq.db ]; then gunzip -f kosdaq.db.gz; fi
+          # 안전장치(2026-10-23 사고 재발 방지): init 외 작업은 DB가 없으면 중단 — 빈 DB로 수집·업로드·배포하면 최신본이 덮인다
+          if [ ! -f kosdaq.db ] && [ "${{ github.event.inputs.job }}" != "init" ]; then echo "::error::DB 복원 실패 — 중단(빈 DB로 진행하지 않음)"; exit 1; fi
           # 대용가: 자택 Mac(국내 IP)이 올린 subst/latest.json (러너는 KRX 직접 호출이 400으로 막힘)
           [ -n "$AWS_ACCESS_KEY_ID" ] && aws s3 cp "s3://$R2_BUCKET/subst/latest.json" subst_latest.json --endpoint-url "$R2_EP" --only-show-errors 2>/dev/null || echo "subst/latest.json 없음"
           echo "복원 출처: ${SRC:-없음(새 DB)}"; ls -la kosdaq.db* || true
@@ -76,6 +90,12 @@ jobs:
               done
             fi
           fi
+      - name: sanity check            # 회사 수 1,000 미만이면 손상·빈 DB로 보고 중단(init 제외)
+        if: github.event.inputs.job != 'init'
+        run: |
+          N=$(python -c "import sqlite3;print(sqlite3.connect('kosdaq.db').execute('select count(*) from company').fetchone()[0])" 2>/dev/null || echo 0)
+          echo "회사 수: $N"; if [ "$N" -lt 1000 ]; then echo "::error::DB 회사 수 $N — 비정상, 중단"; exit 1; fi
+          echo "DB_SANE=1" >> $GITHUB_ENV
       - name: collect
         env:
           PYTHONUNBUFFERED: "1"
@@ -107,15 +127,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: outputs, path: "unlisted_candidates.*", if-no-files-found: ignore, retention-days: 30 }
       - name: pack db
-        if: always() && github.event.inputs.job != 'unlisted'
+        if: always() && github.event.inputs.job != 'unlisted' && (env.DB_SANE == '1' || github.event.inputs.job == 'init')
         run: |
+          N=$(python -c "import sqlite3;print(sqlite3.connect('kosdaq.db').execute('select count(*) from company').fetchone()[0])" 2>/dev/null || echo 0)
+          if [ "$N" -lt 1000 ] && [ "${{ github.event.inputs.job }}" != "init" ]; then echo "::error::업로드 직전 회사 수 $N — 업로드하지 않음"; echo "DB_OK=0" >> $GITHUB_ENV; exit 0; fi
           if python dbcheck.py pack kosdaq.db; then
             rm -f kosdaq.db.gz; gzip -6 -c kosdaq.db > kosdaq.db.gz; ls -la kosdaq.db.gz; echo "DB_OK=1" >> $GITHUB_ENV
           else
             echo "::error::DB 무결성 실패 — 이번 실행 결과는 업로드하지 않음(이전 본 유지)"; echo "DB_OK=0" >> $GITHUB_ENV
           fi
       - name: keep db (R2)           # 최신본 kosdaq.db.gz + 일자별 백업(backup/, 14일 보관). R2 미설정 시 아티팩트로 대체
-        if: always() && github.event.inputs.job != 'unlisted'
+        if: always() && github.event.inputs.job != 'unlisted' && env.DB_OK == '1'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -146,10 +168,10 @@ jobs:
           gh api --paginate "repos/${{ github.repository }}/actions/artifacts?name=kosdaq-db&per_page=100" -q '.artifacts[] | "\(.id) \(.created_at)"' \
             | sort -k2 -r | tail -n +2 | while read id dt; do gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "삭제 $id ($dt)"; done || true
       - name: build site
-        if: github.event.inputs.job != 'unlisted'
+        if: github.event.inputs.job != 'unlisted' && env.DB_OK == '1'
         run: python run.py site
       - name: ensure pages project
-        if: github.event.inputs.job != 'unlisted'
+        if: github.event.inputs.job != 'unlisted' && env.DB_OK == '1'
         continue-on-error: true
         uses: cloudflare/wrangler-action@v3
         with:
@@ -157,7 +179,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages project create kosdaq-db --production-branch=main
       - name: deploy
-        if: github.event.inputs.job != 'unlisted'
+        if: github.event.inputs.job != 'unlisted' && env.DB_OK == '1'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
