@@ -69,7 +69,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -185,8 +185,8 @@ def main():
                  ("da", lambda: __import__("da_xbrl").run(con=con)),   # 상각비(XBRL 주석) — EBITDA 산출 불가 회사 보강
                  ("quarters", lambda: quarters.run(ccs, con=con)),
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
-                 ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
+                 ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 차트 5년·전체 기간용
         for name, fn in steps:
             if common.QUOTA_HIT and name not in ("price_backfill", "kpi"):      # DART 한도 도달 시 DART 단계만 건너뜀(kpi 재계산·KRX 시세 백필은 진행)
@@ -205,6 +205,9 @@ def main():
         import summarize
         # 등급 보유사 = 신용평가서+사업보고서 통합(항목별 근거), 나머지 = 사업보고서 — 병렬·재개 가능
         summarize.run_all(set(ccs) if a.codes else None, model=a.model, force=a.force, limit=a.limit)
+    if a.job == "notes_struct":               # 3-1 차입금·우발채무·계열 구조화(Haiku, DART 호출 없음)
+        import notes_struct
+        notes_struct.run(set(ccs) if a.codes else None, limit=a.limit, con=con, force=a.force)
     if a.job == "fin_yoy":                    # 전년동기 열 재무상태표 보강(최신 분기의 전년 같은 분기 보고서 직접, 연결·별도 각 1콜)
         import financials
         financials.run_yoy(ccs, con=con)

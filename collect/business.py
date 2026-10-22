@@ -150,7 +150,7 @@ def prefetch_report(corp_code, bsns_year):
     return rcept_no, fetch_document_xml(rcept_no)
 
 
-NOTE_KEYS = ("차입금", "사채", "우발", "약정", "담보", "보증", "특수관계자", "소송", "리스", "금융부채", "매입채무", "파생")
+NOTE_KEYS = ("차입금", "사채", "우발", "약정", "담보", "보증", "특수관계자", "소송", "리스", "금융부채", "매입채무", "파생", "계열회사", "제재")
 
 
 def extract_notes(xml_text: str, max_chars=400_000) -> str:
@@ -193,21 +193,49 @@ def fetch_notes_latest(con, corp_code):
     return rcept, nm
 
 
-def run_notes(con, corp_codes, limit=None):
-    """야간: 주석을 최신 정기보고서 기준으로 보관(새 보고서가 나온 회사만 원문 재다운로드). DART 한도 도달 시 중단."""
+def _notes_worker(cc, old_rcept):
+    """스레드(HTTP만): 최신 정기보고서 확인(1콜) → 새 보고서면 원문(1콜)에서 주석 추출. 반환 (rcept, nm, notes|None, changed)"""
+    from mezz import latest_periodic_report
+    rcept, nm = latest_periodic_report(cc)
+    if not rcept:
+        return None, None, None, False
+    if old_rcept == rcept:
+        return rcept, nm, None, False
+    return rcept, nm, extract_notes(fetch_document_xml(rcept)), True
+
+
+def run_notes(con, corp_codes, limit=None, workers=4):
+    """주석(차입금·우발채무·약정·담보·보증·소송·특수관계자·계열회사)을 최신 정기보고서 기준으로 보관. 회사당 1~2콜, 4건 동시. DART 한도 시 중단."""
     import common
+    from concurrent.futures import ThreadPoolExecutor
+    con.execute("""CREATE TABLE IF NOT EXISTS notes_latest (corp_code TEXT PRIMARY KEY, rcept_no TEXT, report_nm TEXT,
+                   notes_z BLOB, char_len INTEGER, fetched_at TEXT)""")
+    old = {r[0]: r[1] for r in con.execute("SELECT corp_code, rcept_no FROM notes_latest")}
     cs = list(corp_codes)[:limit] if limit else list(corp_codes)
+    print(f"[notes] 주석 원문 대상 {len(cs)}사 · 병렬 {workers}", flush=True)
     n = i = 0
-    for i, cc in enumerate(cs, 1):
-        try:
-            if fetch_notes_latest(con, cc):
-                n += 1
-        except Exception as e:  # noqa
-            log(con, cc, "notes", "fail", e)
-            if common.QUOTA_HIT or "한도" in str(e):
+    with ThreadPoolExecutor(workers) as ex:
+        for b in range(0, len(cs), workers * 5):
+            batch = cs[b:b + workers * 5]
+            futs = [(cc, ex.submit(_notes_worker, cc, old.get(cc))) for cc in batch]
+            stop = False
+            for cc, f in futs:
+                i += 1
+                try:
+                    rcept, nm, notes, changed = f.result()
+                    if changed:
+                        con.execute("INSERT OR REPLACE INTO notes_latest VALUES (?,?,?,?,?,?)",
+                                    (cc, rcept, nm, zpack(notes) if notes else None, len(notes or ""), now()))
+                        n += 1
+                except Exception as e:  # noqa
+                    log(con, cc, "notes", "fail", e)
+                    if common.QUOTA_HIT or "한도" in str(e) or "020" in str(e):
+                        stop = True
+            con.commit()
+            if i % 200 < workers * 5:
+                print(f"[notes] {i}/{len(cs)} · 보관 {n} · DART {common.CALLS}콜", flush=True)
+            if stop:
                 print(f"[notes] DART 한도 도달 — {i}/{len(cs)}에서 중단", flush=True); break
-        if i % 200 == 0:
-            print(f"[notes] {i}/{len(cs)} · 보관 {n}", flush=True)
     print(f"[notes] 완료 {i}/{len(cs)} · 보관 {n}", flush=True)
 
 

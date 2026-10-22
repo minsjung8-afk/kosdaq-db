@@ -132,9 +132,15 @@ def dart_get(endpoint: str, retry: int = 3, **params):
 
 
 def dart_get_binary(endpoint: str, **params) -> bytes:
+    global CALLS, QUOTA_HIT
     params = {"crtfc_key": api_key(), **params}
+    with _LOCK:
+        CALLS += 1
     r = requests.get(f"{DART_BASE}/{endpoint}.xml", params=params, headers=UA, timeout=60)
     r.raise_for_status()
+    if not r.content.startswith(b"PK") and (b"<status>020</status>" in r.content[:500] or b"<status>021</status>" in r.content[:500]):
+        QUOTA_HIT = True
+        raise RuntimeError("DART 한도 초과")
     return r.content
 
 

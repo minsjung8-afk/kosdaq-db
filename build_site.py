@@ -19,6 +19,13 @@ def q(con, sql, *a):
     return [dict(r) for r in con.execute(sql, a)]
 
 
+def _safe_q(con, sql, *a):
+    try:
+        return q(con, sql, *a)
+    except Exception:  # noqa
+        return []
+
+
 def _fva(con, sc):
     try:
         import sys
@@ -274,6 +281,8 @@ def company_detail(con, c):
         "quarters": _quarters(con, cc),
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
+        "notes_struct": (lambda r: {"rcept_no": r[0]["rcept_no"], "report_nm": r[0]["report_nm"], **json.loads(r[0]["json"])} if r else None)(
+            _safe_q(con, "SELECT rcept_no, report_nm, json FROM notes_struct WHERE corp_code=?", cc)),
         "valuation": _valuation(kpi, ps[0] if ps else None),
         "flags": None,   # 아래에서 채움
         "industry_pos": None,
