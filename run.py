@@ -155,7 +155,7 @@ def main():
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
-                 ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=600))]   # 과거 시세(최근→과거, 시장별 600콜/일): 차트 5년·전체 기간용
+                 ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 차트 5년·전체 기간용
         for name, fn in steps:
             if common.QUOTA_HIT and name not in ("price_backfill", "kpi"):      # DART 한도 도달 시 DART 단계만 건너뜀(kpi 재계산·KRX 시세 백필은 진행)
                 print(f"[catchup] DART 한도 도달 — {name} 건너뜀(내일)", flush=True); continue

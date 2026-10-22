@@ -405,7 +405,7 @@ async function open(code){
   if(d.prices.length){
     const rets=[['1주','chg_1w'],['1개월','chg_1m'],['3개월','chg_3m'],['6개월','chg_6m'],['1년','chg_1y'],['2년','chg_2y'],['3년','chg_3y']];
     const rc=v=>v==null?'-':`<span style="color:${v<0?'var(--bad)':v>0?'var(--good)':'inherit'}">${(v>0?'+':'')+v.toFixed(1)}%</span>`;
-    h+=`<div class="ptb"><button class="pbtn on" data-tf="D">일봉</button><button class="pbtn" data-tf="W">주봉</button><button class="pbtn" data-tf="M">월봉</button><span class="sp"></span><button class="pbtn" data-p="3m">3개월</button><button class="pbtn" data-p="6m">6개월</button><button class="pbtn on" data-p="1y">1년</button><button class="pbtn" data-p="3y">3년</button><button class="pbtn" data-p="5y">5년</button><button class="pbtn" data-p="all">전체</button><span class="sp"></span><span class="lbl">이평</span><button class="pbtn on" data-ma="5">5</button><button class="pbtn on" data-ma="20">20</button><button class="pbtn on" data-ma="60">60</button><button class="pbtn" data-ma="120">120</button><span class="lbl">휠 확대·축소 / 드래그 이동 / 더블클릭 초기화 · 3년 이전은 주봉 · 회색 = 거래정지일</span></div><div id="px"><div id="pxl"></div></div>
+    h+=`<div class="ptb"><button class="pbtn on" data-tf="D">일봉</button><button class="pbtn" data-tf="W">주봉</button><button class="pbtn" data-tf="M">월봉</button><span class="sp"></span><button class="pbtn" data-p="3m">3개월</button><button class="pbtn" data-p="6m">6개월</button><button class="pbtn on" data-p="1y">1년</button><button class="pbtn" data-p="3y">3년</button><button class="pbtn" data-p="5y">5년</button><button class="pbtn" data-p="all">전체</button><span class="sp"></span><span class="lbl">이평</span><button class="pbtn on" data-ma="5">5</button><button class="pbtn on" data-ma="20">20</button><button class="pbtn on" data-ma="60">60</button><button class="pbtn" data-ma="120">120</button><span class="lbl">휠 확대·축소 / 드래그 이동 / 더블클릭 초기화 · 3년 이전은 주봉 · 회색 = 거래정지일</span></div><div id="px"><div id="pxl"></div></div><div id="pxgap" class="src" style="margin-top:4px"></div>
       <div class="twrap" style="margin-top:10px"><table><tr><th>수익률</th>${rets.map(([n])=>`<th class="n">${n}</th>`).join('')}</tr><tr><td>기준일 ${ps.asof||'-'}</td>${rets.map(([,k])=>`<td class="n">${rc(ps[k])}</td>`).join('')}</tr></table></div>
       <div class="twrap" style="margin-top:10px"><table class="lbl kv8"><tr>
         <td>거래소</td><td>${esc({KOSPI:'유가증권',KOSDAQ:'코스닥',KONEX:'코넥스'}[c.market]||c.market||'비상장')}${c.sect_tp?' <small style="color:var(--mute)">'+esc(c.sect_tp)+'</small>':''}</td><td>상장일</td><td>${c.listed_dt?esc(String(c.listed_dt).replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3')):'-'}</td>
@@ -498,6 +498,9 @@ function aggregate(p,tf){ // 일봉 → 주봉/월봉 집계
   if(cur) out.push(cur); return out;
 }
 function initChart(prices,sub){
+  try{ const g=document.getElementById('pxgap'); if(g&&prices&&prices.length){ const ym=t=>t.slice(0,7).replace('-','.'); const gaps=[];
+      for(let i=1;i<prices.length;i++){ const a=new Date(prices[i-1][0]), b=new Date(prices[i][0]); if((b-a)/864e5>21) gaps.push(`${ym(prices[i-1][0])}~${ym(prices[i][0])}`); }
+      g.innerHTML=`시세 보유 기간 ${ym(prices[0][0])} ~ ${ym(prices[prices.length-1][0])}`+(gaps.length?` · <b style="color:var(--bad)">공백 ${gaps.slice(0,3).join(', ')}${gaps.length>3?' 외':''}</b> (과거 시세 수집 중 — 이 구간은 3년·5년 버튼 범위가 같아 보일 수 있음)`:'')+' · 출처 KRX 정보데이터시스템(일별 전종목 시세)'; } }catch(e){}
   const el=$('#px'), lg=$('#pxl');
   if(CH){ try{CH.chart.remove();}catch(e){} CH=null; }
   const cs=getComputedStyle(document.documentElement), tok=k=>cs.getPropertyValue(k).trim();
