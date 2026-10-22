@@ -397,7 +397,7 @@ async function open(code){
     const ks2=(c.induty_code||'').slice(0,2); const isProj=['41','42','31'].includes(ks2); const isFin=['64','65','66'].includes(ks2);   // 건설·조선=수주형 운전자본, 금융업=운전자본 비표시
     const groups=[
       ['g1', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da','유무형상각비'],['당기순이익','net_income',억]]],
-      ['g7', [['영업활동CF','cfo',억],['투자활동CF','cfi',억],['└ Capex <small>(유·무형자산 취득, 투자활동CF에 포함)</small>','capex',억,null,null,1],['재무활동CF','cff',억],['FCF <small>(영업활동CF − Capex)</small>','fcf',억]]],
+      ['g7', [['영업활동CF','cfo',억],['└ 법인세 납부 <small>(영업활동CF에 이미 차감됨)</small>','tax_paid',억,null,null,1],['투자활동CF','cfi',억],['└ Capex 순액 <small>(유·무형자산 취득 − 처분, 투자활동CF에 포함)</small>','capex',억,null,null,1],['재무활동CF','cff',억],['FCF <small>(영업활동CF − Capex 순액 · 세후)</small>','fcf',억]]],
       ['g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억]]],
       ['g4', [['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억]]],
       ['g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['유동비율','cur_ratio',pct],['순차입금/EBITDA','nd_ebitda',x],['EBITDA/이자비용','interest_cover',x]]],

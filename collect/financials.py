@@ -21,6 +21,12 @@ KPI_MAP = {
                      ["유형자산의 취득", "유형자산의취득", "유형자산 취득", "유형자산취득"]),
     "capex_int":    (["ifrs-full_PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities", "ifrs-full_PurchaseOfIntangibleAssets"],
                      ["무형자산의 취득", "무형자산의취득", "무형자산 취득", "무형자산취득"]),
+    "tax_paid":     (["ifrs-full_IncomeTaxesPaidRefundClassifiedAsOperatingActivities", "ifrs-full_IncomeTaxesPaidRefund"],
+                     ["법인세의 납부", "법인세납부", "법인세의납부", "법인세 납부", "법인세의 환급(납부)", "법인세환급(납부)", "법인세 납부액", "법인세의 납부(환급)"]),
+    "disp_ppe":     (["ifrs-full_ProceedsFromSalesOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", "ifrs-full_ProceedsFromSalesOfPropertyPlantAndEquipment"],
+                     ["유형자산의 처분", "유형자산의처분", "유형자산 처분", "유형자산처분"]),
+    "disp_int":     (["ifrs-full_ProceedsFromSalesOfIntangibleAssetsClassifiedAsInvestingActivities", "ifrs-full_ProceedsFromSalesOfIntangibleAssets"],
+                     ["무형자산의 처분", "무형자산의처분", "무형자산 처분", "무형자산처분"]),
     "dep":          (["ifrs-full_DepreciationExpense", "ifrs-full_AdjustmentsForDepreciationExpense"], ["감가상각비", "유형자산감가상각비", "감가상각"]),
     "amort":        (["ifrs-full_AmortisationExpense", "ifrs-full_AdjustmentsForAmortisationExpense"], ["무형자산상각비", "무형자산상각"]),
     "rou_dep":      ([], ["사용권자산상각비", "사용권자산감가상각비"]),
@@ -166,7 +172,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k = {}
         for key, (ids, names) in KPI_MAP.items():
             sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash", "cur_assets", "cur_liab", "receivables", "inventory", "capital", "payables", "contract_assets", "contract_liab", "advances") else \
-                 ("CF",) if key in ("cfo", "dep", "amort", "rou_dep", "cfi", "cff", "capex_ppe", "capex_int") else ("IS", "CIS")
+                 ("CF",) if key in ("cfo", "dep", "amort", "rou_dep", "cfi", "cff", "capex_ppe", "capex_int", "disp_ppe", "disp_int", "tax_paid") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
         # 상각비: 계정명 패턴으로 재탐색 (합산 계정 '감가상각비와무형자산상각비' 우선, 없으면 감가+무형+사용권 합)
         _da_from_rows(rows, k)
@@ -212,9 +218,11 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             if any(k.get(x) is not None for x in ("receivables", "inventory", "payables")) else None      # 순운전자본 근사(매출채권+재고−매입채무)
         k["nwc_proj"] = (k["nwc"] + (k.get("contract_assets") or 0) - (k.get("contract_liab") or 0) - (k.get("advances") or 0)) \
             if k.get("nwc") is not None else None        # 수주산업형: +미청구공사 −초과청구공사 −선수금
-        # 현금흐름: CAPEX = 유형+무형자산 취득(절대값), FCF = 영업활동CF − CAPEX
+        # 현금흐름: CAPEX(순액) = 유·무형자산 취득 − 유·무형자산 처분(절대값 기준), FCF = 영업활동CF − CAPEX(순액)
         cp = [abs(k[x]) for x in ("capex_ppe", "capex_int") if k.get(x) is not None]
-        k["capex"] = sum(cp) if cp else None
+        dp = [abs(k[x]) for x in ("disp_ppe", "disp_int") if k.get(x) is not None]
+        k["capex_disp"] = sum(dp) if dp else None
+        k["capex"] = (sum(cp) - sum(dp)) if cp else None
         k["fcf"] = (k["cfo"] - k["capex"]) if k.get("cfo") is not None and k["capex"] is not None else None
         rcept = next((r["rcept_no"] for r in rows if r.get("rcept_no")), None)
         if rcept is None:   # 기존 행에 저장된 접수번호 유지
@@ -226,8 +234,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
             cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
             payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio,
-            cfi, cff, capex, capex_ppe, capex_int, fcf)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
@@ -237,7 +245,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda"),
                      k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op"),
                      k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio"),
-                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf")))
+                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None)))
     con.commit()
 
 
