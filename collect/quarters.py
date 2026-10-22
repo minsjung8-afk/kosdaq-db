@@ -1,4 +1,4 @@
-"""분기 손익 수집(LTM·12분기 추이용): DART 전체 재무제표 API(fnlttSinglAcntAll, 주 재무제표 1콜)로 최근 8분기를 복원하는 데 필요한 보고서를 채운다.
+"""분기 손익 수집(LTM·12분기 추이용): DART 전체 재무제표 API(fnlttSinglAcntAll, 주 재무제표 1콜)로 최근 12분기를 복원하는 데 필요한 보고서를 채운다.
 - 보고서 1개 = 1콜(연결·별도 행이 같이 옴). 매출액·영업이익·당기순이익(누적)과 자산·부채·자본만 → fin_kpi에 '빈 열 많은' 행으로 적재.
   이미 fin(전체계정)으로 채워진 (연도,보고서,fs_div) 행은 건드리지 않음.
 - 분기별 값은 build_site._quarters가 누적 차감(2Q=반기−1Q, 4Q=연간−3Q)으로 복원하므로 누적금액(thstrm_add_amount)을 저장.
@@ -55,16 +55,37 @@ def _fs_of(con, cc):
 
 
 def fetch_report(con, cc, year, rc):
-    """전체 재무제표 API(fnlttSinglAcntAll) 1콜(주 재무제표만) → fin_raw(손익은 누적) → build_kpi. 매출원가·감가상각까지 확보. 반환 저장 행 수"""
-    from financials import fetch_fin_raw, build_kpi
+    """단건(순차) 호출용 — 주 재무제표 1콜 → fin_raw(손익 누적, 전기 열로 전년 같은 기간 보충) → build_kpi"""
+    from financials import _fetch_list, store_raw, build_kpi
     n = 0
     for fs in _fs_of(con, cc):
-        n = fetch_fin_raw(con, cc, year, rc, fs_divs=(fs,))
-        if n:
+        lst = _fetch_list(cc, year, rc, fs)
+        if lst:
+            n, filled = store_raw(con, cc, year, rc, fs, lst, prev=True)
+            build_kpi(con, cc, year, rc)
+            if filled:
+                build_kpi(con, cc, str(int(year) - 1), rc)
             break
-    if n:
-        build_kpi(con, cc, year, rc)
     return n
+
+
+def _worker(cc, plan, fss):
+    """스레드(HTTP만): 최신 보고서부터 받되, 받은 보고서의 '전기'로 채워지는 전년 같은 기간은 건너뜀 → 회사당 13콜 → 7~8콜.
+    반환 [(year, rc, fs|None, list)] — list 빈 것은 empty 표시용"""
+    from financials import _fetch_list
+    out, filled = [], set()
+    for y, rc in plan:
+        if (y, rc) in filled:
+            continue
+        got = None
+        for fs in fss:
+            lst = _fetch_list(cc, y, rc, fs)
+            if lst:
+                got = (y, rc, fs, lst); break
+        out.append(got or (y, rc, None, []))
+        if got:
+            filled.add((str(int(y) - 1), rc))
+    return out
 
 
 def plan_for(con, cc, reports):
@@ -84,7 +105,11 @@ def priority(con, corp_codes):
     return sorted(corp_codes, key=lambda c: (0 if c in rated else 1, rank.get(mk.get(c), 9), c))
 
 
-def run(corp_codes, limit=None, con=None):
+def run(corp_codes, limit=None, con=None, workers=4):
+    """limit: '미수집 회사' 중 앞에서 N사(우선순위 순)"""
+    import common
+    from concurrent.futures import ThreadPoolExecutor
+    from financials import store_raw, build_kpi
     con = con or connect()
     _ensure(con)
     reports = needed_reports()
@@ -93,27 +118,36 @@ def run(corp_codes, limit=None, con=None):
     todo = [(c, p) for c, p in todo if p]
     if limit:
         todo = todo[:limit]
-    tot = sum(len(p) for _, p in todo)
-    print(f"[quarters] 대상 보고서 {reports[0]}~{reports[-1]} · 미수집 회사 {len(todo)} · 콜 예정 {tot}", flush=True)
-    calls, saved, i = 0, 0, 0
-    for i, (cc, plan) in enumerate(todo, 1):
-        for y, rc in plan:
-            try:
-                n = fetch_report(con, cc, y, rc)
-                calls += 1; saved += n
-                con.execute("INSERT OR REPLACE INTO quarters_done VALUES (?,?,?,?,?)", (cc, y, rc, "ok" if n else "empty", now()))
-            except Exception as e:  # noqa
-                log(con, cc, f"quarters_{y}_{rc}", "fail", e)
-                if common.QUOTA_HIT or "한도" in str(e):
-                    con.commit()
-                    print(f"[quarters] DART 일일 한도 도달 — {i}/{len(todo)}사, {calls}콜에서 중단(다음 catchup에서 이어서)", flush=True)
-                    return calls
-        con.commit()
-        if i % 100 == 0:
-            print(f"[quarters] {i}/{len(todo)}사 · {calls}콜 · 저장 {saved}행", flush=True)
-    con.commit()
-    print(f"[quarters] 완료 {i}/{len(todo)}사 · {calls}콜 · 저장 {saved}행", flush=True)
-    return calls
+    print(f"[quarters] 대상 보고서 {reports[0]}~{reports[-1]} · 미수집 회사 {len(todo)} · 병렬 {workers} (전기 열 재사용으로 회사당 ~7~8콜)", flush=True)
+    saved, i, c0 = 0, 0, common.CALLS
+    with ThreadPoolExecutor(workers) as ex:
+        for b in range(0, len(todo), workers * 3):
+            batch = todo[b:b + workers * 3]
+            futs = [(cc, ex.submit(_worker, cc, plan, _fs_of(con, cc))) for cc, plan in batch]
+            stop = False
+            for cc, f in futs:
+                i += 1
+                try:
+                    for y, rc, fs, lst in f.result():
+                        if lst:
+                            n, filled = store_raw(con, cc, y, rc, fs, lst, prev=True)
+                            build_kpi(con, cc, y, rc)
+                            if filled:
+                                build_kpi(con, cc, str(int(y) - 1), rc)
+                            saved += n
+                        con.execute("INSERT OR REPLACE INTO quarters_done VALUES (?,?,?,?,?)", (cc, y, rc, "ok" if lst else "empty", now()))
+                except Exception as e:  # noqa
+                    log(con, cc, "quarters", "fail", e)
+                    if common.QUOTA_HIT or "한도" in str(e):
+                        stop = True
+            con.commit()
+            if i % 25 < workers * 3:
+                print(f"[quarters] {i}/{len(todo)}사 · {common.CALLS - c0}콜 · 저장 {saved}행", flush=True)
+            if stop:
+                print(f"[quarters] DART 일일 한도 도달 — {i}/{len(todo)}사에서 중단(다음 catchup에서 이어서)", flush=True)
+                return common.CALLS - c0
+    print(f"[quarters] 완료 {i}/{len(todo)}사 · {common.CALLS - c0}콜 · 저장 {saved}행", flush=True)
+    return common.CALLS - c0
 
 
 if __name__ == "__main__":

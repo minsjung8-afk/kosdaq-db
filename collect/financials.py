@@ -5,8 +5,9 @@ REPRT = {"11011": "사업", "11012": "반기", "11013": "1Q", "11014": "3Q"}
 
 # KPI 매핑: (우선 account_id 리스트, 보조 account_nm 키워드)
 KPI_MAP = {
-    "revenue":      (["ifrs-full_Revenue"], ["매출액", "수익(매출액)", "영업수익"]),
-    "op_income":    (["dart_OperatingIncomeLoss"], ["영업이익"]),
+    "revenue":      (["ifrs-full_Revenue", "ifrs-full_RevenueFromContractsWithCustomers"],
+                     ["매출액", "수익(매출액)", "영업수익", "매출", "수익", "영업수익(매출액)", "매출액(영업수익)", "매출및지분법손익", "순영업수익"]),
+    "op_income":    (["dart_OperatingIncomeLoss"], ["영업이익", "영업이익(손실)", "영업손익", "영업손실"]),
     "cogs":         (["ifrs-full_CostOfSales"], ["매출원가", "영업원가"]),
     "net_income":   (["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)"]),
     "total_assets": (["ifrs-full_Assets"], ["자산총계"]),
@@ -31,6 +32,8 @@ KPI_MAP = {
     "advances":        ([], ["선수금", "유동선수금", "분양선수금", "선수금및선수수익"]),
 }
 BORROW_KEYS = ["단기차입금", "장기차입금", "유동성장기부채", "유동성장기차입금", "사채", "전환사채", "신주인수권부사채",
+               "유동성사채", "유동성전환사채", "유동성신주인수권부사채", "교환사채", "유동성교환사채", "단기사채", "유동차입금", "비유동차입금",
+               "유동성리스부채", "단기차입금및유동성장기부채", "장기차입금및사채",
                "리스부채", "유동리스부채", "비유동리스부채", "장기사채"]
 
 
@@ -46,25 +49,54 @@ def ensure_cum_table(con):
     con.execute("CREATE TABLE IF NOT EXISTS fin_cum_ok (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code))")
 
 
-def fetch_fin_raw(con, corp_code, bsns_year, reprt_code="11011", fs_divs=("CFS", "OFS")):
-    n = 0
+def _fetch_list(corp_code, bsns_year, reprt_code, fs_div):
+    """HTTP만(스레드 안전) — DB 접근 없음"""
+    return dart_get("fnlttSinglAcntAll", corp_code=corp_code, bsns_year=str(bsns_year), reprt_code=reprt_code, fs_div=fs_div).get("list", [])
+
+
+def store_raw(con, corp_code, bsns_year, reprt_code, fs_div, lst, prev=True):
+    """받은 목록 저장(손익은 누적). prev=True면 같은 보고서의 '전기' 열로 전년 같은 기간도 채운다(이미 그 보고서를 받았으면 건드리지 않음).
+    - 연간: 전기 = 전년 사업보고서와 같은 기준(BS 포함) → 전 계정 저장
+    - 분기·반기: 전기 손익·현금흐름 = 전년 같은 기간 누적, BS 전기 = 전년 말(분기말 아님) → BS는 저장하지 않음(분기말 순차입금은 해당 보고서에서만)
+    반환: (당기 저장 행 수, 전기 보충 여부)"""
     ensure_cum_table(con)
+    y = str(bsns_year)
+    con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, y, reprt_code, fs_div))
+    ins = """INSERT OR REPLACE INTO fin_raw (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm,
+             thstrm_amount, frmtrm_amount, bfefrmtrm_amount, ord, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"""
+    for r in lst:
+        con.execute(ins, (corp_code, y, reprt_code, fs_div, r.get("sj_div"), r.get("account_id"), r.get("account_nm"),
+                          _cum(r, "thstrm_amount"), _cum(r, "frmtrm_amount"), to_num(r.get("bfefrmtrm_amount")),
+                          int(r.get("ord") or 0), r.get("rcept_no")))
+    con.execute("INSERT OR IGNORE INTO fin_cum_ok VALUES (?,?,?)", (corp_code, y, reprt_code))
+    filled = False
+    if prev and lst:
+        py = str(int(y) - 1)
+        have = (reprt_code == "11011" or con.execute("SELECT 1 FROM fin_cum_ok WHERE corp_code=? AND bsns_year=? AND reprt_code=?", (corp_code, py, reprt_code)).fetchone()) and \
+               con.execute("SELECT 1 FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? LIMIT 1",
+                           (corp_code, py, reprt_code, fs_div)).fetchone()
+        if not have:     # 없거나 누적 오류(패치68 이전 3개월치) 행이면 손익·현금흐름만 교체(분기말 BS는 보존)
+            if reprt_code == "11011":
+                con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, py, reprt_code, fs_div))
+            else:
+                con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND sj_div IN ('IS','CIS','CF')", (corp_code, py, reprt_code, fs_div))
+            for r in lst:
+                if reprt_code != "11011" and r.get("sj_div") in ("BS", "SCE"):
+                    continue
+                con.execute(ins, (corp_code, py, reprt_code, fs_div, r.get("sj_div"), r.get("account_id"), r.get("account_nm"),
+                                  _cum(r, "frmtrm_amount"), to_num(r.get("bfefrmtrm_amount")), None, int(r.get("ord") or 0),
+                                  (r.get("rcept_no") or "") + ":전기"))
+            con.execute("INSERT OR IGNORE INTO fin_cum_ok VALUES (?,?,?)", (corp_code, py, reprt_code))
+            filled = True
+    return len(lst), filled
+
+
+def fetch_fin_raw(con, corp_code, bsns_year, reprt_code="11011", fs_divs=("CFS", "OFS"), prev=False):
+    n = 0
     for fs_div in fs_divs:
-        js = dart_get("fnlttSinglAcntAll", corp_code=corp_code, bsns_year=bsns_year,
-                      reprt_code=reprt_code, fs_div=fs_div)
-        lst = js.get("list", [])
+        lst = _fetch_list(corp_code, bsns_year, reprt_code, fs_div)
         if lst:
-            con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, bsns_year, reprt_code, fs_div))
-        for r in lst:
-            con.execute("""INSERT OR REPLACE INTO fin_raw (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm,
-                thstrm_amount, frmtrm_amount, bfefrmtrm_amount, ord, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (corp_code, bsns_year, reprt_code, fs_div, r.get("sj_div"),
-                         r.get("account_id"), r.get("account_nm"),
-                         _cum(r, "thstrm_amount"), _cum(r, "frmtrm_amount"),
-                         to_num(r.get("bfefrmtrm_amount")), int(r.get("ord") or 0), r.get("rcept_no")))
-            n += 1
-    if n:
-        con.execute("INSERT OR IGNORE INTO fin_cum_ok VALUES (?,?,?)", (corp_code, str(bsns_year), reprt_code))   # 누적 기준으로 받은 보고서 표시
+            n += store_raw(con, corp_code, bsns_year, reprt_code, fs_div, lst, prev=prev)[0]
     con.commit()
     return n
 
@@ -96,6 +128,15 @@ def _da_from_rows(rows, k):
             return
 
 
+def _norm_nm(nm):
+    """계정명 정규화: 공백·주석표시 '(주석15)'·앞 번호 'Ⅰ.','1.','(1)' 제거 — 정확 일치 매칭 누락 방지"""
+    import re
+    s = (nm or "").replace(" ", "").replace("\u3000", "")
+    s = re.sub(r"\((주석|주)[^)]*\)", "", s)
+    s = re.sub(r"^(\(\d+\)|([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+|\d+|[가-하])[.)])", "", s)
+    return s
+
+
 def _pick(rows, ids, names, sj=None):
     """rows: fin_raw dict 목록. account_id 우선, 없으면 계정명 정확/포함 매칭."""
     for r in rows:
@@ -103,7 +144,7 @@ def _pick(rows, ids, names, sj=None):
             return r["thstrm_amount"]
     for nm in names:
         for r in rows:
-            an = (r["account_nm"] or "").replace(" ", "")
+            an = _norm_nm(r["account_nm"])
             if an == nm.replace(" ", "") and (sj is None or r["sj_div"] in sj):
                 return r["thstrm_amount"]
     return None
@@ -126,9 +167,10 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         # 차입금 근사: BS 계정명 키워드 합(중복 방지: 정확 일치만)
         bor = 0.0
         hit = False
+        bk = {x.replace(" ", "") for x in BORROW_KEYS}
         for r in rows:
-            an = (r["account_nm"] or "").replace(" ", "")
-            if r["sj_div"] == "BS" and an in [x.replace(" ", "") for x in BORROW_KEYS] and r["thstrm_amount"]:
+            an = _norm_nm(r["account_nm"])
+            if r["sj_div"] == "BS" and an in bk and r["thstrm_amount"]:
                 bor += r["thstrm_amount"]
                 hit = True
         k["borrowings"] = bor if hit else None
@@ -265,49 +307,51 @@ def rebuild_kpi_all(con):
     return len(keys)
 
 
-def run_annual_fast(corp_codes, year, con=None):
+def _annual_worker(cc, year):
+    """스레드: 최근 사업보고서(연결→별도), 없으면 전년도 — HTTP만. 반환 [(year, fs, list)] 또는 예외"""
+    for y in (year, year - 1):
+        for fs in ("CFS", "OFS"):
+            lst = _fetch_list(cc, y, "11011", fs)
+            if lst:
+                return [(y, fs, lst)]
+    return []
+
+
+def run_annual_fast(corp_codes, year, con=None, workers=4):
     """연간 재무 빠른 수집: 최근 사업보고서 1건(전체 재무제표, 연결 우선→없으면 별도)으로 당기·전기 2개년을 함께 적재.
-    회사당 1~2콜(기존 run은 8~14콜). 분기·반기는 quarters가 담당. DART 한도 도달 시 중단."""
+    회사당 1~4콜, HTTP는 workers개 병렬(DB 쓰기는 메인 스레드). 시도 결과는 fetch_log(fin_fast)에 남겨 재시도하지 않음. DART 한도 도달 시 중단."""
     import common
+    from concurrent.futures import ThreadPoolExecutor
     con = con or connect()
     ensure_cum_table(con)
     cs = list(corp_codes)
+    print(f"[fin] 연간 재무 대상 {len(cs)}사 · 병렬 {workers}", flush=True)
     n = i = 0
-    for i, cc in enumerate(cs, 1):
-        try:
-            got = False
-            for fs in ("CFS", "OFS"):
-                js = dart_get("fnlttSinglAcntAll", corp_code=cc, bsns_year=str(year), reprt_code="11011", fs_div=fs)
-                lst = js.get("list", [])
-                if not lst:
-                    continue
-                for y, key in ((str(year), "thstrm_amount"), (str(year - 1), "frmtrm_amount")):
-                    con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=?", (cc, y, fs))
-                    for r in lst:
-                        con.execute("""INSERT OR REPLACE INTO fin_raw (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm,
-                            thstrm_amount, frmtrm_amount, bfefrmtrm_amount, ord, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                    (cc, y, "11011", fs, r.get("sj_div"), r.get("account_id"), r.get("account_nm"),
-                                     to_num(r.get(key)), to_num(r.get("frmtrm_amount")) if key == "thstrm_amount" else to_num(r.get("bfefrmtrm_amount")),
-                                     None, int(r.get("ord") or 0), r.get("rcept_no") if key == "thstrm_amount" else None))
-                    build_kpi(con, cc, y, "11011")
-                got = True
-                break
-            if not got:      # 올해 사업보고서가 없으면(신규 상장 등) 전년도 시도
-                for fs in ("CFS", "OFS"):
-                    if fetch_fin_raw(con, cc, str(year - 1), "11011", fs_divs=(fs,)):
-                        build_kpi(con, cc, str(year - 1), "11011")
-                        got = True
-                        break
-            log(con, cc, "fin_fast", "ok" if got else "empty")
-            n += got
-        except Exception as e:  # noqa
-            log(con, cc, "fin_fast", "fail", e)
-            if common.QUOTA_HIT or "한도" in str(e):
+    with ThreadPoolExecutor(workers) as ex:
+        for b in range(0, len(cs), workers * 5):
+            batch = cs[b:b + workers * 5]
+            futs = [(cc, ex.submit(_annual_worker, cc, year)) for cc in batch]
+            stop = False
+            for cc, f in futs:
+                i += 1
+                try:
+                    got = f.result()
+                    for y, fs, lst in got:
+                        store_raw(con, cc, y, "11011", fs, lst, prev=True)
+                        build_kpi(con, cc, str(y), "11011")
+                        build_kpi(con, cc, str(y - 1), "11011")
+                    log(con, cc, "fin_fast", "ok" if got else "empty")
+                    n += bool(got)
+                except Exception as e:  # noqa
+                    log(con, cc, "fin_fast", "fail", e)
+                    if common.QUOTA_HIT or "한도" in str(e):
+                        stop = True
+            con.commit()
+            if i % 50 < workers * 5:
+                print(f"[fin] {i}/{len(cs)} · 적재 {n} · DART {common.CALLS}콜", flush=True)
+            if stop:
                 print(f"[fin] DART 한도 도달 — {i}/{len(cs)}에서 중단", flush=True); break
-        con.commit()
-        if i % 100 == 0:
-            print(f"[fin] {i}/{len(cs)} · 적재 {n}", flush=True)
-    print(f"[fin] 완료 {i}/{len(cs)} · 적재 {n}", flush=True)
+    print(f"[fin] 완료 {i}/{len(cs)} · 적재 {n} · DART {common.CALLS}콜", flush=True)
     return n
 
 

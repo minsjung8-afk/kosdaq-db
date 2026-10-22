@@ -93,6 +93,9 @@ def log(con, corp_code, job, status, msg=""):
 
 
 _last_call = 0.0
+CALLS = 0           # 이번 실행의 DART 호출 수(run.py가 종료 시 dart_usage에 기록)
+import threading as _th
+_LOCK = _th.Lock()
 
 
 QUOTA_HIT = False   # DART 일일 한도 도달 여부(catchup 체인 중단용)
@@ -100,13 +103,15 @@ QUOTA_HIT = False   # DART 일일 한도 도달 여부(catchup 체인 중단용)
 
 def dart_get(endpoint: str, retry: int = 3, **params):
     """DART JSON API 호출. status 000 이외는 예외. 초당 호출 간격 유지."""
-    global _last_call
+    global _last_call, CALLS
     params = {"crtfc_key": api_key(), **params}
     for i in range(retry):
-        gap = 0.2 - (time.time() - _last_call)
-        if gap > 0:
-            time.sleep(gap)
-        _last_call = time.time()
+        with _LOCK:                          # 병렬 호출 시에도 호출 시작 간격 0.2초 유지
+            gap = 0.2 - (time.time() - _last_call)
+            if gap > 0:
+                time.sleep(gap)
+            _last_call = time.time()
+            CALLS += 1
         r = requests.get(f"{DART_BASE}/{endpoint}.json", params=params, headers=UA, timeout=30)
         if r.status_code != 200:
             time.sleep(2 * (i + 1))

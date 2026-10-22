@@ -32,6 +32,26 @@ def corp_pairs(con, limit=None):
 
 
 
+def annual_done(con):
+    """연간 재무를 이미 받았거나(fin_raw 연간) 빠른 수집을 시도한(ok/empty) 회사 — 금융사처럼 '매출액'이 없는 회사를 매번 다시 받지 않도록"""
+    s = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_raw WHERE reprt_code='11011'")}
+    s |= {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fetch_log WHERE job='fin_fast' AND status IN ('ok','empty')")}
+    return s
+
+
+def record_usage(con, job):
+    import common, datetime
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS dart_usage (dt TEXT, job TEXT, calls INTEGER, finished_at TEXT)")
+        if common.CALLS:
+            con.execute("INSERT INTO dart_usage VALUES (?,?,?,?)", (datetime.date.today().isoformat(), job, common.CALLS, datetime.datetime.now().isoformat(timespec="seconds")))
+            con.commit()
+        tot = con.execute("SELECT COALESCE(SUM(calls),0) FROM dart_usage WHERE dt=?", (datetime.date.today().isoformat(),)).fetchone()[0]
+        print(f"[run] DART 호출 이번 {common.CALLS:,}콜 · 오늘 누적 {tot:,}콜 / 10,000", flush=True)
+    except Exception as e:  # noqa
+        print("[run] 사용량 기록 실패:", e)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast"])
@@ -87,14 +107,15 @@ def main():
             mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
     if a.job == "fin_fast":                  # 연간 재무 빠른 수집(연간 재무 없는 회사만, 회사당 1~2콜)
         import financials
-        have = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_kpi WHERE reprt_code='11011' AND revenue IS NOT NULL")}
+        have = annual_done(con)
         financials.run_annual_fast([c for c in ccs if c not in have], a.year - 1, con=con)
+        print("KPI 재계산(계정 매핑 보강 반영):", financials.rebuild_kpi_all(con), "건", flush=True)
     if a.job == "subst":                     # 대용가(KRX 정보데이터시스템 MDCSTAT04001) 1콜
         import subst
         subst.run(start=a.start, con=con)
     if a.job == "quarters":                  # 8분기·LTM 분기 손익(등급사→코스피→코스닥 순, 한도까지)
         import quarters
-        quarters.run(ccs, limit=a.limit, con=con)
+        quarters.run([p[0] for p in corp_pairs(con)] if not a.codes else ccs, limit=a.limit, con=con)   # --limit = 미수집 회사 중 N사
     if a.job == "unlisted":                  # 비상장 등급사 드라이런(명단 xlsx, DB 변경 없음)
         import unlisted
         unlisted.run(years=(a.years[0] if a.years else 3), max_pages=a.max_pages, ttype=a.type)
@@ -115,8 +136,7 @@ def main():
     if a.job == "catchup":                   # 야간: 미수집분을 mezz → biz → fin → kpi 순으로, DART 한도 도달 시 중단(다음날 이어서)
         import common, mezz, business, financials, quarters
         done = lambda tbl: {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
-        def done_annual(con):                      # 연간(사업보고서) 재무 지표가 있는 회사
-            return {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_kpi WHERE reprt_code='11011' AND revenue IS NOT NULL")}
+        done_annual = annual_done
         def done_notes(con):
             try:
                 return {r[0] for r in con.execute("SELECT corp_code FROM notes_latest")}
@@ -175,6 +195,7 @@ def main():
         import build_site
         build_site.build()
 
+    record_usage(con, a.job)
     fails = con.execute("SELECT job, COUNT(*) n FROM fetch_log WHERE status='fail' GROUP BY job").fetchall()
     if fails:
         print("실패 요약:", {r["job"]: r["n"] for r in fails})
