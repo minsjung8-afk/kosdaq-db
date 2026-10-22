@@ -178,6 +178,7 @@ def main():
                 return set()
         steps = [("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
+                 ("summarize", lambda: __import__("summarize").run_all(None, model="haiku", force=False)),   # 새로 받은 사업보고서만 Haiku 요약(기존은 건너뜀)
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
                  ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),
@@ -189,14 +190,14 @@ def main():
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 차트 5년·전체 기간용
         for name, fn in steps:
-            if common.QUOTA_HIT and name not in ("price_backfill", "kpi"):      # DART 한도 도달 시 DART 단계만 건너뜀(kpi 재계산·KRX 시세 백필은 진행)
+            if common.QUOTA_HIT and name not in ("price_backfill", "kpi", "summarize"):      # DART 한도 도달 시 DART 단계만 건너뜀(kpi 재계산·KRX 시세 백필은 진행)
                 print(f"[catchup] DART 한도 도달 — {name} 건너뜀(내일)", flush=True); continue
             print(f"[catchup] {name} 시작", flush=True)
             try:
                 fn()
             except Exception as e:  # noqa
                 print(f"[catchup] {name} 오류: {e}", flush=True)
-            if name in ("biz", "fin", "fin_ofs", "fin_yoy", "da", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
+            if name in ("biz", "summarize", "fin", "fin_ofs", "fin_yoy", "da", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
                 con.commit(); publish(f"catchup {name}")
     if a.job in ("price", "all"):
         import prices
