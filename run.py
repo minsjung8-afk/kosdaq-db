@@ -54,7 +54,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -69,6 +69,7 @@ def main():
     ap.add_argument("--model", default="sonnet", help="summarize: sonnet(기본)/haiku/opus 또는 모델 ID")
     ap.add_argument("--force", action="store_true", help="summarize: 이미 요약된 회사도 다시 생성")
     ap.add_argument("--codes", nargs="*", help="대상 종목코드 지정 (예: --codes 060310 006840) — 모든 작업 공통")
+    ap.add_argument("--steps", nargs="*", help="chain: 순서대로 실행할 작업 (예: --steps da quarters \"price:--start 2016-01-01\")")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
 
@@ -151,6 +152,7 @@ def main():
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
+                 ("da", lambda: __import__("da_xbrl").run(con=con)),   # 상각비(XBRL 주석) — EBITDA 산출 불가 회사 보강
                  ("quarters", lambda: quarters.run(ccs, con=con)),
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
@@ -172,6 +174,15 @@ def main():
         if not a.codes:
             summarize.run_rating(set(ccs) if a.limit else None)              # 등급 보유사: 신용평가서 기반 요약(우선)
         summarize.run(ccs, a.years[-1] if a.years else a.year - 1, force=a.force, model=a.model)   # 나머지(또는 --codes 지정분): 사업보고서 기반
+    if a.job == "da":                         # 상각비 보강(XBRL 주석) — da 빈 회사의 최신 연간·분기, 1콜/보고서
+        import da_xbrl
+        da_xbrl.run(ccs if a.codes else None, limit=a.limit, con=con, debug=a.debug is not None)
+    if a.job == "chain":                      # 한 번의 실행에서 여러 작업을 순서대로(대기열 교체·빈 시간 방지)
+        import subprocess, shlex
+        for st in (a.steps or []):
+            nm, _, rest = st.partition(":")
+            print(f"[chain] ▶ {nm} {rest}", flush=True)
+            subprocess.run([sys.executable, str(Path(__file__).resolve()), nm] + shlex.split(rest), check=False)
     if a.job == "rating_fix":                 # 신용등급 계열사 혼입 정정(완전일치 재조회, 등급 보유사만 ~10분)
         import fss_rating
         fss_rating.fix_mismatch(con)

@@ -183,6 +183,14 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k["net_borrowings"] = (k["borrowings"] - (k.get("cash") or 0)) if k.get("borrowings") is not None else None
         da = [abs(x) for x in (k.get("dep"), k.get("amort"), k.get("rou_dep")) if x is not None]
         k["da"] = sum(da) if da else None
+        if k["da"] is None:          # 본문에 상각비가 없으면 XBRL 주석에서 뽑은 값(da_xbrl) 사용
+            try:
+                x = con.execute("SELECT da FROM da_xbrl WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND da IS NOT NULL",
+                                (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
+                if x:
+                    k["da"] = x[0]
+            except Exception:  # noqa
+                pass
         k["ebitda"] = (k["op_income"] + k["da"]) if k.get("op_income") is not None and k["da"] is not None else None
         ie = abs(k["int_exp"]) if k.get("int_exp") else None
         k["interest_cover"] = round(k["ebitda"] / ie, 1) if k.get("ebitda") is not None and ie else None   # EBITDA/이자비용
