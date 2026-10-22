@@ -32,6 +32,21 @@ def corp_pairs(con, limit=None):
 
 
 
+def publish(tag):
+    import subprocess, time, os
+    """사이트 중간 반영: 빌드 → Cloudflare Pages 배포(토큰 없으면 건너뜀). 실패해도 수집은 계속"""
+    if not os.environ.get("CLOUDFLARE_API_TOKEN"):
+        return
+    t0 = time.time()
+    try:
+        subprocess.run([sys.executable, str(Path(__file__).resolve()), "site"], check=True, stdout=subprocess.DEVNULL, timeout=900)
+        subprocess.run(["npx", "--yes", "wrangler@3", "pages", "deploy", "site", "--project-name", "kosdaq-db", "--branch", "main",
+                        "--commit-dirty=true"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+        print(f"[chain] 사이트 반영 완료({tag}, {int(time.time() - t0)}초)", flush=True)
+    except Exception as e:  # noqa
+        print(f"[chain] 사이트 반영 실패({tag}): {str(e)[:120]}", flush=True)
+
+
 def annual_done(con):
     """연간 재무를 이미 받았거나(fin_raw 연간) 빠른 수집을 시도한(ok/empty) 회사 — 금융사처럼 '매출액'이 없는 회사를 매번 다시 받지 않도록"""
     s = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_raw WHERE reprt_code='11011'")}
@@ -166,6 +181,8 @@ def main():
                 fn()
             except Exception as e:  # noqa
                 print(f"[catchup] {name} 오류: {e}", flush=True)
+            if name in ("biz", "fin", "da", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
+                con.commit(); publish(f"catchup {name}")
     if a.job in ("price", "all"):
         import prices
         prices.run(pairs, a.year, start=a.start, markets=a.market)
@@ -177,11 +194,27 @@ def main():
         import da_xbrl
         da_xbrl.run(ccs if a.codes else None, limit=a.limit, con=con, debug=a.debug is not None)
     if a.job == "chain":                      # 한 번의 실행에서 여러 작업을 순서대로(대기열 교체·빈 시간 방지)
-        import subprocess, shlex
+        import subprocess, shlex, time, os
+        me = str(Path(__file__).resolve())
+        EVERY = int(os.environ.get("CHAIN_PUBLISH_MIN", "40")) * 60     # 긴 단계는 40분마다 중간 반영
         for st in (a.steps or []):
             nm, _, rest = st.partition(":")
             print(f"[chain] ▶ {nm} {rest}", flush=True)
-            subprocess.run([sys.executable, str(Path(__file__).resolve()), nm] + shlex.split(rest), check=False)
+            p = subprocess.Popen([sys.executable, me, nm] + shlex.split(rest))
+            last = time.time()
+            try:
+                while p.poll() is None:
+                    time.sleep(15)
+                    if time.time() - last >= EVERY:
+                        publish(f"{nm} 진행 중"); last = time.time()
+            except KeyboardInterrupt:          # 170분 제한(timeout INT) → 하위 작업도 정리하고 종료(이후 단계는 워크플로가 저장·배포)
+                p.send_signal(__import__("signal").SIGINT)
+                try:
+                    p.wait(timeout=120)
+                except Exception:  # noqa
+                    p.kill()
+                raise
+            publish(f"{nm} 완료")
     if a.job == "rating_fix":                 # 신용등급 계열사 혼입 정정(완전일치 재조회, 등급 보유사만 ~10분)
         import fss_rating
         fss_rating.fix_mismatch(con)
