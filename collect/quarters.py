@@ -46,12 +46,23 @@ def needed_reports(today=None, n_q=12):
 def _ensure(con):
     con.execute("""CREATE TABLE IF NOT EXISTS quarters_done (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, status TEXT, fetched_at TEXT,
                    PRIMARY KEY (corp_code, bsns_year, reprt_code))""")
+    # v2(2026-10-23): 연결·별도 각각 관리 → 키에 fs 포함. 옛 표(status ok/empty, fs 없음)는 버리고 fin_raw 보유 여부로 다시 판단
+    cols = [r[1] for r in con.execute("PRAGMA table_info(quarters_done)")]
+    if "fs_div" not in cols:
+        con.execute("DROP TABLE quarters_done")
+        con.execute("""CREATE TABLE quarters_done (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, status TEXT, fetched_at TEXT,
+                       PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))""")
+        con.commit()
 
 
 def _fs_of(con, cc):
     """회사의 주 재무제표 구분(연결 있으면 CFS) — 연간 데이터로 판단, 모르면 둘 다"""
-    r = con.execute("SELECT fs_div FROM fin_kpi WHERE corp_code=? AND reprt_code='11011' AND revenue IS NOT NULL ORDER BY fs_div='CFS' DESC LIMIT 1", (cc,)).fetchone()
-    return (r[0],) if r else ("CFS", "OFS")
+    # 연결 우선, 없으면 별도. 연결 작성을 중단한 회사(두산테스나 2025~ 등)는 최신 연간이 별도뿐이므로 둘 다 시도(빈 응답은 1콜 추가)
+    r = con.execute("""SELECT fs_div FROM fin_kpi WHERE corp_code=? AND reprt_code='11011' AND revenue IS NOT NULL
+                       ORDER BY bsns_year DESC, fs_div='CFS' DESC LIMIT 1""", (cc,)).fetchone()
+    if not r:
+        return ("CFS", "OFS")
+    return ("CFS", "OFS") if r[0] == "CFS" else ("OFS", "CFS")
 
 
 def fetch_report(con, cc, year, rc):
@@ -69,33 +80,28 @@ def fetch_report(con, cc, year, rc):
     return n
 
 
-def _worker(cc, plan, fss):
-    """스레드(HTTP만): 최신 보고서부터 받되, 받은 보고서의 '전기'로 채워지는 전년 같은 기간은 건너뜀 → 회사당 13콜 → 7~8콜.
-    반환 [(year, rc, fs|None, list)] — list 빈 것은 empty 표시용"""
+def _worker(cc, plan, fs):
+    """스레드(HTTP만): 한 fs(연결 또는 별도) 기준으로 최신 보고서부터 받되, 받은 보고서의 '전기'로 채워지는 전년 같은 기간은 건너뜀.
+    반환 [(year, rc, fs, list)] — list 빈 것은 empty 표시용"""
     from financials import _fetch_list
     out, filled = [], set()
     for y, rc in plan:
         if (y, rc) in filled:
             continue
-        got = None
-        for fs in fss:
-            lst = _fetch_list(cc, y, rc, fs)
-            if lst:
-                got = (y, rc, fs, lst); break
-        out.append(got or (y, rc, None, []))
-        if got:
+        lst = _fetch_list(cc, y, rc, fs)
+        out.append((y, rc, fs, lst))
+        if lst:
             filled.add((str(int(y) - 1), rc))
     return out
 
 
-def plan_for(con, cc, reports):
-    """아직 '누적 기준'으로 받지 않은 (year, rc) — 연간은 fin_raw 있으면 완료, 분기·반기는 fin_cum_ok 표시가 있어야 완료"""
+def plan_for(con, cc, reports, fs="CFS"):
+    """fs 기준으로 아직 받지 않은 (year, rc). 완료 = fin_raw에 그 fs 행이 있음(연간·분기 모두). 'empty'(해당 fs 보고서 없음) 표시는 fs별로 관리"""
     from financials import ensure_cum_table
     ensure_cum_table(con)
-    ann = {(r[0], r[1]) for r in con.execute("SELECT DISTINCT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND reprt_code='11011'", (cc,))}
-    ok = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM fin_cum_ok WHERE corp_code=?", (cc,))}
-    empty = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM quarters_done WHERE corp_code=? AND status='empty'", (cc,))}
-    return [(y, rc) for (y, rc) in reports if (y, rc) not in ann and (y, rc) not in ok and (y, rc) not in empty]
+    have = {(r[0], r[1]) for r in con.execute("SELECT DISTINCT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND fs_div=?", (cc, fs))}
+    empty = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM quarters_done WHERE corp_code=? AND fs_div=? AND status='empty'", (cc, fs))}
+    return [(y, rc) for (y, rc) in reports if (y, rc) not in have and (y, rc) not in empty]
 
 
 def priority(con, corp_codes):
@@ -114,28 +120,30 @@ def run(corp_codes, limit=None, con=None, workers=4):
     _ensure(con)
     reports = needed_reports()
     cs = priority(con, corp_codes)
-    todo = [(c, plan_for(con, c, reports)) for c in cs]
-    todo = [(c, p) for c, p in todo if p]
+    # 연결·별도 모두 수집(전사): 연결 먼저 전부, 그다음 별도(별도는 '연결 없음'인 회사도 포함)
+    has_cfs = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_raw WHERE fs_div='CFS'")}   # 연결 자체가 없는 회사(연간 수집 때 확인)는 연결 조회 생략
+    todo = [(c, "CFS", plan_for(con, c, reports, "CFS")) for c in cs if c in has_cfs] + [(c, "OFS", plan_for(con, c, reports, "OFS")) for c in cs]
+    todo = [(c, fs, p) for c, fs, p in todo if p]
     if limit:
         todo = todo[:limit]
-    print(f"[quarters] 대상 보고서 {reports[0]}~{reports[-1]} · 미수집 회사 {len(todo)} · 병렬 {workers} (전기 열 재사용으로 회사당 ~7~8콜)", flush=True)
+    print(f"[quarters] 대상 보고서 {reports[0]}~{reports[-1]} · 미수집 {len(todo)}건(회사×연결/별도) · 병렬 {workers} (전기 열 재사용으로 건당 ~7콜)", flush=True)
     saved, i, c0 = 0, 0, common.CALLS
     with ThreadPoolExecutor(workers) as ex:
         for b in range(0, len(todo), workers * 3):
             batch = todo[b:b + workers * 3]
-            futs = [(cc, ex.submit(_worker, cc, plan, _fs_of(con, cc))) for cc, plan in batch]
+            futs = [((cc, fs), ex.submit(_worker, cc, plan, fs)) for cc, fs, plan in batch]
             stop = False
-            for cc, f in futs:
+            for (cc, fs), f in futs:
                 i += 1
                 try:
-                    for y, rc, fs, lst in f.result():
+                    for y, rc, fs_, lst in f.result():
                         if lst:
-                            n, filled = store_raw(con, cc, y, rc, fs, lst, prev=True)
+                            n, filled = store_raw(con, cc, y, rc, fs_, lst, prev=True)
                             build_kpi(con, cc, y, rc)
                             if filled:
                                 build_kpi(con, cc, str(int(y) - 1), rc)
                             saved += n
-                        con.execute("INSERT OR REPLACE INTO quarters_done VALUES (?,?,?,?,?)", (cc, y, rc, "ok" if lst else "empty", now()))
+                        con.execute("INSERT OR REPLACE INTO quarters_done VALUES (?,?,?,?,?,?)", (cc, y, rc, fs_, "ok" if lst else "empty", now()))
                 except Exception as e:  # noqa
                     log(con, cc, "quarters", "fail", e)
                     if common.QUOTA_HIT or "한도" in str(e):
