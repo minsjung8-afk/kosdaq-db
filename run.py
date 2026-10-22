@@ -171,9 +171,8 @@ def main():
         prices.run(pairs, a.year, start=a.start, markets=a.market)
     if a.job in ("summarize", "all"):
         import summarize
-        if not a.codes:
-            summarize.run_rating(set(ccs) if a.limit else None)              # 등급 보유사: 신용평가서 기반 요약(우선)
-        summarize.run(ccs, a.years[-1] if a.years else a.year - 1, force=a.force, model=a.model)   # 나머지(또는 --codes 지정분): 사업보고서 기반
+        # 등급 보유사 = 신용평가서+사업보고서 통합(항목별 근거), 나머지 = 사업보고서 — 병렬·재개 가능
+        summarize.run_all(set(ccs) if a.codes else None, model=a.model, force=a.force, limit=a.limit)
     if a.job == "da":                         # 상각비 보강(XBRL 주석) — da 빈 회사의 최신 연간·분기, 1콜/보고서
         import da_xbrl
         da_xbrl.run(ccs if a.codes else None, limit=a.limit, con=con, debug=a.debug is not None)

@@ -36,7 +36,7 @@ def _parse_json(out: str) -> dict:
     return json.loads(out)
 
 MODELS = {"sonnet": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5", "opus": "claude-opus-4-1"}
-MAX_CHARS = int(os.environ.get("SUMMARY_MAX_CHARS", "70000"))      # 입력 절단(사업의 개요~생산·매출 절까지면 충분) — 비용 40% 절감
+MAX_CHARS = int(os.environ.get("SUMMARY_MAX_CHARS", "45000"))      # 입력 절단(사업의 개요~생산·매출 절까지면 충분) — 비용 40% 절감
 
 
 def summarize_text(text: str, model: str = "claude-sonnet-4-5") -> dict:
@@ -157,3 +157,134 @@ def run_rating(corp_codes=None, force=False, model="claude-sonnet-4-5"):
         except Exception as e:  # noqa
             print("신용평가서 요약 실패", cc, e)
     print(f"신용평가서 요약 {n}건")
+
+
+# ---------------------------------------------------------------------------
+# 통합 요약(2026-10-22): 등급 보유사 = 신용평가서 + 사업보고서를 한 표로(항목별 근거 표시), 비보유사 = 사업보고서.
+# 병렬 호출·재개(이미 같은 모델로 만든 건 건너뜀). 원문·PDF는 메모리에서만 처리.
+COMBINED_PROMPT = """당신은 여신심사역이다. 아래 [A] 신용평가사 기업신용평가서와 [B] 사업보고서 'II. 사업의 내용'을 함께 읽고,
+두 자료를 적절히 섞어 심사용 요약을 아래 JSON으로만 답하라(없으면 null). 평가사·회사 문장을 베끼지 말고 내 말로. 금액은 억원.
+각 항목의 근거를 "_src"에 "신용평가서" / "사업보고서" / "양쪽" 중 하나로 적어라. 두 자료가 다르면 최신·구체적인 쪽을 쓰고 차이를 note에 남겨라.
+{
+ "industry": "업종 한 줄",
+ "business_model": "무엇을 누구에게 어떻게 파는지 2~3문장",
+ "main_products": [{"name": "", "revenue_share_pct": null, "note": ""}],
+ "major_customers": ["고객명/비중"],
+ "customer_concentration": "상위 거래처 의존도 평가",
+ "raw_material_supply": "원재료·공급망 리스크",
+ "competition": "경쟁강도·진입장벽·시장지위",
+ "capacity_utilization": "생산능력·가동률(있으면)",
+ "new_business": "신규사업·투자계획",
+ "group_support": "계열·대주주 지원 가능성(있으면)",
+ "key_financials_view": "평가사의 재무 평가 요지 2~3문장(차입·현금흐름·유동성)",
+ "rating_rationale": ["등급 논리 3~5개, 각 한 줄"],
+ "rating_triggers": {"up": ["상향 요인"], "down": ["하향 요인"]},
+ "key_risks": ["심사상 유의할 리스크 3~5개"],
+ "summary_md": "승인신청서 '사업현황'란에 쓸 10줄 내외 서술",
+ "_src": {"industry": "", "business_model": "", "main_products": "", "major_customers": "", "customer_concentration": "",
+          "raw_material_supply": "", "competition": "", "capacity_utilization": "", "new_business": "", "group_support": "",
+          "key_financials_view": "", "rating_rationale": "", "rating_triggers": "", "key_risks": ""}
+}
+"""
+
+
+def _call(client, model, content, tries=4):
+    import time
+    for k in range(tries):
+        try:
+            msg = client.messages.create(model=model, max_tokens=4000, messages=[{"role": "user", "content": content}])
+            return _parse_json(msg.content[0].text)
+        except Exception as e:  # noqa
+            if k == tries - 1:
+                raise
+            time.sleep(20 * (k + 1) if "429" in str(e) or "overloaded" in str(e).lower() else 5)
+
+
+def _latest_ratings(con):
+    rows = con.execute("""SELECT r.corp_code, r.agency, r.disc_dt, r.grade, r.file_url,
+                          CASE WHEN r.target_type LIKE '%기업신용평가%' THEN 0 ELSE 1 END AS pri
+                          FROM credit_rating r WHERE r.file_url IS NOT NULL
+                          AND (r.target_type LIKE '%기업신용평가%' OR r.target_type LIKE '%사채%')
+                          AND COALESCE(r.grade,'') NOT IN ('취소','철회','WD','NR','-')
+                          AND COALESCE(r.eval_kind,'') NOT LIKE '%취소%' AND COALESCE(r.eval_kind,'') NOT LIKE '%철회%'
+                          ORDER BY r.corp_code, pri, r.disc_dt DESC""").fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["corp_code"], dict(r))
+    return out
+
+
+def run_all(corp_codes=None, model="haiku", force=False, workers=6, limit=None):
+    """전 종목 요약. force=True여도 '같은 모델·같은 근거'로 이미 만든 건 건너뜀(타임아웃 후 재개)."""
+    import time
+    import requests
+    from concurrent.futures import ThreadPoolExecutor
+    from common import UA
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ANTHROPIC_API_KEY 없음 - 요약 건너뜀"); return
+    import anthropic  # noqa
+    client = anthropic.Anthropic()
+    mid = MODELS.get(model, model)
+    con = connect()
+    rat = _latest_ratings(con)
+    biz = {}
+    for r in con.execute("""SELECT corp_code, bsns_year, rcept_no, COALESCE(full_z, full_text) t, summary_json FROM business
+                            WHERE (full_z IS NOT NULL OR full_text IS NOT NULL) ORDER BY corp_code, bsns_year"""):
+        biz[r["corp_code"]] = dict(r)                # 최신 연도가 마지막에 덮어씀
+    todo = []
+    for cc, b in biz.items():
+        if corp_codes and cc not in corp_codes:
+            continue
+        old = json.loads(b["summary_json"]) if b["summary_json"] else None
+        rr = rat.get(cc)
+        want_kind = "combined" if rr else "biz"
+        if old and old.get("_model") == mid and old.get("_kind", "biz") == want_kind and \
+           (not rr or (old.get("_rating") or {}).get("disc_dt") == rr["disc_dt"]):
+            continue                                  # 이미 최신 근거로 같은 모델 요약 완료
+        if old and not force:
+            continue
+        todo.append((cc, b, rr))
+    todo.sort(key=lambda x: x[2] is None)            # 등급 보유사 먼저
+    if limit:
+        todo = todo[:limit]
+    print(f"[summarize] 대상 {len(todo)}사 (등급 보유 {sum(1 for t in todo if t[2])}) · 모델 {mid} · 병렬 {workers}", flush=True)
+
+    def work(item):
+        cc, b, rr = item
+        btxt = (ztext(b["t"]) or "")
+        if rr:
+            pdf_txt = ""
+            try:
+                pdf = requests.get(rr["file_url"], headers=UA, timeout=(15, 60)).content
+                if pdf[:4] == b"%PDF":
+                    pdf_txt, _ = _pdf_text(pdf)
+            except Exception:  # noqa
+                pdf_txt = ""
+            if len(pdf_txt) >= 500:
+                js = _call(client, mid, COMBINED_PROMPT + "\n[A] 신용평가서(" + rr["agency"] + " " + rr["disc_dt"] + " " + str(rr["grade"]) + "):\n"
+                           + pdf_txt[:45000] + "\n\n[B] 사업보고서(" + str(b["bsns_year"]) + "):\n" + btxt[:35000])
+                js["_kind"] = "combined"
+                js["_rating"] = {k: rr[k] for k in ("agency", "disc_dt", "grade", "file_url")}
+                return cc, b, js
+        js = _call(client, mid, PROMPT + btxt[:MAX_CHARS])
+        js["_kind"] = "biz"
+        return cc, b, js
+
+    n = fail = 0
+    t0 = time.time()
+    with ThreadPoolExecutor(workers) as ex:
+        for i, fut in enumerate([ex.submit(work, it) for it in todo], 1):
+            try:
+                cc, b, js = fut.result()
+                js["_model"] = mid
+                con.execute("UPDATE business SET summary_json=?, summary_md=?, summarized_at=? WHERE corp_code=? AND bsns_year=?",
+                            (json.dumps(js, ensure_ascii=False), js.get("summary_md"), now(), cc, b["bsns_year"]))
+                n += 1
+            except Exception as e:  # noqa
+                fail += 1
+                print("요약 실패", todo[i - 1][0], str(e)[:150], flush=True)
+            if i % 25 == 0:
+                con.commit()
+                print(f"[summarize] {i}/{len(todo)} · 성공 {n} · 실패 {fail} · {int(time.time() - t0)}초", flush=True)
+    con.commit()
+    print(f"[summarize] 완료 {n}/{len(todo)} · 실패 {fail}", flush=True)

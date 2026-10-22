@@ -334,8 +334,8 @@ async function open(code){
     ${d.minor?`<tr><td>소액주주 (${num(d.minor.shrholdr_co)}명)</td><td></td><td class="n">${num(d.minor.hold_stock_co)}</td><td class="n">${pct(d.minor.hold_stock_rate)}</td></tr>`:''}</table></div>`; }
   h+=`</section>`;
   // 2 사업내용
-  const b=d.business, rs=d.rating_summary, s=rs?rs.summary:b.summary;
-  h+=`<section><h3>2. 사업내용 ${rs?`(${esc(rs.agency)} 신용평가서 ${rs.disc_dt}, ${esc(rs.grade)})`:b.year?`(${b.year} 사업보고서)`:''}</h3>`;
+  const b=d.business, cb=(b.summary&&b.summary._kind==='combined')?b.summary:null, rs=cb?null:d.rating_summary, s=cb||(rs?rs.summary:b.summary);
+  h+=`<section><h3>2. 사업내용 ${cb?`(${esc(cb._rating.agency)} 신용평가서 ${esc(cb._rating.disc_dt)} ${esc(cb._rating.grade)} + ${esc(b.year||'')} 사업보고서)`:rs?`(${esc(rs.agency)} 신용평가서 ${rs.disc_dt}, ${esc(rs.grade)})`:b.year?`(${b.year} 사업보고서)`:''}</h3>`;
   const rawBiz=t=>{ // 사업보고서 평문 → 문단 + 표 복원. 표는 두 형태: ① 'a | b | c' 한 줄  ② 셀이 'a |' 한 줄씩, 행 사이 빈 줄
     t=t.replace(/([다음요됨임함])\.(?=[가-힣(])/g,'$1. ');                    // '합니다.지주회사' → 문장 사이 공백
     const blocks=t.split(/\n\s*\n/).map(b=>b.trim()).filter(Boolean); let out='', tbl=[], seen=new Set();
@@ -358,8 +358,19 @@ async function open(code){
   const prodCell=ps=>{ ps=(ps||[]).filter(p=>p&&p.name); if(!ps.length) return '-'; const hasPct=ps.some(p=>p.revenue_share_pct!=null);
     return hasPct?`<div class="prod">${ps.map(p=>`<span>${esc(p.name)}</span><div class="pb"><i style="width:${Math.min(100,Math.max(0,+p.revenue_share_pct||0))}%"></i></div><span>${p.revenue_share_pct!=null?p.revenue_share_pct+'%':'-'}</span>`).join('')}</div>`:ps.map(p=>esc(p.name)+(p.note?` <small style="color:var(--mute)">${esc(p.note)}</small>`:'')).join(', '); };
   const row=(k,v)=>`<tr><td>${k}</td><td>${v||'-'}</td></tr>`;
-  const memo=(t)=>t?`<div class="full"><div class="cap"><span>승인신청서 '사업현황'란 서술 (AI 요약 · ${rs?'신용평가서':'사업보고서'} 기준)</span><button class="btn" onclick="navigator.clipboard.writeText(this.closest('.full').querySelector('.memo').innerText).then(()=>{this.textContent='복사됨';setTimeout(()=>this.textContent='📋 본문 복사',1500)})">📋 본문 복사</button></div><div class="memo">${mdHtml(t)}</div></div>`:'';
-  if(rs&&s){h+=`<div class="biz"><div class="full"><div class="twrap"><table class="lbl">
+  const memo=(t)=>t?`<div class="full"><div class="cap"><span>승인신청서 '사업현황'란 서술 (AI 요약 · ${cb?'신용평가서+사업보고서':rs?'신용평가서':'사업보고서'} 기준)</span><button class="btn" onclick="navigator.clipboard.writeText(this.closest('.full').querySelector('.memo').innerText).then(()=>{this.textContent='복사됨';setTimeout(()=>this.textContent='📋 본문 복사',1500)})">📋 본문 복사</button></div><div class="memo">${mdHtml(t)}</div></div>`:'';
+  const SRC=x=>{ const v=(cb&&cb._src||{})[x]; if(!v) return ''; const c=v.includes('양쪽')?'#0e5a4a':v.includes('신용')?'#8a6d3b':'#1d4e7f'; return ` <span style="font-size:10px;font-weight:700;color:${c};border:1px solid ${c}55;border-radius:4px;padding:0 4px;margin-left:4px;white-space:nowrap">${esc(v)}</span>`; };
+  const SRCD=x=>{ const v=(cb&&cb._src||{})[x]; return v?` <span style="font-size:10px;font-weight:700;color:#E8D9A0;border:1px solid rgba(232,217,160,.5);border-radius:4px;padding:0 4px;margin-left:4px">${esc(v)}</span>`:''; };
+  const rowS=(k,key,v)=>`<tr><td>${k}${SRC(key)}</td><td>${v||'-'}</td></tr>`;
+  if(cb){h+=`<div class="src" style="margin-bottom:6px">AI 구조화 요약 · <b>신용평가서 + 사업보고서 통합</b> (항목별 근거 표시)${s._model?` · 모델 ${esc(String(s._model).replace('claude-','').replace(/-\d.*$/,''))}`:''} · <a href="${esc(cb._rating.file_url)}" target="_blank" rel="noopener">${esc(cb._rating.agency)} 평가서</a>${b.rcept_no?` · <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${b.rcept_no}" target="_blank" rel="noopener">사업보고서 원문</a>`:''}</div><div class="biz"><div class="full"><div class="twrap"><table class="lbl">
+    ${rowS('업종','industry',esc(s.industry))}${rowS('사업모델','business_model',esc(s.business_model))}${rowS('주요 제품·매출비중','main_products',prodCell(s.main_products))}
+    ${rowS('주요 고객','major_customers',esc((s.major_customers||[]).join(', ')))}${rowS('거래처 집중도','customer_concentration',esc(s.customer_concentration))}${rowS('원재료·공급망','raw_material_supply',esc(s.raw_material_supply))}
+    ${rowS('경쟁·시장지위','competition',esc(s.competition))}${rowS('생산·가동률','capacity_utilization',esc(s.capacity_utilization))}${rowS('신규사업·투자','new_business',esc(s.new_business))}
+    ${rowS('계열 지원','group_support',esc(s.group_support))}${rowS('재무 평가 요지','key_financials_view',esc(s.key_financials_view))}</table></div></div>
+    ${numTable('등급 논리'+SRCD('rating_rationale'),s.rating_rationale)}${numTable('심사상 유의 리스크'+SRCD('key_risks'),s.key_risks)}
+    <div class="full"><div class="twrap"><table><tr><th class="up" style="width:50%">▲ 등급 상향 요인</th><th class="dn">▼ 등급 하향 요인</th></tr><tr><td>${(s.rating_triggers&&s.rating_triggers.up||[]).map(esc).join('<br>')||'-'}</td><td>${(s.rating_triggers&&s.rating_triggers.down||[]).map(esc).join('<br>')||'-'}</td></tr></table></div></div>
+    ${memo(s.summary_md)}</div>`;}
+  else if(rs&&s){h+=`<div class="biz"><div class="full"><div class="twrap"><table class="lbl">
     ${row('업종',esc(s.industry))}${row('사업모델',esc(s.business_model))}${row('주요 제품·매출비중',prodCell(s.main_products))}
     ${row('시장지위',esc(s.market_position))}${row('계열 지원',esc(s.group_support))}${row('재무 평가 요지',esc(s.key_financials_view))}</table></div></div>
     ${numTable('등급 논리 (평가사 근거)',s.rating_rationale)}${numTable('심사상 유의 리스크',s.key_risks)}
