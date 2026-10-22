@@ -122,8 +122,11 @@ def fix_mismatch(con=None, years=3):
     """기존 등급 보유사만 다시 조회해 완전일치 행으로 교체 → 바뀐 회사 목록 출력 + 잘못된 평가서로 만든 요약(rating_summary) 삭제"""
     con = con or connect()
     _ensure_target(con)
+    # 대상: 지금 등급이 있는 회사 + 과거 수집에서 1건 이상 잡혔던 회사(1차 정정 때 페이지 한도로 0건이 된 한화·SK 등 포함)
     cs = [dict(r) for r in con.execute("""SELECT c.corp_code, c.corp_name, c.corp_name_full FROM company c
-                                          WHERE c.corp_code IN (SELECT DISTINCT corp_code FROM credit_rating)""")]
+                                          WHERE c.corp_code IN (SELECT DISTINCT corp_code FROM credit_rating)
+                                             OR c.corp_code IN (SELECT DISTINCT corp_code FROM fetch_log WHERE job='rating' AND status='ok'
+                                                                AND COALESCE(msg,'0') NOT IN ('0',''))""")]
     before = {r[0]: r[1] for r in con.execute("SELECT corp_code, COUNT(*) FROM credit_rating GROUP BY corp_code")}
     print(f"[rating-fix] 등급 보유 {len(cs)}사 재조회(완전일치)", flush=True)
     changed = []
