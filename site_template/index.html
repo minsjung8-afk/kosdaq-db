@@ -455,10 +455,11 @@ async function open(code){
      if(ns.other_commitments&&ns.other_commitments.length) h+=`<div class="src" style="margin:8px 0 2px"><b>기타 약정·우발</b></div><ul style="margin:0 0 0 18px;padding:0;font-size:12.5px">${ns.other_commitments.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
      if(ns.summary_md) h+=`<div style="margin:10px 0 0;padding:8px 12px;border:1px solid var(--line);background:var(--panel);border-radius:6px;font-size:12.5px;white-space:pre-wrap">${esc(ns.summary_md)}</div>`;
    }
-   if(nr&&nr.sections&&nr.sections.length){   // 주석 원문 발췌(비용 0): 절 제목별 접기 — 구조화 결과의 대조용 또는 구조화 전 1차 자료
+   const nrDebt=nr&&nr.sections?nr.sections.filter(x=>x.g!=='mezz'):[];
+   if(nrDebt.length){   // 주석 원문 발췌(비용 0): 절 제목별 접기 — 구조화 결과의 대조용 또는 구조화 전 1차 자료
      const KW=/(차입금|사채|우발|담보|보증|약정|소송|리스|파생|만기|한도|연체|기한의 이익)/g;
-     h+=`<div class="src" style="margin:${ns?'12px':'2px'} 0 4px"><b>주석 원문 발췌</b> · ${esc(nr.report_nm||'')} ${nr.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${nr.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · 차입금·사채·우발채무·담보·보증·약정·소송·리스 절만 · 표는 평문으로 펼쳐져 있어 숫자 열 순서는 원문 확인${nr.truncated?' · 일부 절은 길이 제한으로 잘림':''}</div>`;
-     h+=nr.sections.map(sec=>`<details style="margin:0 0 4px;border:1px solid var(--line);border-radius:6px;background:#fbfcfe"><summary style="cursor:pointer;padding:6px 10px;font-weight:700;font-size:12.5px;color:var(--navy2)">${esc(sec.t)} <small style="color:var(--mute);font-weight:400">${(sec.b||'').length.toLocaleString()}자</small></summary><div style="padding:4px 12px 10px;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:420px;overflow:auto">${esc(sec.b).replace(KW,'<mark style="background:#fff1c2;padding:0 1px">$1</mark>')}</div></details>`).join('');
+     h+=`<div class="src" style="margin:${ns?'12px':'2px'} 0 4px"><b>주석 원문 발췌</b> · ${esc(nr.report_nm||'')} ${nr.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${nr.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · 차입금·사채·우발채무·담보·보증·약정·소송·리스 절만(전환사채·파생은 3-2) · 표는 평문으로 펼쳐져 있어 숫자 열 순서는 원문 확인${nr.truncated?' · 일부 절은 길이 제한으로 잘림':''}</div>`;
+     h+=nrDebt.map(sec=>`<details style="margin:0 0 4px;border:1px solid var(--line);border-radius:6px;background:#fbfcfe"><summary style="cursor:pointer;padding:6px 10px;font-weight:700;font-size:12.5px;color:var(--navy2)">${esc(sec.t)} <small style="color:var(--mute);font-weight:400">${(sec.b||'').length.toLocaleString()}자</small></summary><div style="padding:4px 12px 10px;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:420px;overflow:auto">${esc(sec.b).replace(KW,'<mark style="background:#fff1c2;padding:0 1px">$1</mark>')}</div></details>`).join('');
    }
    h+=`</section>`;}
     const mo=d.mezz_out||[], mi=d.mezz_issue||[];
@@ -485,6 +486,11 @@ async function open(code){
       ${evsHtml}
       <div class="src" style="margin-top:4px">잔액·현재 전환가는 최신 정기보고서(분기 포함) ‘자본금 변동사항’ 표, 금리·풋·콜은 발행결정 공시 본문 기준 · 전환가 하방 = 최초 공시의 최저조정가액(리픽싱 바닥), 상방 = 최초 전환가(하향 후 상향 조정 한도) · 종류주식 행은 유상증자 중 ‘기타주식’ 발행건(RCPS·CPS 여부는 공시 확인) · 회차가 안 맞아 합쳐지지 않은 건은 따로 표시</div>`;
     }
+    {const nr2=d.notes_raw, nrM=nr2&&nr2.sections?nr2.sections.filter(x=>x.g==='mezz'):[];   // 메자닌 관련 주석 원문(전환사채·신주인수권부사채·교환사채·파생상품부채) — 비용 0
+     if(nrM.length){ const KW2=/(전환사채|신주인수권|교환사채|파생|전환가|행사가|조기상환|풋|콜|리픽싱|만기|사채할인|전환권)/g;
+       h+=`<div class="src" style="margin:10px 0 4px"><b>주석 원문 발췌(메자닌)</b> · ${esc(nr2.report_nm||'')} ${nr2.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${nr2.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · 재무제표 주석의 전환사채·신주인수권부사채·교환사채·파생상품부채 절 · 위 표(공시·자본금 변동사항 기준)와 장부금액·전환권대가 대조용</div>`;
+       h+=nrM.map(sec=>`<details style="margin:0 0 4px;border:1px solid var(--line);border-radius:6px;background:#fbfcfe"><summary style="cursor:pointer;padding:6px 10px;font-weight:700;font-size:12.5px;color:var(--navy2)">${esc(sec.t)} <small style="color:var(--mute);font-weight:400">${(sec.b||'').length.toLocaleString()}자</small></summary><div style="padding:4px 12px 10px;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:420px;overflow:auto">${esc(sec.b).replace(KW2,'<mark style="background:#fff1c2;padding:0 1px">$1</mark>')}</div></details>`).join('');
+     }}
     h+=`</section>`;
   }
   if((d.other_invest||[]).length){ const oi=d.other_invest[0]; const RN2={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const oiSrc=`${oi.bsns_year} ${RN2[oi.reprt_code||'11011']}`+(oi.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${oi.rcept_no}" target="_blank" rel="noopener" style="color:#fff;text-decoration:underline">${oi.rcept_no}</a>`:'');
