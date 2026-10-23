@@ -25,7 +25,7 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;white-sp
 <script>
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 fetch('data/dq.json',{cache:'no-store'}).then(r=>r.json()).then(d=>{
-  document.getElementById('s').innerHTML=`전체 ${d.companies.toLocaleString()}사 · 점검 ${d.checks.length}개 항목 · <a href="./">← 심사참고 DB</a>`;
+  document.getElementById('s').innerHTML=`전체 ${d.companies.toLocaleString()}사${d.spac_excluded?` (스팩 ${d.spac_excluded}사 제외)`:''} · 점검 ${d.checks.length}개 항목 · <a href="./">← 심사참고 DB</a>`;
   document.getElementById('b').innerHTML=d.checks.map(c=>{const p=c.companies/d.companies*100;
     return `<tr><td><b>${esc(c.check)}</b></td><td class="n">${c.companies.toLocaleString()}</td><td><div class="bar"><i style="width:${Math.min(100,p).toFixed(1)}%"></i></div><small>${p.toFixed(1)}%</small></td>
     <td class="ex">${c.examples.map(e=>`<a href="./#${esc(e.code)}" target="_blank">${esc(e.name)}${e.detail?` <small>${esc(e.detail)}</small>`:''}</a>`).join('')}</td></tr>`}).join('');

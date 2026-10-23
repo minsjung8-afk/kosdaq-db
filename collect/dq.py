@@ -19,7 +19,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def run(con=None, sample=12):
     con = con or connect()
+    import re
     names = {r[0]: (r[1], r[2], r[3], (r[4] or "")[:2]) for r in con.execute("SELECT corp_code, corp_name, stock_code, market, induty_code FROM company")}
+    spac = {cc for cc, v in names.items() if re.search(r"스팩|기업인수목적", v[0] or "")}   # 스팩: 매출·Capex·사업내용이 없는 게 정상 → 점검 제외
+    names = {cc: v for cc, v in names.items() if cc not in spac}
     issues = defaultdict(list)
 
     def add(key, cc, detail=""):
@@ -33,6 +36,8 @@ def run(con=None, sample=12):
         by[r["corp_code"]][r["fs_div"]] = dict(r)
     fin_ind = {"64", "65", "66"}
     for cc, d in by.items():
+        if cc in spac:
+            continue
         k = d.get("CFS") or d.get("OFS")
         ind = names.get(cc, ("", "", "", ""))[3]
         isfin = ind in fin_ind
@@ -70,6 +75,8 @@ def run(con=None, sample=12):
     for r in con.execute("SELECT corp_code, fs_div, bsns_year, reprt_code, revenue FROM fin_kpi WHERE revenue IS NOT NULL"):
         q[(r[0], r[1], r[2])][r[3]] = r[4]
     for (cc, fs, y), m in q.items():
+        if cc in spac:
+            continue
         q1, h, q3, a = m.get("11013"), m.get("11012"), m.get("11014"), m.get("11011")
         if (q1 and h and h < q1 * 0.98) or (h and q3 and q3 < h * 0.98) or (q3 and a and a < q3 * 0.98):
             add("분기 누적 역전(누적 오류 의심)", cc, f"{fs} {y}")
@@ -98,6 +105,8 @@ def run(con=None, sample=12):
             lat[key] = (r[2], o, r[3])
     ta = {(r[0], r[1], r[2], r[3]): r[4] for r in con.execute("SELECT corp_code, fs_div, bsns_year, reprt_code, total_assets FROM fin_kpi WHERE reprt_code<>'11011'")}
     for (cc, fs), (y, _, rc) in lat.items():
+        if cc in spac:
+            continue
         if ta.get((cc, fs, y, rc)) is None:
             add("최신 분기 재무상태표 없음", cc, f"{fs} {y} {rc}")
         py = str(int(y) - 1)
@@ -105,8 +114,8 @@ def run(con=None, sample=12):
             add("전년동기 재무상태표 없음", cc, f"{fs} {py} {rc}")
 
     total = len(names)
-    out = {"companies": total, "checks": []}
-    print(f"[dq] 데이터 품질 점검 — 전체 {total}사", flush=True)
+    out = {"companies": total, "spac_excluded": len(spac), "checks": []}
+    print(f"[dq] 데이터 품질 점검 — 전체 {total}사 (스팩 {len(spac)}사 제외)", flush=True)
     for key, lst in sorted(issues.items(), key=lambda x: -len({c for c, _ in x[1]})):
         ccs = sorted({c for c, _ in lst})
         ex = [{"code": names.get(c, ("", ""))[1], "name": names.get(c, ("?",))[0], "detail": dt} for c, dt in lst[:sample]]

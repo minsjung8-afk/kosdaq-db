@@ -196,16 +196,27 @@ def main():
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 차트 5년·전체 기간용
+        import os as _os
+        _cont = Path(__file__).resolve().with_name("continue.txt")
+        if a.hop < 8 and not _os.environ.get("KOSDAQ_IN_CHAIN"):   # 시작 시 미리 기록 → 170분 제한으로 중간에 끊겨도 워크플로가 catchup을 자동 재실행(정상 완료 시 삭제)
+            _cont.write_text(f"--hop {a.hop + 1} --steps catchup", encoding="utf-8")
         for name, fn in steps:
             if common.QUOTA_HIT and name not in ("price_backfill", "kpi", "summarize"):      # DART 한도 도달 시 DART 단계만 건너뜀(kpi 재계산·KRX 시세 백필은 진행)
                 print(f"[catchup] DART 한도 도달 — {name} 건너뜀(내일)", flush=True); continue
             print(f"[catchup] {name} 시작", flush=True)
             try:
                 fn()
+            except KeyboardInterrupt:        # 170분 제한(timeout INT) → 커밋·사이트 반영 후 다음 실행에서 catchup 이어하기(단계별 미수집분만 수집하므로 재개 가능)
+                con.commit(); print(f"[catchup] 제한 시간 도달 — {name} 중단, 다음 실행에서 자동 이어하기", flush=True)
+                publish(f"catchup {name} 부분")
+                break
             except Exception as e:  # noqa
                 print(f"[catchup] {name} 오류: {e}", flush=True)
             if name in ("biz", "summarize", "fin", "fin_ofs", "fin_yoy", "da", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
                 con.commit(); publish(f"catchup {name}")
+        else:   # 모든 단계 정상 완료 → 이어하기 불필요
+            if _cont.exists() and not _os.environ.get("KOSDAQ_IN_CHAIN"):
+                _cont.unlink()
     if a.job in ("price", "all"):
         import prices
         prices.run(pairs, a.year, start=a.start, markets=a.market)
@@ -240,7 +251,7 @@ def main():
         for si, st in enumerate(steps):
             nm, _, rest = st.partition(":")
             print(f"[chain] ▶ {nm} {rest}", flush=True)
-            p = subprocess.Popen([sys.executable, me, nm] + shlex.split(rest))
+            p = subprocess.Popen([sys.executable, me, nm] + shlex.split(rest), env={**os.environ, "KOSDAQ_IN_CHAIN": "1"})   # 하위 작업은 continue.txt를 직접 쓰지 않음(chain이 관리)
             last = time.time()
             try:
                 while p.poll() is None:

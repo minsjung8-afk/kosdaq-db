@@ -1,0 +1,19 @@
+name = "kosdaq-db-scheduler"
+main = "scheduler.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+GH_REPO = "minsjung8-afk/kosdaq-db"
+GH_REF = "main"
+
+# UTC 기준. scheduler.js의 TABLE과 문자열이 정확히 같아야 함
+[triggers]
+crons = [
+  "0 21 * * 0-4",
+  "30 21 * * 0-4",
+  "30 23 * * 0-4",
+  "10 15 * * *",
+  "30 20 2 * *",
+  "30 20 1,15 * *",
+  "0 19 * * 1,4",
+]
