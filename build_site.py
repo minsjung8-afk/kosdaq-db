@@ -439,7 +439,7 @@ _NOTES_SKIP = ("특수관계자", "계열회사", "매입채무", "제재")     
 _NOTES_ORDER = ("차입금", "사채", "우발", "담보", "보증", "약정", "소송", "리스", "파생", "금융부채")
 
 
-def _notes_raw(con, cc, per_sec=7000, total=24000):
+def _notes_raw(con, cc, per_sec=7000, total=30000):
     """notes_latest(주석 원문, zlib) → 절별 발췌 [{t,b}] — 비용 0. 절 우선순위: 차입금·사채·우발·담보·보증·약정·소송·리스·파생, 절당 7천자·합계 2.4만자 상한."""
     try:
         r = con.execute("SELECT rcept_no, report_nm, notes_z FROM notes_latest WHERE corp_code=?", (cc,)).fetchone()
@@ -457,15 +457,16 @@ def _notes_raw(con, cc, per_sec=7000, total=24000):
         if not t or not b or any(k in t.replace(" ", "") for k in _NOTES_SKIP):
             continue
         pri = next((i for i, k in enumerate(_NOTES_ORDER) if k in t.replace(" ", "")), 99)
-        secs.append((pri, t, b))
+        grp = "mezz" if re.search(r"전환사채|신주인수권|교환사채|파생|전환우선주|상환전환|복합금융", t.replace(" ", "")) else "debt"   # 메자닌 관련 절은 3-2로
+        secs.append((pri, t, b, grp))
     secs.sort(key=lambda x: x[0])
     out, used, trunc = [], 0, False
-    for _, t, b in secs:
+    for _, t, b, grp in secs:
         if used >= total:
             trunc = True; break
         if len(b) > per_sec:
             b = b[:per_sec] + " …(이하 생략)"; trunc = True
-        out.append({"t": t, "b": b}); used += len(b)
+        out.append({"t": t, "b": b, "g": grp}); used += len(b)
     return {"rcept_no": r["rcept_no"], "report_nm": r["report_nm"], "sections": out, "truncated": trunc} if out else None
 
 
