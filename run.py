@@ -217,11 +217,11 @@ def main():
                  ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
                  ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),
                  ("fin_yoy", lambda: financials.run_yoy(ccs, con=con)),       # 전년동기 BS 보강   # 별도 재무 보강(연결만 있는 회사)
-                 ("da", lambda: __import__("da_xbrl").run(con=con)),   # 상각비(XBRL 주석) — EBITDA 산출 불가 회사 보강
                  ("quarters", lambda: quarters.run(ccs, con=con)),
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
+                 ("da", lambda: __import__("da_xbrl").run(con=con)),   # 상각비(XBRL) — 건당 수초로 느려 분기·주석·요약 뒤로(2026-10-23)
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 차트 5년·전체 기간용
         import os as _os
         _cont = Path(__file__).resolve().with_name("continue.txt")

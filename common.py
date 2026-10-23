@@ -37,7 +37,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     except sqlite3.OperationalError:
         con.execute("PRAGMA journal_mode=DELETE")   # 네트워크/FUSE 마운트: WAL 불가
     con.executescript((ROOT / "schema.sql").read_text(encoding="utf-8"))
-    migrations = [("company", "sect_tp TEXT"), ("company", "corp_name_full TEXT"), ("company", "parval REAL")] + \
+    migrations = [("company", "sect_tp TEXT"), ("company", "corp_name_full TEXT"), ("company", "parval REAL"), ("company", "delisted_dt TEXT")] + \
                  [("price_summary", c) for c in ("chg_1w REAL", "chg_6m REAL", "chg_2y REAL", "chg_3y REAL")] + \
                  [("fin_kpi", c) for c in ("net_borrowings REAL", "da REAL", "ebitda REAL", "int_exp REAL",
                                            "interest_cover REAL", "borrow_dep REAL", "rcept_no TEXT",

@@ -446,6 +446,7 @@ def _site_meta(con, index):
         m["by_market"] = {}
         for it in index:
             m["by_market"][it.get("market") or "-"] = m["by_market"].get(it.get("market") or "-", 0) + 1
+        m["delisted"] = sum(1 for it in index if it.get("delisted"))
     except Exception:  # noqa
         pass
     m["fin_annual"] = one("SELECT COUNT(DISTINCT corp_code) FROM fin_kpi WHERE reprt_code='11011' AND (revenue IS NOT NULL OR total_assets IS NOT NULL)")
@@ -488,7 +489,7 @@ def build():
         ao = d["audit"][0] if d["audit"] else {}
         LONG = ("기업신용평가", "회사채", "사채")
         cur_rt = next((r for r in d["ratings"] if any(k in (r["target_type"] or "") for k in LONG)), None)
-        index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"],
+        index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"], "delisted": c.get("delisted_dt"),
                       "rev": k.get("revenue"), "op": k.get("op_income"), "debt": k.get("debt_ratio"),
                       "mcap": ps.get("mcap"), "opinion": ao.get("adt_opinion"), "year": k.get("bsns_year"),
                       "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None,

@@ -57,6 +57,7 @@ aside input:focus{outline:2px solid var(--navy2);outline-offset:-1px}
 .row .cd{color:var(--mute);font-size:11.5px;font-variant-numeric:tabular-nums}
 .row .sub{grid-column:1/-1;font-size:11px;color:#8a94a3;display:flex;gap:10px;flex-wrap:wrap}
 .mk{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;color:#fff;vertical-align:1px}.mk.KOSDAQ{background:var(--navy2)}.mk.KOSPI{background:#b23a3a}.mk.KONEX{background:#7b8699}
+.dl{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px;color:#fff;background:#6b7280;vertical-align:1px}.row.dlr .nm{color:var(--mute)}
 .rt{font-size:10.5px;padding:1px 7px;border-radius:20px;margin-left:6px;font-weight:700;color:var(--warn);border:1px solid #f0c9ae;background:var(--warn-bg);vertical-align:1px}
 /* 본문 */
 main{overflow:auto;min-width:0;padding:18px 24px 48px}
@@ -188,7 +189,7 @@ function renderBand(m){
   const qn={'03':'1분기','06':'반기','09':'3분기'};
   const lq=m.latest_q?`${m.latest_q.slice(0,4)} ${qn[m.latest_q.slice(5)]||''}보고서`:'';
   const cells=[
-    ['수록 회사',`${n(m.count)}개사`,['KOSPI','KOSDAQ','KONEX'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준'],
+    ['수록 회사',`${n(m.count)}개사`,(['KOSPI','KOSDAQ','KONEX'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준')+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'')],
     ['재무 기준',m.fin_year?`${m.fin_year} 사업보고서`:'-',(lq?`최신 ${lq.replace('보고서','')} · `:'')+`${n(m.fin_annual)}사 · DART`],
     ['분기 손익 (12분기)',`${n(m.fin_q)}사`,'누적 차감 복원 · LTM · DART'],
     ['주가 기준일',m.price_asof||'-','종가·거래량·시총 · KRX 일별시세'],
@@ -215,11 +216,12 @@ function sortList(l){
     rating:(a,b)=>{const x=rtScore(a.rating),y=rtScore(b.rating);if(x==null&&y==null)return a.name.localeCompare(b.name,'ko');if(x==null)return 1;if(y==null)return -1;return (y-x)||a.name.localeCompare(b.name,'ko')},
   }[sortKey];
   const out=[...l].sort(cmp);
+  const back=o=>o.filter(i=>!i.delisted).concat(o.filter(i=>i.delisted));   // 상장폐지 종목은 어떤 정렬에서도 맨 뒤(제외는 안 함)
   if(sortDesc){ // 값 없는 항목은 역순에서도 맨 뒤
     const has=i=>sortKey==='mcap'?nv(i.mcap)!=null:sortKey==='per'?nv(i.per)!=null:sortKey==='ev'?nv(i.ev_ebitda)!=null:sortKey==='rating'?rtScore(i.rating)!=null:true;
-    const a=out.filter(has).reverse(),b=out.filter(i=>!has(i)); return a.concat(b);
+    const a=out.filter(has).reverse(),b=out.filter(i=>!has(i)); return back(a.concat(b));
   }
-  return out;
+  return back(out);
 }
 function applyFilter(){
   const t=$('#q').value.trim().toLowerCase();
@@ -236,8 +238,8 @@ $('#q').addEventListener('input',applyFilter);
 document.querySelectorAll('.mbtn').forEach(b=>b.onclick=()=>{mkt=b.dataset.m;document.querySelectorAll('.mbtn').forEach(x=>x.classList.toggle('on',x===b));applyFilter()});
 function render(list){
   $('#cnt').textContent=`${list.length}개`;
-  $('#list').innerHTML=list.slice(0,300).map(i=>`<div class="row${cur===i.code?' on':''}" data-c="${i.code}">
-    <span class="nm"><span class="mk ${esc(i.market||'')}">${i.market==='KOSPI'?'코스피':i.market==='KONEX'?'코넥스':'코스닥'}</span>${esc(i.name)}${i.rating?`<span class="rt">${esc(i.rating)}</span>`:''}</span><span class="cd">${i.code}</span>
+  $('#list').innerHTML=list.slice(0,300).map(i=>`<div class="row${cur===i.code?' on':''}${i.delisted?' dlr':''}" data-c="${i.code}">
+    <span class="nm"><span class="mk ${esc(i.market||'')}">${i.market==='KOSPI'?'코스피':i.market==='KONEX'?'코넥스':'코스닥'}</span>${esc(i.name)}${i.delisted?`<span class="dl" title="KRX 상장 목록에서 제외 확인일 ${esc(i.delisted)} · 재무·공시 데이터는 보존">상장폐지</span>`:''}${i.rating?`<span class="rt">${esc(i.rating)}</span>`:''}</span><span class="cd">${i.code}</span>
     <span class="sub"><span>${esc(i.sector||'')}</span><span>시총 ${억(i.mcap)}억</span><span>매출 ${억(i.rev)}억</span><span>부채비율 ${pct(i.debt)}</span>${i.per!=null?`<span>PER ${Number(i.per).toFixed(1)}</span>`:''}${i.ev_ebitda!=null?`<span>EV/EBITDA ${Number(i.ev_ebitda).toFixed(1)}</span>`:''}${i.red?`<span class="neg">⚑${i.red}</span>`:''}${i.amber?`<span style="color:var(--warn)">⚑${i.amber}</span>`:''}${i.opinion&&i.opinion!=='적정'?`<span class="neg">${esc(i.opinion)}</span>`:''}</span></div>`).join('')
     +(list.length>300?'<div class="row"><span class="cd">상위 300개만 표시 · 검색어를 좁히세요</span></div>':'');
 }
@@ -254,7 +256,7 @@ async function open(code){
   const rtBadge=curRt?`<span class="pill" style="margin-left:10px;vertical-align:middle;font-size:14px;color:var(--accent);border-color:var(--accent)">${esc(curRt.grade)}${curRt.outlook?' '+esc(curRt.outlook):''}</span><span class="src" style="margin-left:6px">${esc(curRt.agency)} · ${curRt.disc_dt}</span>`:`<span class="src" style="margin-left:10px">유효 공시등급 없음</span>`;
   const fl=d.flags||[];
   const flagStrip=fl.length?`<div class="flags">${fl.map(([n,l,t])=>`<span class="flag ${l}" title="${esc(t)}">${esc(n)}${t?` <small>${esc(t)}</small>`:''}</span>`).join('')}</div>`:`<div class="flags"><span class="flag ok">경고 플래그 없음</span></div>`;
-  let h=`<h2>${esc(c.corp_name)}${rtBadge}</h2><div class="sub-title">${c.stock_code} · ${esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
+  let h=`<h2>${esc(c.corp_name)}${c.delisted_dt?'<span class="dl" style="font-size:12px;vertical-align:middle">상장폐지</span>':''}${rtBadge}</h2><div class="sub-title">${c.stock_code} · ${esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
   h+=flagStrip;
   h+=`<div class="tiles">
     <div class="tile"><div class="k">시가총액</div><div class="v">${억(ps.mcap)}<small>억</small></div><div class="d">${ps.asof||''}</div></div>
@@ -473,7 +475,7 @@ async function open(code){
     h+=`<div class="ptb"><button class="pbtn on" data-tf="D">일봉</button><button class="pbtn" data-tf="W">주봉</button><button class="pbtn" data-tf="M">월봉</button><span class="sp"></span><button class="pbtn" data-p="3m">3개월</button><button class="pbtn" data-p="6m">6개월</button><button class="pbtn on" data-p="1y">1년</button><button class="pbtn" data-p="3y">3년</button><button class="pbtn" data-p="5y">5년</button><button class="pbtn" data-p="all">전체</button><span class="sp"></span><span class="lbl">이평</span><button class="pbtn on" data-ma="5">5</button><button class="pbtn on" data-ma="20">20</button><button class="pbtn on" data-ma="60">60</button><button class="pbtn" data-ma="120">120</button><span class="lbl">휠 확대·축소 / 드래그 이동 / 더블클릭 초기화 · 3년 이전은 주봉 · 회색 = 거래정지일</span></div><div id="px"><div id="pxl"></div></div><div id="pxgap" class="src" style="margin-top:4px"></div>
       <div class="twrap" style="margin-top:10px"><table><tr><th>수익률</th>${rets.map(([n])=>`<th class="n">${n}</th>`).join('')}</tr><tr><td>기준일 ${ps.asof||'-'}</td>${rets.map(([,k])=>`<td class="n">${rc(ps[k])}</td>`).join('')}</tr></table></div>
       <div class="twrap" style="margin-top:10px"><table class="lbl kv8"><tr>
-        <td>거래소</td><td>${esc({KOSPI:'유가증권',KOSDAQ:'코스닥',KONEX:'코넥스'}[c.market]||c.market||'비상장')}${c.sect_tp?' <small style="color:var(--mute)">'+esc(c.sect_tp)+'</small>':''}</td><td>상장일</td><td>${c.listed_dt?esc(String(c.listed_dt).replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3')):'-'}</td>
+        <td>거래소</td><td>${esc({KOSPI:'유가증권',KOSDAQ:'코스닥',KONEX:'코넥스'}[c.market]||c.market||'비상장')}${c.delisted_dt?` <span class="dl">상장폐지</span> <small style="color:var(--mute)">KRX 목록 제외 확인 ${esc(c.delisted_dt)}</small>`:''}${c.sect_tp?' <small style="color:var(--mute)">'+esc(c.sect_tp)+'</small>':''}</td><td>상장일</td><td>${c.listed_dt?esc(String(c.listed_dt).replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3')):'-'}</td>
         <td>시가총액</td><td>${억(ps.mcap)}억</td><td>시가총액 순위</td><td>${d.industry_pos&&d.industry_pos.mcap?d.industry_pos.mcap.rank+'위 / '+d.industry_pos.mcap.n+'개사 (업종)':'-'}</td></tr><tr>
         <td>종가</td><td>${num(ps.close)}원 <small style="color:var(--mute)">(${ps.asof||'-'})</small></td><td>액면가</td><td>${c.parval?num(c.parval)+'원':'-'}</td>
         <td>발행주식수</td><td>${num(ps.shares_out)}주</td><td>평균거래량 (3M)</td><td>${num(Math.round(ps.avg_vol_3m||0))}주</td></tr><tr>

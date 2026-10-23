@@ -190,7 +190,13 @@ def targets(con, corp_codes=None):
     return list(pick.values())
 
 
-def run(corp_codes=None, limit=None, con=None, workers=4, debug=False):
+def _fetch_parse(rc, reprt_code, fs_div, debug=False):
+    """워커 스레드: 다운로드 + XML 파싱까지(메인 스레드는 DB 기록만) → 2026-10-23 속도 개선(15초/건 → 목표 5초/건)"""
+    xml = _fetch_zip(rc, reprt_code)
+    return xml is not None, (parse_da(xml, fs_div, debug=debug) if xml else None)
+
+
+def run(corp_codes=None, limit=None, con=None, workers=8, debug=False):
     from concurrent.futures import ThreadPoolExecutor
     from financials import build_kpi
     con = con or connect()
@@ -218,14 +224,13 @@ def run(corp_codes=None, limit=None, con=None, workers=4, debug=False):
     with ThreadPoolExecutor(workers) as ex:
         for b in range(0, len(ts), workers * 5):
             batch = ts[b:b + workers * 5]
-            futs = [(r, ex.submit(_fetch_zip, r["rc"], r["reprt_code"])) for r in batch]
+            futs = [(r, ex.submit(_fetch_parse, r["rc"], r["reprt_code"], r["fs_div"], debug)) for r in batch]
             stop = False
             for r, f in futs:
                 i += 1
                 key = (r["corp_code"], r["bsns_year"], r["reprt_code"], r["fs_div"])
                 try:
-                    xml = f.result()
-                    res = parse_da(xml, r["fs_div"], debug=debug) if xml else None
+                    xml, res = f.result()          # xml: XBRL 존재 여부(bool), res: 파싱 결과
                     if debug:
                         print(f"  {r['corp_code']} {r['bsns_year']} {r['reprt_code']} {r['fs_div']} rcept {r['rc']} → {'OK' if res else '없음'}", flush=True)
                     con.execute("INSERT OR REPLACE INTO da_xbrl VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",

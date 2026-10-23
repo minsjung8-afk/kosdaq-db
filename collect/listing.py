@@ -72,6 +72,23 @@ def run(limit=None, market="KOSDAQ", skip_existing=False):
                 moved += cur.rowcount
         if moved:
             con.commit(); print(f"[init] {market} 기존 종목 시장/명칭 갱신 {moved}건", flush=True)
+        # 상장폐지 탐지: 이 시장으로 기록된 종목이 KRX 목록(보통주)에 없으면 delisted_dt 기록 — 데이터는 삭제하지 않고 '비상장'처럼 표시만. 다시 나타나면 해제.
+        # 안전장치: KRX 응답이 비정상적으로 작으면(평소의 80% 미만) 대량 오탐 방지를 위해 건너뜀
+        if len(rows) >= 50:
+            cur_codes = {r["stock_code"] for r in rows}
+            mine = con.execute("SELECT stock_code, delisted_dt FROM company WHERE market=?", (market,)).fetchall()
+            if len(rows) >= len(mine) * 0.8:
+                today = now()[:10]
+                gone = [sc for sc, d in mine if sc not in cur_codes and not d]
+                back = [sc for sc, d in mine if sc in cur_codes and d]
+                for sc in gone:
+                    con.execute("UPDATE company SET delisted_dt=?, updated_at=? WHERE stock_code=?", (today, now(), sc))
+                for sc in back:
+                    con.execute("UPDATE company SET delisted_dt=NULL, updated_at=? WHERE stock_code=?", (now(), sc))
+                if gone or back:
+                    con.commit(); print(f"[init] {market} 상장폐지 표시 {len(gone)}건, 해제 {len(back)}건", flush=True)
+            else:
+                print(f"[init] {market} KRX 목록 {len(rows)}건 < 보유 {len(mine)}건×0.8 — 상장폐지 판정 건너뜀", flush=True)
     for i, r in enumerate(rows, 1):
         if i % 100 == 0:
             print(f"[init] {i}/{len(rows)} 처리, 적재 {n}", flush=True)
