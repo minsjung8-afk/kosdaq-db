@@ -222,7 +222,7 @@ def main():
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("da", lambda: __import__("da_xbrl").run(con=con)),   # 상각비(XBRL) — 건당 수초로 느려 분기·주석·요약 뒤로(2026-10-23)
-                 ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2016-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 차트 5년·전체 기간용
+                 ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2011-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 2011년까지(2026-10-23 사용자 요청) — KRX는 연속 호출 수백 건 후 차단되므로 야간 분할
         import os as _os
         _cont = Path(__file__).resolve().with_name("continue.txt")
         if a.hop < 8 and not _os.environ.get("KOSDAQ_IN_CHAIN"):   # 시작 시 미리 기록 → 170분 제한으로 중간에 끊겨도 워크플로가 catchup을 자동 재실행(정상 완료 시 삭제)

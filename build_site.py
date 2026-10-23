@@ -281,6 +281,7 @@ def company_detail(con, c):
         "quarters": _quarters(con, cc),
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
+        "notes_raw": _notes_raw(con, cc),
         "notes_struct": (lambda r: {"rcept_no": r[0]["rcept_no"], "report_nm": r[0]["report_nm"], **json.loads(r[0]["json"])} if r else None)(
             _safe_q(con, "SELECT rcept_no, report_nm, json FROM notes_struct WHERE corp_code=?", cc)),
         "valuation": _valuation(kpi, ps[0] if ps else None),
@@ -432,6 +433,40 @@ def _flags(c, kpi, ps, audit, events, ratings):
         if r0.get("watch") or (r0.get("outlook") and "부정" in r0["outlook"]):
             out.append(("등급전망 부정적/감시", "amber", f"{r0['agency']} {r0['grade']} {r0.get('outlook') or ''} {r0.get('watch') or ''}"))
     return out
+
+
+_NOTES_SKIP = ("특수관계자", "계열회사", "매입채무", "제재")      # 3-1 원문 발췌에서 제외(사용자 결정 2026-10-23: 특수관계자·계열 불필요)
+_NOTES_ORDER = ("차입금", "사채", "우발", "담보", "보증", "약정", "소송", "리스", "파생", "금융부채")
+
+
+def _notes_raw(con, cc, per_sec=7000, total=24000):
+    """notes_latest(주석 원문, zlib) → 절별 발췌 [{t,b}] — 비용 0. 절 우선순위: 차입금·사채·우발·담보·보증·약정·소송·리스·파생, 절당 7천자·합계 2.4만자 상한."""
+    try:
+        r = con.execute("SELECT rcept_no, report_nm, notes_z FROM notes_latest WHERE corp_code=?", (cc,)).fetchone()
+    except Exception:  # noqa
+        return None
+    if not r or not r["notes_z"]:
+        return None
+    from common import ztext
+    txt = ztext(r["notes_z"]) or ""
+    secs = []
+    for part in txt.split("\n### ")[0:]:
+        part = part[4:] if part.startswith("### ") else part
+        t, _, b = part.partition("\n")
+        t = t.strip(); b = b.strip()
+        if not t or not b or any(k in t.replace(" ", "") for k in _NOTES_SKIP):
+            continue
+        pri = next((i for i, k in enumerate(_NOTES_ORDER) if k in t.replace(" ", "")), 99)
+        secs.append((pri, t, b))
+    secs.sort(key=lambda x: x[0])
+    out, used, trunc = [], 0, False
+    for _, t, b in secs:
+        if used >= total:
+            trunc = True; break
+        if len(b) > per_sec:
+            b = b[:per_sec] + " …(이하 생략)"; trunc = True
+        out.append({"t": t, "b": b}); used += len(b)
+    return {"rcept_no": r["rcept_no"], "report_nm": r["report_nm"], "sections": out, "truncated": trunc} if out else None
 
 
 def _site_meta(con, index):
