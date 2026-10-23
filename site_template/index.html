@@ -435,9 +435,31 @@ async function open(code){
   // 3-1 기발행 메자닌 (CB·BW·EB·종류주식): 미상환 현황(정기보고서) + 발행결정(주요사항보고서)을 회차로 합쳐 한 표
   {
   // 3-1 차입금·우발채무·계열 (사업보고서 주석·DART 공시 — 수집 전까지 안내)
-  {const dl=d.debt_detail, cg=d.contingent, gr=d.group;
-   h+=`<section data-sec="3-1"><h3>3-1. 차입금 · 우발채무 · 계열 <small>사업보고서 주석 · DART 공시</small></h3>`;
-   if(!dl&&!cg&&!gr) h+=`<div class="src" style="padding:4px 0 2px">차입금 만기구조 · 금융기관별 차입 · 우발채무(보증·담보·소송·약정) · 계열 지배구조 — <b>수집 예정</b>(사업보고서 주석 파싱 + DART 계열회사 API). 현재는 3. 재무현황의 총차입금·순차입금과 5. 공시 타임라인의 담보제공·소송 키워드를 참고하세요.</div>`;
+  {const ns=d.notes_struct;
+   h+=`<section data-sec="3-1"><h3>3-1. 차입금 · 우발채무 · 계열 <small>최신 정기보고서 재무제표 주석 · AI 구조화</small></h3>`;
+   const nr=d.notes_raw;
+   if(!ns&&!nr) h+=`<div class="src" style="padding:4px 0 2px">차입금 만기구조 · 금융기관별 차입 · 우발채무(보증·담보·소송·약정) — 최신 정기보고서 주석 수집 후 표시. 현재는 3. 재무현황의 총차입금·순차입금과 5. 공시 타임라인의 담보제공·소송 키워드를 참고하세요.</div>`;
+   if(ns){
+     const A=v=>v==null||v===''?'-':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:1});   // 억원(구조화 단계에서 환산)
+     const T=(title,cols,rows,cell)=>rows&&rows.length?`<div class="src" style="margin:8px 0 2px"><b>${title}</b> · ${rows.length}건</div><div class="twrap"><table class="fin" style="width:100%"><tr>${cols.map(c=>`<th${/금액|한도|사용|잔액|억/.test(c)?' class="n"':''}>${c}</th>`).join('')}</tr>${rows.map(cell).join('')}</table></div>`:'';
+     const mp=ns.maturity_profile||{}; const mpv=[mp.within_1y,mp.y1_2,mp.y2_5,mp.over_5y]; const mpt=mpv.reduce((a,b)=>a+(Number(b)||0),0);
+     h+=`<div class="src" style="margin:2px 0 6px">기준 <b>${esc(ns.report_nm||'')}</b> ${ns.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${ns.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · ${esc(ns.basis||'')} 기준 · 보고기간 말 ${esc(ns.as_of||'-')} · 금액 억원 · <b>AI(Haiku) 추출 — 금액·기관명은 원문 대조 필요</b></div>`;
+     if(ns.key_risks&&ns.key_risks.length) h+=`<div style="margin:0 0 8px;padding:8px 12px;border:1px solid #f0c9ae;background:var(--warn-bg);border-radius:6px"><b style="color:var(--warn)">심사 유의</b><ul style="margin:4px 0 0 18px;padding:0">${ns.key_risks.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>`;
+     if(mpt) h+=`<div class="src" style="margin:4px 0 2px"><b>차입금 만기구조</b> (억원)</div><div class="twrap"><table class="fin" style="width:100%"><tr><th>1년 이내</th><th>1~2년</th><th>2~5년</th><th>5년 초과</th><th>합계</th></tr><tr>${mpv.map(v=>`<td class="n" style="font-weight:400;background:#fff!important;color:inherit">${A(v)}${mpt?` <small style="color:var(--mute)">(${(Number(v||0)/mpt*100).toFixed(0)}%)</small>`:''}</td>`).join('')}<td class="n"><b>${A(mpt)}</b></td></tr></table></div>`;
+     h+=T('차입금·사채 명세',['구분','차입처','금리(%)','만기','금액(억)','담보·보증'],ns.borrowings,b=>`<tr><td>${esc(b.type)}</td><td style="font-weight:400;background:#fff!important;color:inherit">${esc(b.lender)}</td><td class="n">${b.rate_pct==null?'-':esc(b.rate_pct)}</td><td>${esc(b.maturity)}</td><td class="n">${A(b.amount)}</td><td>${esc(b.secured)}</td></tr>`);
+     h+=T('약정 한도',['은행','종류','한도(억)','사용(억)','소진율'],ns.credit_lines,c=>`<tr><td>${esc(c.bank)}</td><td style="font-weight:400;background:#fff!important;color:inherit">${esc(c.type)}</td><td class="n">${A(c.limit)}</td><td class="n">${A(c.used)}</td><td class="n">${c.limit&&c.used!=null?(Number(c.used)/Number(c.limit)*100).toFixed(0)+'%':'-'}</td></tr>`);
+     h+=T('담보 제공',['제공자산','담보권자','금액(억)','목적'],ns.collateral_provided,c=>`<tr><td>${esc(c.asset)}</td><td style="font-weight:400;background:#fff!important;color:inherit">${esc(c.secured_party)}</td><td class="n">${A(c.amount)}</td><td>${esc(c.purpose)}</td></tr>`);
+     h+=T('지급보증 제공',['피보증인','채권자','금액(억)','비고'],ns.guarantees_provided,g=>`<tr><td>${esc(g.beneficiary)}</td><td style="font-weight:400;background:#fff!important;color:inherit">${esc(g.creditor)}</td><td class="n">${A(g.amount)}</td><td>${esc(g.note)}</td></tr>`);
+     h+=T('보증 수혜',['보증인','금액(억)','비고'],ns.guarantees_received,g=>`<tr><td>${esc(g.guarantor)}</td><td class="n">${A(g.amount)}</td><td>${esc(g.note)}</td></tr>`);
+     h+=T('소송',['지위','내용','금액(억)','진행'],ns.litigation,l=>`<tr><td>${esc(l.role)}</td><td style="font-weight:400;background:#fff!important;color:inherit;white-space:normal">${esc(l.desc)}</td><td class="n">${A(l.amount)}</td><td>${esc(l.status)}</td></tr>`);
+     if(ns.other_commitments&&ns.other_commitments.length) h+=`<div class="src" style="margin:8px 0 2px"><b>기타 약정·우발</b></div><ul style="margin:0 0 0 18px;padding:0;font-size:12.5px">${ns.other_commitments.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
+     if(ns.summary_md) h+=`<div style="margin:10px 0 0;padding:8px 12px;border:1px solid var(--line);background:var(--panel);border-radius:6px;font-size:12.5px;white-space:pre-wrap">${esc(ns.summary_md)}</div>`;
+   }
+   if(nr&&nr.sections&&nr.sections.length){   // 주석 원문 발췌(비용 0): 절 제목별 접기 — 구조화 결과의 대조용 또는 구조화 전 1차 자료
+     const KW=/(차입금|사채|우발|담보|보증|약정|소송|리스|파생|만기|한도|연체|기한의 이익)/g;
+     h+=`<div class="src" style="margin:${ns?'12px':'2px'} 0 4px"><b>주석 원문 발췌</b> · ${esc(nr.report_nm||'')} ${nr.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${nr.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · 차입금·사채·우발채무·담보·보증·약정·소송·리스 절만 · 표는 평문으로 펼쳐져 있어 숫자 열 순서는 원문 확인${nr.truncated?' · 일부 절은 길이 제한으로 잘림':''}</div>`;
+     h+=nr.sections.map(sec=>`<details style="margin:0 0 4px;border:1px solid var(--line);border-radius:6px;background:#fbfcfe"><summary style="cursor:pointer;padding:6px 10px;font-weight:700;font-size:12.5px;color:var(--navy2)">${esc(sec.t)} <small style="color:var(--mute);font-weight:400">${(sec.b||'').length.toLocaleString()}자</small></summary><div style="padding:4px 12px 10px;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:420px;overflow:auto">${esc(sec.b).replace(KW,'<mark style="background:#fff1c2;padding:0 1px">$1</mark>')}</div></details>`).join('');
+   }
    h+=`</section>`;}
     const mo=d.mezz_out||[], mi=d.mezz_issue||[];
     h+=`<section><h3>3-2. 기발행 메자닌 (CB · BW · EB · 종류주식)</h3>`;
