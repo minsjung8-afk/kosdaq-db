@@ -7,23 +7,23 @@
  *   GH_REPO   : "minsjung8-afk/kosdaq-db" (vars)
  *   GH_REF    : "main" (vars)
  *
- * 크론은 UTC 기준(wrangler.toml). 아래 표의 KST ↔ UTC 매핑으로 job을 고른다.
- *   21:00 UTC 일~목 = 06:00 KST 월~금  daily   (시세+대용가+델타)
+ * 크론은 UTC 기준(wrangler.toml). 요일은 Cloudflare 규칙 1=일요일 … 7=토요일 (GitHub cron의 0=일요일과 다름). 아래 표의 KST ↔ UTC 매핑으로 job을 고른다.
+ *   21:00 UTC 일~목(1-5) = 06:00 KST 월~금  daily   (시세+대용가+델타)
  *   21:30 UTC 일~목 = 06:30 KST        subst   (대용가 재조회)
  *   23:30 UTC 일~목 = 08:30 KST        daily   (06:00 보완)
  *   15:10 UTC 매일  = 00:10 KST        catchup (미수집분)
  *   20:30 UTC 2일   = 05:30 KST 2일    fin
  *   20:30 UTC 1·15일= 05:30 KST        rating
- *   19:00 UTC 월·목 = 04:00 KST 화·금  news
+ *   19:00 UTC 월·목(2,5) = 04:00 KST 화·금  news
  */
 const TABLE = [
-  { cron: "0 21 * * 0-4",  job: "daily" },
-  { cron: "30 21 * * 0-4", job: "subst" },
-  { cron: "30 23 * * 0-4", job: "daily" },
+  { cron: "0 21 * * 1-5",  job: "daily" },
+  { cron: "30 21 * * 1-5", job: "subst" },
+  { cron: "30 23 * * 1-5", job: "daily" },
   { cron: "10 15 * * *",   job: "catchup" },
   { cron: "30 20 2 * *",   job: "fin" },
   { cron: "30 20 1,15 * *", job: "rating" },
-  { cron: "0 19 * * 1,4",  job: "news" },
+  { cron: "0 19 * * 2,5",  job: "news" },
 ];
 
 async function dispatch(env, job, args = "") {

@@ -6,14 +6,14 @@ compatibility_date = "2026-01-01"
 GH_REPO = "minsjung8-afk/kosdaq-db"
 GH_REF = "main"
 
-# UTC 기준. scheduler.js의 TABLE과 문자열이 정확히 같아야 함
+# UTC 기준. 요일은 Cloudflare 규칙(1=일 … 7=토; GitHub의 0-4 ≠ 여기 1-5). scheduler.js의 TABLE과 문자열이 정확히 같아야 함
 [triggers]
 crons = [
-  "0 21 * * 0-4",
-  "30 21 * * 0-4",
-  "30 23 * * 0-4",
+  "0 21 * * 1-5",
+  "30 21 * * 1-5",
+  "30 23 * * 1-5",
   "10 15 * * *",
   "30 20 2 * *",
   "30 20 1,15 * *",
-  "0 19 * * 1,4",
+  "0 19 * * 2,5",
 ]
