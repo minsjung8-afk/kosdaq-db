@@ -191,9 +191,18 @@ def targets(con, corp_codes=None):
 
 
 def _fetch_parse(rc, reprt_code, fs_div, debug=False):
-    """워커 스레드: 다운로드 + XML 파싱까지(메인 스레드는 DB 기록만) → 2026-10-23 속도 개선(15초/건 → 목표 5초/건)"""
+    """워커 스레드: 다운로드 + XML 파싱까지(메인 스레드는 DB 기록만) → 2026-10-23 속도 개선(15초/건 → 목표 5초/건)
+    반환: (xbrl 존재 여부, {fs_div: 결과}) — 같은 XBRL에 연결·별도가 모두 들어 있어 한 번 내려받아 둘 다 파싱(다운로드 절반)"""
     xml = _fetch_zip(rc, reprt_code)
-    return xml is not None, (parse_da(xml, fs_div, debug=debug) if xml else None)
+    if not xml:
+        return False, {}
+    out = {}
+    for fs in ("CFS", "OFS"):
+        try:
+            out[fs] = parse_da(xml, fs, debug=debug and fs == fs_div)
+        except Exception:  # noqa
+            out[fs] = None
+    return True, out
 
 
 def run(corp_codes=None, limit=None, con=None, workers=8, debug=False):
@@ -230,7 +239,18 @@ def run(corp_codes=None, limit=None, con=None, workers=8, debug=False):
                 i += 1
                 key = (r["corp_code"], r["bsns_year"], r["reprt_code"], r["fs_div"])
                 try:
-                    xml, res = f.result()          # xml: XBRL 존재 여부(bool), res: 파싱 결과
+                    xml, both = f.result()         # xml: XBRL 존재 여부(bool), both: {CFS: 결과, OFS: 결과}
+                    res = both.get(r["fs_div"])
+                    other = "OFS" if r["fs_div"] == "CFS" else "CFS"
+                    if xml and con.execute("SELECT 1 FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND da IS NULL",
+                                           (r["corp_code"], r["bsns_year"], r["reprt_code"], other)).fetchone():   # 반대편 재무제표도 같은 보고서면 함께 기록
+                        o = both.get(other)
+                        con.execute("INSERT OR REPLACE INTO da_xbrl VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                    (r["corp_code"], r["bsns_year"], r["reprt_code"], other, *((o["dep"], o["amort"], o["rou"], o["da"], o["tag"]) if o else (None,) * 5),
+                                     r["rc"], "ok" if o else "notag", now()))
+                        if o:
+                            ok += 1
+                            build_kpi(con, r["corp_code"], r["bsns_year"], r["reprt_code"])
                     if debug:
                         print(f"  {r['corp_code']} {r['bsns_year']} {r['reprt_code']} {r['fs_div']} rcept {r['rc']} → {'OK' if res else '없음'}", flush=True)
                     con.execute("INSERT OR REPLACE INTO da_xbrl VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",

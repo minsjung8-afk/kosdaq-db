@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -251,6 +251,14 @@ def main():
         import summarize
         # 등급 보유사 = 신용평가서+사업보고서 통합(항목별 근거), 나머지 = 사업보고서 — 병렬·재개 가능
         summarize.run_all(set(ccs) if a.codes else None, model=a.model, force=a.force, limit=a.limit)
+    if a.job == "notes":                      # 주석 원문(차입금·우발채무·약정·담보·보증·소송·특수관계자·계열) — 최신 정기보고서, 회사당 1~2콜 (chain에서 단독 실행용; catchup의 notes 단계와 동일)
+        import business
+        have = {r[0] for r in con.execute("SELECT corp_code FROM notes_latest")} if con.execute("SELECT name FROM sqlite_master WHERE name='notes_latest'").fetchone() else set()
+        business.run_notes(con, [c for c in ccs if c not in have], limit=a.limit)
+    if a.job == "invest":                     # 타법인 출자 현황 — 최신 분기보고서 기준 갱신
+        import business
+        have = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM other_invest WHERE reprt_code IN ('11012','11013','11014')")}
+        business.refresh_other_investments(con, [c for c in ccs if c not in have], a.year - 1)
     if a.job == "notes_struct":               # 3-1 차입금·우발채무·계열 구조화(Haiku, DART 호출 없음)
         import notes_struct
         notes_struct.run(set(ccs) if a.codes else None, limit=a.limit, con=con, force=a.force)

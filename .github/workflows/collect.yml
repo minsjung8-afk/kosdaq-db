@@ -15,7 +15,7 @@ on:
         description: "run.py job"
         default: "price"
         type: choice
-        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted, quarters, subst, fin_fast, rating_fix, da, chain, fin_ofs, fin_yoy, notes_struct, newlist]
+        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted, quarters, subst, fin_fast, rating_fix, da, chain, fin_ofs, fin_yoy, notes_struct, newlist, notes, invest]
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only / unlisted: --type 기업신용평가)"
         default: ""
@@ -23,7 +23,7 @@ on:
         description: "이전 실행의 DB 아티팩트로 복원 (run id, 선택)"
         default: ""
       restore_key:
-        description: "R2 백업 키로 복원 (예: backup/kosdaq-20261022.db.gz, 선택) — 복원 후 최신본으로 다시 올림"
+        description: "R2 백업 키로 복원 (예: backup/kosdaq-20261022.db.gz 또는 weekly/kosdaq-20261019.db.gz, 선택) — 복원 후 최신본으로 다시 올림"
         default: ""
 concurrency:
   # DB를 쓰는 작업은 한 번에 하나(뒤 실행은 대기). unlisted(드라이런, DB 읽기만)는 별도 그룹이라 병렬 실행 가능
@@ -65,6 +65,9 @@ jobs:
               for key in $(aws s3 ls "s3://$R2_BUCKET/backup/" --endpoint-url "$R2_EP" 2>/dev/null | awk '{print $4}' | sort -r | head -5); do
                 r2get "backup/$key" && { SRC="R2 backup/$key"; break; }
               done
+              if [ -z "$SRC" ]; then for key in $(aws s3 ls "s3://$R2_BUCKET/weekly/" --endpoint-url "$R2_EP" 2>/dev/null | awk '{print $4}' | sort -r | head -3); do
+                r2get "weekly/$key" && { SRC="R2 weekly/$key"; break; }
+              done; fi
             fi
           else
             for id in $(gh run list -w collect.yml -s success -L 15 --json databaseId -q '.[].databaseId'); do
@@ -154,8 +157,17 @@ jobs:
           aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/backup/kosdaq-$D.db.gz" --endpoint-url "$R2_EP" --only-show-errors
           CUT=$(TZ=Asia/Seoul date -d '14 days ago' +%Y%m%d)
           aws s3 ls "s3://$R2_BUCKET/backup/" --endpoint-url "$R2_EP" | awk '{print $4}' | while read f; do
-            d=$(echo "$f" | sed -E 's/kosdaq-([0-9]{8}).*/\1/'); if [ -n "$d" ] && [ "$d" -lt "$CUT" ]; then aws s3 rm "s3://$R2_BUCKET/backup/$f" --endpoint-url "$R2_EP"; fi
+            d=$(echo "$f" | sed -nE 's/^kosdaq-([0-9]{8})\.db\.gz$/\1/p'); if [ -n "$d" ] && [ "$d" -lt "$CUT" ]; then aws s3 rm "s3://$R2_BUCKET/backup/$f" --endpoint-url "$R2_EP"; fi
           done || true
+          # 주간 백업(2026-10-23 추가): 이번 주 월요일 날짜로 weekly/ 에 1개(주 첫 실행 때만 기록, 그 주엔 덮어쓰지 않음) × 8주 보관 → 일자별 14일 백업으로 못 돌아가는 오래된 오염도 복구 가능
+          MON=$(TZ=Asia/Seoul date -d "$D -$(( $(TZ=Asia/Seoul date -d "$D" +%u) - 1 )) days" +%Y%m%d)
+          if ! aws s3 ls "s3://$R2_BUCKET/weekly/kosdaq-$MON.db.gz" --endpoint-url "$R2_EP" >/dev/null 2>&1; then
+            aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/weekly/kosdaq-$MON.db.gz" --endpoint-url "$R2_EP" --only-show-errors && echo "주간 백업 기록: weekly/kosdaq-$MON.db.gz"
+            WCUT=$(TZ=Asia/Seoul date -d '56 days ago' +%Y%m%d)
+            aws s3 ls "s3://$R2_BUCKET/weekly/" --endpoint-url "$R2_EP" | awk '{print $4}' | while read f; do
+              d=$(echo "$f" | sed -nE 's/^kosdaq-([0-9]{8})\.db\.gz$/\1/p'); if [ -n "$d" ] && [ "$d" -lt "$WCUT" ]; then aws s3 rm "s3://$R2_BUCKET/weekly/$f" --endpoint-url "$R2_EP"; fi
+            done || true
+          fi
           echo "R2 저장 완료: kosdaq.db.gz, backup/kosdaq-$D.db.gz"; echo "R2=1" >> $GITHUB_ENV
       - name: keep db artifact (R2 미설정 시 대체)
         if: always() && env.R2 != '1' && env.DB_OK == '1'
