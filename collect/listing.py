@@ -63,6 +63,15 @@ def run(limit=None, market="KOSDAQ", skip_existing=False):
         rows = rows[:limit] if krx_ok else rows  # DART 경로는 전체를 훑어야 코스닥만 걸러짐
     n = 0
     print(f"[init] {market} 대상 {len(rows)}개 (KRX {'ok' if krx_ok else 'fail→DART'})", flush=True)
+    if skip_existing and krx_ok:   # 이미 있는 종목의 시장 이전(코스닥→코스피 등)·종목명 변경만 반영 (DART 호출 없음)
+        moved = 0
+        for r in rows:
+            if r["stock_code"] in existing:
+                cur = con.execute("UPDATE company SET market=?, corp_name=COALESCE(NULLIF(?,''), corp_name), updated_at=? WHERE stock_code=? AND (market IS NULL OR market<>? OR corp_name<>COALESCE(NULLIF(?,''), corp_name))",
+                                  (market, r.get("corp_name"), now(), r["stock_code"], market, r.get("corp_name")))
+                moved += cur.rowcount
+        if moved:
+            con.commit(); print(f"[init] {market} 기존 종목 시장/명칭 갱신 {moved}건", flush=True)
     for i, r in enumerate(rows, 1):
         if i % 100 == 0:
             print(f"[init] {i}/{len(rows)} 처리, 적재 {n}", flush=True)

@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -158,6 +158,33 @@ def main():
     if a.job == "delta":
         import delta
         delta.run(days=a.limit)
+    if a.job in ("daily", "newlist"):         # 신규 상장 탐지: KRX 종목기본정보에 있는데 company에 없는 종목 → 개황 적재 후 미니 파이프라인(당일 사이트 반영)
+        import listing
+        before = {r[0] for r in con.execute("SELECT corp_code FROM company")}
+        for m in a.market:
+            try:
+                listing.run(market=m, skip_existing=True)
+            except Exception as e:  # noqa
+                print(f"[newlist] {m} 상장목록 갱신 실패: {e}", flush=True)
+        pairs = corp_pairs(con, a.limit); ccs = [p[0] for p in pairs]          # 신규분 포함해 다시 계산(아래 시세 요약에도 반영)
+        new = [c for c in ccs if c not in before]
+        if new:
+            names = {r[0]: f"{r[1]}({r[2]}·{r[3]})" for r in con.execute("SELECT corp_code, corp_name, stock_code, market FROM company")}
+            print(f"[newlist] 신규 상장 {len(new)}사: " + ", ".join(names.get(c, c) for c in new), flush=True)
+            import financials, quarters, business, mezz, fss_rating
+            for nm, fn in (("fin", lambda: financials.run_annual_fast(new, a.year - 1, con=con)),      # 직전 연도 사업보고서(없으면 skip 기록)
+                           ("fin_ofs", lambda: financials.run_ofs(new, a.year - 1, con=con)),
+                           ("quarters", lambda: quarters.run(new, con=con)),                          # 상장 후 첫 분기·반기보고서
+                           ("biz", lambda: business.run(new, a.year - 1)),                             # 사업내용·주주·감사의견(사업보고서 없으면 fail 기록)
+                           ("mezz", lambda: mezz.run(set(new), new_only=True)),
+                           ("rating", lambda: fss_rating.run(set(new))),
+                           ("summarize", lambda: __import__("summarize").run_all(set(new), model="haiku", force=False))):
+                try:
+                    print(f"[newlist] {nm} 시작 ({len(new)}사)", flush=True); fn(); con.commit()
+                except Exception as e:  # noqa
+                    print(f"[newlist] {nm} 오류: {e}", flush=True)
+        else:
+            print("[newlist] 신규 상장 없음", flush=True)
     if a.job == "daily":                     # 평일 아침: 시세 + 수시공시 델타(전환청구·리픽싱·5%보고·주요이벤트)
         import prices, delta, subst
         prices.run(pairs, a.year, markets=a.market)
