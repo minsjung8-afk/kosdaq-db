@@ -31,5 +31,6 @@ Worker가 안정적으로 돌면 `.github/workflows/collect.yml`의 `schedule:` 
 그 전까지는 둘 다 켜 두어도 무방 — concurrency 그룹이 같은 job 중복을 대기열로 막습니다.
 
 ## 운영 메모
-- 시간을 바꾸려면 `wrangler.toml`의 crons와 `scheduler.js`의 TABLE을 **같이** 수정(문자열 일치 필요) 후 `npx wrangler@3 deploy`.
+- 시간을 바꾸려면 `scheduler.js`의 TABLE(KST, 시·분·요일·일)만 수정 후 `npx wrangler@3 deploy`. 분은 0·10·30 중 하나여야 함(크론이 그 시각에만 깨어남; 다른 분이 필요하면 wrangler.toml crons도 수정).
+- 무료 플랜은 계정당 크론 트리거 5개 제한 → 이 Worker는 1개만 사용.
 - 토큰 만료 시 `npx wrangler@3 secret put GH_TOKEN` 으로 교체.
