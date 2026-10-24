@@ -282,6 +282,7 @@ def company_detail(con, c):
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
         "notes_raw": _notes_raw(con, cc),
+        "borrow_bd": _safe(lambda: _borrow_bd(con, cc)),
         "notes_struct": (lambda r: {"rcept_no": r[0]["rcept_no"], "report_nm": r[0]["report_nm"], **json.loads(r[0]["json"])} if r else None)(
             _safe_q(con, "SELECT rcept_no, report_nm, json FROM notes_struct WHERE corp_code=?", cc)),
         "valuation": _valuation(kpi, ps[0] if ps else None),
@@ -437,6 +438,51 @@ def _flags(c, kpi, ps, audit, events, ratings):
 
 _NOTES_SKIP = ("특수관계자", "계열회사", "매입채무", "제재")      # 3-1 원문 발췌에서 제외(사용자 결정 2026-10-23: 특수관계자·계열 불필요)
 _NOTES_ORDER = ("차입금", "사채", "우발", "담보", "보증", "약정", "소송", "리스", "파생", "금융부채")
+
+
+def _borrow_bd(con, cc):
+    """3-1 차입금 현황(사용자 요청 2026-10-24): 재무상태표 계정으로 차입금·사채·리스 × 유동/비유동을 연간 3개년 + 최근 분기로.
+    DART 호출 0 — fin_raw(BS) 재분류. 합계는 KPI 총차입금과 같은 규칙(financials.borrow_items)."""
+    from financials import borrow_items
+    out = {}
+    acc = 12
+    try:
+        a = con.execute("SELECT acc_mt FROM company WHERE corp_code=?", (cc,)).fetchone()
+        acc = int(a[0]) if a and a[0] else 12
+    except Exception:  # noqa
+        pass
+    Q = {"11013": 1, "11012": 2, "11014": 3}
+    def plabel(year, rc):
+        if rc == "11011":
+            return year
+        mm = ((acc + 3 * Q.get(rc, 0) - 1) % 12) + 1
+        return f"{year}.{mm:02d}"
+    for fs in ("CFS", "OFS"):
+        per = con.execute("""SELECT bsns_year, reprt_code, MAX(rcept_no) rc FROM fin_raw WHERE corp_code=? AND fs_div=? AND sj_div='BS'
+                             GROUP BY bsns_year, reprt_code""", (cc, fs)).fetchall()
+        if not per:
+            continue
+        ann = sorted([p for p in per if p[1] == "11011"], key=lambda p: p[0])[-3:]
+        inter = sorted([p for p in per if p[1] != "11011"], key=lambda p: (p[0], Q.get(p[1], 0)))
+        cols = ann + ([inter[-1]] if inter and (not ann or (inter[-1][0], 1) >= (ann[-1][0], 1)) else [])
+        res = []
+        for y, rc, rcept in cols:
+            rows = [dict(r) for r in con.execute("SELECT sj_div, account_id, account_nm, thstrm_amount, ord FROM fin_raw WHERE corp_code=? AND fs_div=? AND bsns_year=? AND reprt_code=?", (cc, fs, y, rc))]
+            items = borrow_items(rows)
+            if not items:
+                continue
+            agg = {}
+            for it in items:
+                k = "사채" if it["kind"] in ("일반사채", "CB", "BW", "EB", "CP") else it["kind"]
+                c = it["cur"] or "미구분"
+                agg.setdefault(k, {}); agg[k][c] = agg[k].get(c, 0) + it["amt"]
+            cash = con.execute("SELECT cash, ebitda FROM fin_kpi WHERE corp_code=? AND fs_div=? AND bsns_year=? AND reprt_code=?", (cc, fs, y, rc)).fetchone()
+            res.append({"label": plabel(y, rc), "year": y, "rc": rc, "rcept_no": rcept, "interim": rc != "11011",
+                        "k": agg, "total": sum(i["amt"] for i in items), "cash": cash[0] if cash else None, "ebitda": cash[1] if cash else None,
+                        "detail": [[i["nm"], i["kind"], i["cur"], i["amt"]] for i in items]})
+        if res:
+            out[fs] = res
+    return out or None
 
 
 def _notes_raw(con, cc, per_sec=7000, total=30000):
