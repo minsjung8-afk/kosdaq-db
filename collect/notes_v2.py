@@ -120,21 +120,43 @@ _ROW_DA = re.compile(r"(감가상각|상각비|상각액|상각)")
 _ROW_EX = re.compile(r"(누계|충당|손상|환입|누적|취득|처분|대체|기초|기말|평가|재분류|환율|외화|매각|계정|이연)")
 
 
+def _hdr_match(cell):
+    c = (cell or "").replace(" ", "")
+    return bool(_ROW_DA.search(c)) and not _ROW_EX.search(c)
+
+
 def _da_from_table(tbl):
-    """변동표 1개 → (값, 열 라벨) 상각비 행의 '합계/계' 열 우선, 없으면 마지막 숫자 열. 값은 절대값(원 단위 환산)."""
-    rows, unit = tbl["rows"], tbl.get("unit", 1)
-    hdr = rows[0] if rows else []
-    tot_idx = next((i for i, h in enumerate(hdr) if re.search(r"^(합\s*계|계|총\s*계|합계액)$", h.replace(" ", "")) or re.search(r"합계", h)), None)
+    """변동표 1개 → 상각비(원 단위 절대값) 또는 None.
+    ① 열 방향(흔함): 머리글(1~2행)에 '감가상각비/상각' 열이 있고 행이 자산 종류 → '합계/계' 행의 그 열, 없으면 자산 행 합산
+    ② 행 방향: 첫 열이 '감가상각비/상각' 인 행 → '합계/계' 열, 없으면 마지막 숫자 열"""
+    rows, unit = tbl["rows"], tbl.get("unit", 1) or 1
+    if not rows:
+        return None
+    # ① 열 방향
+    for hi in (0, 1):
+        if hi >= len(rows):
+            break
+        hdr = rows[hi]
+        cols = [i for i, h in enumerate(hdr) if _hdr_match(h)]
+        if not cols:
+            continue
+        ci = cols[0]
+        body = rows[hi + 1:]
+        tot = next((r for r in body if r and re.search(r"^(합\s*계|총\s*계|계)$", r[0].replace(" ", "")) or (r and re.search(r"합계|총계", r[0].replace(" ", "")))), None)
+        if tot and ci < len(tot) and _num(tot[ci]) is not None:
+            return abs(_num(tot[ci]) * unit)
+        vals = [_num(r[ci]) for r in body if ci < len(r) and _num(r[ci]) is not None and not re.search(r"기초|기말|취득원가|장부금액", (r[0] or "").replace(" ", ""))]
+        if vals:
+            return abs(sum(vals) * unit)
+    # ② 행 방향
+    hdr = rows[0]
+    tot_idx = next((i for i, h in enumerate(hdr) if i > 0 and re.search(r"합계|총계|^계$", h.replace(" ", ""))), None)
     for r in rows[1:]:
-        if not r:
+        if not r or not _hdr_match(r[0]):
             continue
-        label = r[0].replace(" ", "")
-        if not _ROW_DA.search(label) or _ROW_EX.search(label):
-            continue
-        vals = [(_num(c), i) for i, c in enumerate(r)]
         if tot_idx is not None and tot_idx < len(r) and _num(r[tot_idx]) is not None:
             return abs(_num(r[tot_idx]) * unit)
-        nums = [v for v, i in vals if v is not None and i > 0]
+        nums = [_num(c) for c in r[1:] if _num(c) is not None]
         if nums:
             return abs(nums[-1] * unit)
     return None
@@ -167,6 +189,7 @@ def ensure(con):
     con.execute("""CREATE TABLE IF NOT EXISTS da_notes (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT,
                    dep REAL, amort REAL, rou REAL, da REAL, rcept_no TEXT, src TEXT, fetched_at TEXT,
                    PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))""")
+    con.execute("""CREATE TABLE IF NOT EXISTS notes_annual (corp_code TEXT PRIMARY KEY, rcept_no TEXT, report_nm TEXT, secs_j BLOB, fetched_at TEXT)""")   # 사업보고서 변동표 절(유형·무형·사용권·투자부동산)만 캐시 — 파서 개선 시 재다운로드 없이 재계산
     try:
         con.execute("ALTER TABLE notes_latest ADD COLUMN notes_j BLOB")
     except Exception:  # noqa
@@ -223,14 +246,24 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
                     build_kpi(con, r[0], y, rc); k0 += 1
             except Exception as e:  # noqa
                 log(con, r[0], "notes_v2", "fail", e)
+    have_a = {(r[0], r[1]) for r in con.execute("SELECT corp_code, rcept_no FROM da_notes WHERE src='annual'")}
+    for r in con.execute("SELECT corp_code, rcept_no, report_nm, secs_j FROM notes_annual WHERE secs_j IS NOT NULL"):
+        if (not corp_codes or r[0] in corp_codes) and (r[0], r[1]) not in have_a:
+            try:
+                secs = json.loads(ztext(r[3]) or "[]")
+                y, rc = _report_key(r[2])
+                if y and rc and _store_da(con, r[0], y, rc, secs, r[1], "annual"):
+                    build_kpi(con, r[0], y, rc); k0 += 1
+            except Exception as e:  # noqa
+                log(con, r[0], "notes_v2", "fail", e)
     con.commit()
     if k0:
-        print(f"[notes-v2] 보관된 주석에서 상각비 {k0}사 계산(호출 0)", flush=True)
+        print(f"[notes-v2] 보관된 주석에서 상각비 {k0}건 계산(호출 0)", flush=True)
     # ①b 최신 정기보고서 v2 재수집(notes_j 없는 회사)
     latest = {r[0]: (r[1], r[2]) for r in con.execute("SELECT corp_code, rcept_no, report_nm FROM notes_latest WHERE rcept_no IS NOT NULL AND notes_j IS NULL")}
     todo1 = [(cc, latest[cc][0], latest[cc][1], "latest") for cc in cs if cc in latest]
     # ② 연간: 사업보고서 변동표 (da_notes 11011 없는 회사)
-    have_ann = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM da_notes WHERE reprt_code='11011'")}
+    have_ann = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM da_notes WHERE reprt_code='11011'")} | {r[0] for r in con.execute("SELECT corp_code FROM notes_annual")}
     ann = {}
     for r in con.execute("SELECT corp_code, bsns_year, rcept_no FROM business WHERE rcept_no IS NOT NULL ORDER BY bsns_year"):
         ann[r[0]] = (r[1], r[2])
@@ -253,6 +286,9 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
                         con.execute("UPDATE notes_latest SET notes_j=?, notes_z=?, char_len=? WHERE corp_code=? AND rcept_no=?",
                                     (zpack(json.dumps(secs, ensure_ascii=False)), zpack(to_text(secs)), len(to_text(secs)), cc, rcept))
                         n += 1
+                    else:
+                        asset = [x for x in secs if re.search(r"유형자산|무형자산|사용권자산|투자부동산", x["t"].replace(" ", ""))]
+                        con.execute("INSERT OR REPLACE INTO notes_annual VALUES (?,?,?,?,?)", (cc, rcept, nm, zpack(json.dumps(asset, ensure_ascii=False)), now()))
                     if y and rc and _store_da(con, cc, y, rc, secs, rcept, kind):
                         got += 1
                         build_kpi(con, cc, y, rc)
