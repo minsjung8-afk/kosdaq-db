@@ -453,7 +453,7 @@ async function open(code){
    if(bb&&(bb.CFS||bb.OFS)){   // 차입금 현황: 차입금·사채·리스 × 유동/비유동, 연간 3개년 + 최근 분기 (사용자 요청 2026-10-24 — 주석 원문보다 요약표)
      const bases=[['OFS','별도'],['CFS','연결']].filter(([fs])=>bb[fs]&&bb[fs].length);
      const g=(col,k,c)=>{const v=col.k[k]&&col.k[k][c]; return v||0;};
-     const kinds=[['차입금','차입금'],['사채','사채 (CB·BW·EB·CP 포함)'],['리스','리스부채']].filter(([k])=>bases.some(([fs])=>bb[fs].some(col=>col.k[k])));
+     const kinds=[['차입금','차입금'],['사채','사채 (CB·BW·EB·CP 포함)'],['차입금·사채','차입금·사채 (합산 계정)'],['리스','리스부채']].filter(([k])=>bases.some(([fs])=>bb[fs].some(col=>col.k[k])));
      const unk=bases.some(([fs])=>bb[fs].some(col=>Object.values(col.k).some(o=>o['미구분'])));
      const curs=[['유동','유동(1년 내)'],['비유동','비유동']].concat(unk?[['미구분','구분불명']]:[]);
      const td=(v,cls)=>`<td class="n${cls||''}"><span class="val">${v==null?'-':억(v)}</span></td>`;
@@ -466,7 +466,7 @@ async function open(code){
        body+=`<tr class="g3"><td>${cn} 소계</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(sumCur(col,c),i===0?' sep':'')).join('')).join('')}</tr>`;});
      body+=`<tr class="g3 gs"><td><b>총차입금</b> (괄호: 유동 비중)</td>${bases.map(([fs])=>bb[fs].map((col,i)=>`<td class="n${i===0?' sep':''}"><span class="val"><b>${억(col.total)}</b></span>${col.total?`<span class="chg">(${(sumCur(col,'유동')/col.total*100).toFixed(0)}%)</span>`:''}</td>`).join('')).join('')}</tr>`;
      body+=`<tr class="g3"><td>순차입금 (− 현금성자산)</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(col.cash==null?null:col.total-col.cash,i===0?' sep':'')).join('')).join('')}</tr>`;
-     h+=`<div class="src" style="margin:4px 0 6px">단위 억원 · 재무상태표의 차입성 계정(단기·장기차입금, 유동성장기부채, 사채·CB·BW·EB·CP, 리스부채)을 유동/비유동 × 종류로 재분류 · 합계 = 3. 재무현황의 총차입금(근사) · 연도 클릭 → DART 보고서${unk?' · 구분불명 = 계정명·위치로 유동성 판정 불가':''}</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div>`;
+     h+=`<div class="src" style="margin:4px 0 6px">단위 억원 · 재무상태표의 차입성 계정(단기·장기차입금, 유동성장기부채, 사채·CB·BW·EB·CP, 리스부채)을 유동/비유동 × 종류로 재분류 · 합계 = 3. 재무현황의 총차입금(근사) · 연도 클릭 → DART 보고서${kinds.some(([k])=>k==='차입금·사채')?' · 합산 계정 = 재무상태표에 차입금과 사채가 한 줄로 표시된 회사(분리 불가)':''}${unk?' · 구분불명 = 계정명·위치로 유동성 판정 불가':''}</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div>`;
    } else if(d.kpi&&(d.kpi.CFS||d.kpi.OFS)) h+=`<div class="src" style="padding:4px 0 2px">차입금 현황 표: 재무상태표 세부 계정 미수집(사이트 재생성 후 표시)</div>`;
    if(!ns&&!nr&&!bb) h+=`<div class="src" style="padding:4px 0 2px">차입금 만기구조 · 금융기관별 차입 · 우발채무(보증·담보·소송·약정) — 최신 정기보고서 주석 수집 후 표시. 현재는 3. 재무현황의 총차입금·순차입금과 5. 공시 타임라인의 담보제공·소송 키워드를 참고하세요.</div>`;
    if(ns){
