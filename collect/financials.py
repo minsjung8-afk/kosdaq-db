@@ -158,7 +158,9 @@ def _bor_kind(nm):
     """차입성 계정 → 종류: 차입금 | 일반사채 | CB | BW | EB | CP | 리스 (사용자 요청 2026-10-24: 사채는 일반/CB/BW/EB로 표기)"""
     if "리스" in nm:
         return "리스"
-    if "차입금" in nm and "사채" in nm:       # '단기차입금및사채' 등 합산 계정(대동 등) — 재무상태표로는 분리 불가
+    if "사채제외" in nm:                       # '비유동금융기관차입금(사채제외)…' (AJ네트웍스 2024 표준계정명) → 차입금
+        return "차입금"
+    if "차입금" in nm and "사채" in nm:       # '단기차입금및사채'·'유동차입금(사채포함)' 등 합산 계정(대동 등) — 재무상태표로는 분리 불가
         return "차입금·사채"
     if "전환사채" in nm or "상환전환" in nm:
         return "CB"
@@ -212,7 +214,10 @@ def borrow_items(rows):
         if (nm, v) in seen:
             continue
         seen.add((nm, v))
-        cur = "유동" if "유동성" in nm else "비유동" if _BOR_NON.search(nm) else "유동" if _BOR_CUR.search(nm) else pos_cur(o)   # '유동성장기부채'는 유동
+        # 순서: '비유동'(…의비유동성부분 포함) → '유동성·단기·유동'('유동성장기부채'는 유동) → 재무상태표 위치
+        cur = "비유동" if "비유동" in nm else "유동" if ("유동성" in nm or _BOR_CUR.search(nm)) else "비유동" if _BOR_NON.search(nm) else pos_cur(o)
+        if cur is None and _bor_kind(nm) in ("일반사채", "CB", "BW", "EB"):
+            cur = "비유동"                        # 위치 판정 불가(ord 없음)한 '사채'류 — 1년 내 만기분은 '유동성사채'로 따로 공시되므로 본계정은 비유동
         out.append({"nm": nm, "amt": v, "kind": _bor_kind(nm), "cur": cur})
     return out
 
