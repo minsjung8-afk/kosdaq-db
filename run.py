@@ -271,7 +271,7 @@ def main():
             for r in con.execute("""SELECT bsns_year, reprt_code, fs_div, sj_div, account_nm, thstrm_amount, frmtrm_amount, rcept_no FROM fin_raw
                                     WHERE corp_code=? AND sj_div IN ('IS','CIS') AND reprt_code<>'11011' AND bsns_year>='2025'
                                     AND account_nm IN ('매출액','수익(매출액)','영업수익','매출','영업이익','영업이익(손실)','당기순이익','당기순이익(손실)','반기순이익','분기순이익')
-                                    ORDER BY bsns_year, reprt_code, fs_div, sj_div, ord"""):
+                                    ORDER BY bsns_year, reprt_code, fs_div, sj_div, ord""", (cc,)):
                 print("  ", dict(r), flush=True)
             for r in con.execute("SELECT * FROM fin_cum_ok WHERE corp_code=?", (cc,)):
                 print("   cum_ok", tuple(r), flush=True)
