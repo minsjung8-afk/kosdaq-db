@@ -26,8 +26,13 @@ def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=
     # 2026-10-22 수정: 예전 백필에서 KRX가 빈 응답(한도·장애)을 준 날짜가 '휴장일'로 굳어져 2021.10~2023.10 등 구간이 영구 누락됨.
     #  → '적재 완료'는 실제 시세 행이 있는 날짜만 인정. 빈 날짜는 _price_empty에 시도 횟수를 두고 2회까지 재시도 후 휴장일로 확정.
     con.execute("CREATE TABLE IF NOT EXISTS _price_empty (market TEXT, dt TEXT, tries INTEGER, PRIMARY KEY(market, dt))")
-    have = {r[0] for r in con.execute("""SELECT DISTINCT p.dt FROM price_daily p JOIN company c ON c.stock_code=p.stock_code
-                                          WHERE c.market=?""", (market,))}
+    # 2026-10-24 수정: '그 시장 소속 회사의 시세가 1행이라도 있는 날짜'를 적재 완료로 보면 이전상장(코넥스→코스닥, 코스닥→코스피) 회사가
+    #  옛 시장에서 받은 날짜까지 완료로 오인해 구간이 통째로 빠짐(코스피 2011~2013.10, 코스닥 2013.10~2015 누락의 원인).
+    #  → 적재 완료 = _price_fetched 기록(빈 응답은 기록 안 함) 또는 그 날짜 시세 행이 시장 회사 수의 절반 이상인 경우.
+    ncomp = con.execute("SELECT COUNT(*) FROM company WHERE market=?", (market,)).fetchone()[0] or 1
+    have = {r[0] for r in con.execute("SELECT dt FROM _price_fetched WHERE market=?", (market,))}
+    have |= {r[0] for r in con.execute("""SELECT p.dt FROM price_daily p JOIN company c ON c.stock_code=p.stock_code
+                                           WHERE c.market=? GROUP BY p.dt HAVING COUNT(*) >= ?""", (market, max(50, ncomp // 2)))}
     empty = {r[0]: r[1] for r in con.execute("SELECT dt, tries FROM _price_empty WHERE market=?", (market,))}
     today = date.today().isoformat()
     n = 0
