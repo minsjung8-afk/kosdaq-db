@@ -539,7 +539,7 @@ def _notes_raw(con, cc, per_sec=7000, total=30000):
                     blocks.append({"tbl": {"unit": b["tbl"].get("unit", 1), "rows": rows}}); size += sum(len(" ".join(x)) for x in rows)
                 if size > per_sec:
                     trunc = True; break
-            t = sc["t"] + (" [별도]" if sc.get("fs") == "OFS" else " [연결]" if sc.get("fs") == "CFS" else "")
+            t = sc["t"] + ("" if re.search(r"\((연결|별도)\)", sc["t"]) else " [별도]" if sc.get("fs") == "OFS" else " [연결]" if sc.get("fs") == "CFS" else "")   # 제목에 (연결)/(별도)가 있으면 꼬리표 생략
             out.append({"t": t, "g": g, "fs": sc.get("fs"), "blocks": blocks}); used += size
         return {"rcept_no": r["rcept_no"], "report_nm": r["report_nm"], "sections": out, "truncated": trunc, "v": 2} if out else None
     if not r["notes_z"]:
