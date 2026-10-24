@@ -100,6 +100,10 @@ def plan_for(con, cc, reports, fs="CFS"):
     from financials import ensure_cum_table
     ensure_cum_table(con)
     have = {(r[0], r[1]) for r in con.execute("SELECT DISTINCT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND fs_div=?", (cc, fs))}
+    # 2026-10-24 진단(rawdump): 접수번호 없는 분기·반기 손익 행 = 누적(thstrm_add_amount) 적용 전(패치68 이전)에 저장된 3개월치 → 미수집으로 보고 다시 받는다(별도 309사 분기 누적 역전의 원인)
+    stale = {(r[0], r[1]) for r in con.execute("""SELECT DISTINCT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND fs_div=? AND reprt_code<>'11011'
+                                                    AND sj_div IN ('IS','CIS') AND rcept_no IS NULL""", (cc, fs))}
+    have -= stale
     empty = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM quarters_done WHERE corp_code=? AND fs_div=? AND status='empty'", (cc, fs))}
     return [(y, rc) for (y, rc) in reports if (y, rc) not in have and (y, rc) not in empty]
 
@@ -143,6 +147,10 @@ def run(corp_codes, limit=None, con=None, workers=4):
                             if filled:
                                 build_kpi(con, cc, str(int(y) - 1), rc)
                             saved += n
+                        else:   # 보고서 없음 — 접수번호 없는 옛 3개월치 손익 행이 남아 있으면 지우고 KPI 재계산(누적 역전 방지)
+                            if con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND sj_div IN ('IS','CIS') AND rcept_no IS NULL",
+                                           (cc, y, rc, fs_)).rowcount:
+                                build_kpi(con, cc, y, rc)
                         con.execute("INSERT OR REPLACE INTO quarters_done VALUES (?,?,?,?,?,?)", (cc, y, rc, fs_, "ok" if lst else "empty", now()))
                 except Exception as e:  # noqa
                     log(con, cc, "quarters", "fail", e)
