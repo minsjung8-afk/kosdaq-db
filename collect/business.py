@@ -212,11 +212,13 @@ def run_notes(con, corp_codes, limit=None, workers=4):
     from concurrent.futures import ThreadPoolExecutor
     con.execute("""CREATE TABLE IF NOT EXISTS notes_latest (corp_code TEXT PRIMARY KEY, rcept_no TEXT, report_nm TEXT,
                    notes_z BLOB, char_len INTEGER, fetched_at TEXT)""")
-    try:
-        con.execute("ALTER TABLE notes_latest ADD COLUMN notes_j BLOB")
-    except Exception:  # noqa
-        pass
+    for sql in ("ALTER TABLE notes_latest ADD COLUMN notes_j BLOB", "ALTER TABLE notes_latest ADD COLUMN notes_v INTEGER"):
+        try:
+            con.execute(sql)
+        except Exception:  # noqa
+            pass
     import json as _json
+    from notes_v2 import PARSER_VER
     old = {r[0]: r[1] for r in con.execute("SELECT corp_code, rcept_no FROM notes_latest")}
     cs = list(corp_codes)[:limit] if limit else list(corp_codes)
     print(f"[notes] 주석 원문 대상 {len(cs)}사 · 병렬 {workers}", flush=True)
@@ -232,8 +234,8 @@ def run_notes(con, corp_codes, limit=None, workers=4):
                     rcept, nm, notes, changed = f.result()
                     if changed:
                         txt, secs = notes if notes else ("", [])
-                        con.execute("INSERT OR REPLACE INTO notes_latest (corp_code, rcept_no, report_nm, notes_z, char_len, fetched_at, notes_j) VALUES (?,?,?,?,?,?,?)",
-                                    (cc, rcept, nm, zpack(txt) if txt else None, len(txt or ""), now(), zpack(_json.dumps(secs, ensure_ascii=False)) if secs else None))
+                        con.execute("INSERT OR REPLACE INTO notes_latest (corp_code, rcept_no, report_nm, notes_z, char_len, fetched_at, notes_j, notes_v) VALUES (?,?,?,?,?,?,?,?)",
+                                    (cc, rcept, nm, zpack(txt) if txt else None, len(txt or ""), now(), zpack(_json.dumps(secs, ensure_ascii=False)) if secs else None, PARSER_VER))
                         n += 1
                 except Exception as e:  # noqa
                     log(con, cc, "notes", "fail", e)

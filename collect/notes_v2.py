@@ -20,7 +20,8 @@ UNIT = {"원": 1, "천원": 1_000, "백만원": 1_000_000, "십억원": 1_000_00
 CELL_RE = re.compile(r"<T[DHEU]\b[^>]*>(.*?)</T[DHEU]>", re.S | re.I)
 TR_RE = re.compile(r"<TR[^>]*>(.*?)</TR>", re.S | re.I)
 TABLE_RE = re.compile(r"<TABLE[^>]*>(.*?)</TABLE>", re.S | re.I)
-MAX_ROWS, MAX_P, MAX_SEC = 80, 3000, 40
+MAX_ROWS, MAX_P, MAX_SEC = 80, 3000, 90
+PARSER_VER = 3          # 3: 주석 항목을 TITLE 기준으로 분할(2026-10-24) — 이보다 낮은 버전으로 보관된 notes_j·notes_annual은 재수집
 
 
 def _unit_of(text):
@@ -39,14 +40,14 @@ def _num(cell):
     return -v if neg else v
 
 
-def _blocks(sec_xml):
-    """절 XML → 문단·표 블록 (표는 행렬 유지)."""
+def _blocks(sec_xml, cap=True):
+    """절 XML → 문단·표 블록 (표는 행렬 유지). cap=False면 문단을 자르지 않음(주석 항목 분할용)."""
     out = []
     pos = 0
     for tm in TABLE_RE.finditer(sec_xml):
         before = _strip(sec_xml[pos:tm.start()])
         if before:
-            out.append({"p": before[:MAX_P]})
+            out.append({"p": before[:MAX_P] if cap else before})
         rows = []
         for tr in TR_RE.findall(tm.group(1)):
             cells = [_strip(c).replace("\n", " ").strip() for c in CELL_RE.findall(tr)]
@@ -60,14 +61,67 @@ def _blocks(sec_xml):
         pos = tm.end()
     tail = _strip(sec_xml[pos:])
     if tail:
-        out.append({"p": tail[:MAX_P]})
+        out.append({"p": tail[:MAX_P] if cap else tail})
     return out
 
 
+# 주석 항목 제목: 'N. 제목' 한 줄(문장 아님) — DART 원문에서 주석 항목(1. 회사의 개요 … 15. 유형자산 …)은 별도 SECTION이 아니라
+# '재무제표 주석' 절 본문의 <P> 제목으로만 구분된다(2026-10-24 확인: SECTION 제목만 보면 주석 항목이 하나도 안 잡힘).
+_HEAD_RE = re.compile(r"^\s*(\d{1,2})\s*[.．]\s*(?![\d.)])(\S.{0,70}?)\s*$")
+_NOTES_TITLE_RE = re.compile(r"((연결|별도)?재무제표(에대한)?주석|^(\d+\.)?주석)$")
+
+
+def _split_notes(sec_xml, fs):
+    """주석 절 본문 → 항목별 [{t, fs, blocks}].
+    ① 본문 안에 <TITLE>(ATOC 목차 항목: '12. 유형자산 (연결)', '17-1. 차입금 (연결)')이 3개 이상이면 그 제목 사이로 분할(DART 표준 — 항목은 SECTION이 아니라 TITLE만 있음)
+    ② 없으면 연번(직전+1~2)으로 이어지는 'N. 제목' 문단으로 분할(구형 원문)"""
+    titles = list(re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", sec_xml, flags=re.S | re.I))
+    if len(titles) >= 3:
+        secs = []
+        for i, m in enumerate(titles):
+            end = titles[i + 1].start() if i + 1 < len(titles) else len(sec_xml)
+            t = _strip(m.group(1)).replace("\n", " ").strip()
+            if not t:
+                continue
+            blocks = _blocks(sec_xml[m.end():end])
+            secs.append({"t": t, "fs": fs, "blocks": blocks})
+        return secs
+    secs, cur, last = [], None, 0
+    for b in _blocks(sec_xml, cap=False):
+        if "tbl" in b:
+            if cur is not None:
+                cur["blocks"].append(b)
+            continue
+        buf = []
+        for line in b["p"].split("\n"):
+            m = _HEAD_RE.match(line)
+            n = int(m.group(1)) if m else None
+            if m and last < n <= last + 2 and not re.search(r"(니다|습니다|음|함|임)\s*[.．]?$", m.group(2)):
+                if cur is not None:
+                    if buf:
+                        cur["blocks"].append({"p": "\n".join(buf)[:MAX_P]})
+                    secs.append(cur)
+                buf = []
+                cur = {"t": f"{n}. {m.group(2).strip()}", "fs": fs, "blocks": []}
+                last = n
+            else:
+                buf.append(line)
+        if buf and cur is not None:
+            cur["blocks"].append({"p": "\n".join(buf)[:MAX_P]})
+    if cur is not None:
+        secs.append(cur)
+    return secs
+
+
+def _sec_size(blocks):
+    return sum(len(b.get("p", "")) + sum(len(" ".join(r)) for r in b.get("tbl", {}).get("rows", [])) for b in blocks)
+
+
 def extract_notes_v2(xml_text):
-    """정기보고서 원문 → [{t, fs, blocks}] (fs: 'CFS'|'OFS'|None — 상위 제목에 '연결'이 있으면 CFS, '별도'/'재무제표 주석'(연결 아님)이면 OFS)."""
+    """정기보고서 원문 → [{t, fs, blocks}].
+    ① '연결재무제표 주석'/'재무제표 주석' 절 본문을 항목(N. 제목)으로 분할해 심사·상각비 관련 항목만(fs: CFS/OFS)
+    ② 그 밖의 제목 있는 절(재무에 관한 사항의 차입금·우발부채 등)은 종전처럼 SECTION 단위(fs: 상위 제목으로 추정)"""
     secs = []
-    # 상위 섹션(연결재무제표 주석 / 재무제표 주석) 경계 수집
     bounds = []
     for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml_text, flags=re.S | re.I):
         t = _strip(m.group(1)).replace(" ", "")
@@ -83,22 +137,30 @@ def extract_notes_v2(xml_text):
             else:
                 break
         return cur
+    others = []
     for lv in ("1", "2", "3", "4", "5"):
         for m in re.finditer(rf"<SECTION-{lv}[^>]*>(.*?)</SECTION-{lv}>", xml_text, flags=re.S | re.I):
             sec = m.group(1)
-            t = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", sec, flags=re.S | re.I)
-            title = _strip(t.group(1)) if t else ""
-            if not title or not any(k in title.replace(" ", "") for k in NOTE_KEYS_V2):
-                continue
             if re.search(r"<SECTION-\d", sec, flags=re.I):
                 continue
-            blocks = _blocks(re.sub(r"<TITLE[^>]*>.*?</TITLE>", "", sec, count=1, flags=re.S | re.I))
-            if sum(len(b.get("p", "")) + sum(len(" ".join(r)) for r in b.get("tbl", {}).get("rows", [])) for b in blocks) < 60:
+            t = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", sec, flags=re.S | re.I)
+            title = _strip(t.group(1)) if t else ""
+            tt = title.replace(" ", "")
+            if not title:
                 continue
-            secs.append({"t": title, "fs": fs_at(m.start()), "blocks": blocks})
-            if len(secs) >= MAX_SEC:
-                break
-    return secs
+            body = re.sub(r"<TITLE[^>]*>.*?</TITLE>", "", sec, count=1, flags=re.S | re.I)
+            if _NOTES_TITLE_RE.search(tt):
+                fs = "CFS" if "연결" in tt else "OFS"
+                for s in _split_notes(body, fs):
+                    if any(k in s["t"].replace(" ", "") for k in NOTE_KEYS_V2) and _sec_size(s["blocks"]) >= 60:
+                        secs.append(s)
+                continue
+            if any(k in tt for k in NOTE_KEYS_V2):
+                blocks = _blocks(body)
+                if _sec_size(blocks) >= 60:
+                    others.append({"t": title, "fs": None, "blocks": blocks})          # 재무에 관한 사항 등 — 연결·별도 구분 없음
+    secs += others
+    return secs[:MAX_SEC]
 
 
 def to_text(secs):
@@ -169,7 +231,8 @@ def da_from_secs(secs, fs=None):
         if fs and s.get("fs") and s["fs"] != fs:
             continue
         t = s["t"].replace(" ", "")
-        key = "rou" if "사용권" in t else "amort" if "무형" in t else "inv" if "투자부동산" in t else "dep" if "유형자산" in t else None
+        key = ("rou" if ("사용권" in t or (re.search(r"리스", t) and "리스부채" not in t))
+               else "amort" if "무형" in t else "inv" if "투자부동산" in t else "dep" if "유형자산" in t else None)
         if not key or res[key] is not None:
             continue
         for b in s["blocks"]:
@@ -190,10 +253,12 @@ def ensure(con):
                    dep REAL, amort REAL, rou REAL, da REAL, rcept_no TEXT, src TEXT, fetched_at TEXT,
                    PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))""")
     con.execute("""CREATE TABLE IF NOT EXISTS notes_annual (corp_code TEXT PRIMARY KEY, rcept_no TEXT, report_nm TEXT, secs_j BLOB, fetched_at TEXT)""")   # 사업보고서 변동표 절(유형·무형·사용권·투자부동산)만 캐시 — 파서 개선 시 재다운로드 없이 재계산
-    try:
-        con.execute("ALTER TABLE notes_latest ADD COLUMN notes_j BLOB")
-    except Exception:  # noqa
-        pass
+    for sql in ("ALTER TABLE notes_latest ADD COLUMN notes_j BLOB", "ALTER TABLE notes_latest ADD COLUMN notes_v INTEGER",
+                "ALTER TABLE notes_annual ADD COLUMN ver INTEGER"):
+        try:
+            con.execute(sql)
+        except Exception:  # noqa
+            pass
 
 
 def _report_key(report_nm):
@@ -260,10 +325,10 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
     if k0:
         print(f"[notes-v2] 보관된 주석에서 상각비 {k0}건 계산(호출 0)", flush=True)
     # ①b 최신 정기보고서 v2 재수집(notes_j 없는 회사)
-    latest = {r[0]: (r[1], r[2]) for r in con.execute("SELECT corp_code, rcept_no, report_nm FROM notes_latest WHERE rcept_no IS NOT NULL AND notes_j IS NULL")}
+    latest = {r[0]: (r[1], r[2]) for r in con.execute("SELECT corp_code, rcept_no, report_nm FROM notes_latest WHERE rcept_no IS NOT NULL AND (notes_j IS NULL OR COALESCE(notes_v,0) < ?)", (PARSER_VER,))}
     todo1 = [(cc, latest[cc][0], latest[cc][1], "latest") for cc in cs if cc in latest]
     # ② 연간: 사업보고서 변동표 (da_notes 11011 없는 회사)
-    have_ann = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM da_notes WHERE reprt_code='11011'")} | {r[0] for r in con.execute("SELECT corp_code FROM notes_annual")}
+    have_ann = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM da_notes WHERE reprt_code='11011'")} | {r[0] for r in con.execute("SELECT corp_code FROM notes_annual WHERE COALESCE(ver,0) >= ?", (PARSER_VER,))}
     ann = {}
     for r in con.execute("SELECT corp_code, bsns_year, rcept_no FROM business WHERE rcept_no IS NOT NULL ORDER BY bsns_year"):
         ann[r[0]] = (r[1], r[2])
@@ -283,12 +348,13 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
                     secs = f.result()
                     y, rc = _report_key(nm)
                     if kind == "latest":
-                        con.execute("UPDATE notes_latest SET notes_j=?, notes_z=?, char_len=? WHERE corp_code=? AND rcept_no=?",
-                                    (zpack(json.dumps(secs, ensure_ascii=False)), zpack(to_text(secs)), len(to_text(secs)), cc, rcept))
+                        con.execute("UPDATE notes_latest SET notes_j=?, notes_z=?, char_len=?, notes_v=? WHERE corp_code=? AND rcept_no=?",
+                                    (zpack(json.dumps(secs, ensure_ascii=False)), zpack(to_text(secs)), len(to_text(secs)), PARSER_VER, cc, rcept))
                         n += 1
                     else:
                         asset = [x for x in secs if re.search(r"유형자산|무형자산|사용권자산|투자부동산", x["t"].replace(" ", ""))]
-                        con.execute("INSERT OR REPLACE INTO notes_annual VALUES (?,?,?,?,?)", (cc, rcept, nm, zpack(json.dumps(asset, ensure_ascii=False)), now()))
+                        con.execute("INSERT OR REPLACE INTO notes_annual (corp_code, rcept_no, report_nm, secs_j, fetched_at, ver) VALUES (?,?,?,?,?,?)",
+                                    (cc, rcept, nm, zpack(json.dumps(asset, ensure_ascii=False)), now(), PARSER_VER))
                     if y and rc and _store_da(con, cc, y, rc, secs, rcept, kind):
                         got += 1
                         build_kpi(con, cc, y, rc)
