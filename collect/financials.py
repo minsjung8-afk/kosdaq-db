@@ -158,6 +158,8 @@ def _bor_kind(nm):
     """차입성 계정 → 종류: 차입금 | 일반사채 | CB | BW | EB | CP | 리스 (사용자 요청 2026-10-24: 사채는 일반/CB/BW/EB로 표기)"""
     if "리스" in nm:
         return "리스"
+    if "차입금" in nm and "사채" in nm:       # '단기차입금및사채' 등 합산 계정(대동 등) — 재무상태표로는 분리 불가
+        return "차입금·사채"
     if "전환사채" in nm or "상환전환" in nm:
         return "CB"
     if "신주인수권" in nm:
