@@ -150,36 +150,77 @@ _BOR_AGG = _re.compile(r"(및|합계|총계)")
 _BOR_FIN = _re.compile(r"^(유동|비유동|단기|장기)?금융부채$")
 
 
-def _borrowings(rows):
-    """총차입금(근사) v2: 재무상태표에서 차입성 부채를 모은다.
-    ① account_id(Borrowing·BondsIssued·LeaseLiabilities 등) 또는 ② 계정명(차입금·사채·리스부채·유동성장기부채 등)으로 후보를 찾고,
-    조정·할인·이자 등 차감/부수 계정은 제외. 합산 행(차입금 및 사채, 차입금 합계 등)이 세부 행과 같이 있으면 세부만 사용(이중계상 방지).
-    반환 (금액 or None, 근거 문자열)"""
+_BOR_CUR = _re.compile(r"(유동성|단기|^유동|당좌|전자단기|기업어음)")
+_BOR_NON = _re.compile(r"(비유동|장기)")
+
+
+def _bor_kind(nm):
+    """차입성 계정 → 종류: 차입금 | 일반사채 | CB | BW | EB | CP | 리스 (사용자 요청 2026-10-24: 사채는 일반/CB/BW/EB로 표기)"""
+    if "리스" in nm:
+        return "리스"
+    if "전환사채" in nm or "상환전환" in nm:
+        return "CB"
+    if "신주인수권" in nm:
+        return "BW"
+    if "교환사채" in nm:
+        return "EB"
+    if "기업어음" in nm or "전자단기사채" in nm or "단기사채" in nm:
+        return "CP"
+    if "사채" in nm:
+        return "일반사채"
+    return "차입금"
+
+
+def borrow_items(rows):
+    """재무상태표 차입성 부채 세부 → [{nm, amt, kind, cur}] (cur: '유동'|'비유동'|None).
+    총차입금(_borrowings)과 같은 후보·중복 규칙을 쓰므로 합계가 KPI 총차입금과 일치한다.
+    유동/비유동: ① 계정명(유동성·단기 / 장기·비유동) ② 없으면 재무상태표의 유동부채·비유동부채 구간 위치(ord)로 판정"""
     cand = []
-    for r in rows:
-        if r.get("sj_div") != "BS" or not r.get("thstrm_amount"):
+    bs = [r for r in rows if r.get("sj_div") == "BS"]
+    for r in bs:
+        if not r.get("thstrm_amount"):
             continue
         nm = _norm_nm(r.get("account_nm")); aid = r.get("account_id") or ""
         by_id = bool(_BOR_ID.search(aid)) and not _BOR_ID_EX.search(aid)
         by_nm = (bool(_BOR_NM.search(nm)) and not _BOR_EX.search(nm)) or bool(_BOR_FIN.match(nm))
         if by_id or by_nm:
-            cand.append((nm, r["thstrm_amount"], aid))
+            cand.append((nm, r["thstrm_amount"], aid, r.get("ord")))
     if not cand:
-        return None, ""
+        return []
     agg = [c for c in cand if _BOR_AGG.search(c[0])]
     detail = [c for c in cand if not _BOR_AGG.search(c[0])]
-    # 합산 행(차입금 및 사채 등)은 같은 종류의 세부 행(차입금·사채)이 있을 때만 버림 — 리스부채만 따로 있는 경우는 합산 행 유지
-    if agg and any(_re.search(r"(차입금|사채|유동성장기부채)", c[0]) for c in detail):
-        use = detail
-    else:
-        use = cand
-    seen, tot = set(), 0.0
-    for nm, v, aid in use:
-        key = (nm, v)
-        if key in seen:                           # 같은 이름·같은 금액 중복 행 제거
+    use = detail if (agg and any(_re.search(r"(차입금|사채|유동성장기부채)", c[0]) for c in detail)) else cand
+    # 유동/비유동 구간(ord): DART 재무상태표 행은 소계(유동부채·비유동부채)가 먼저 오고 세부가 뒤따름(헤더 선행) — 아니면 반대로 해석
+    def _ord(name):
+        for r in bs:
+            if _norm_nm(r.get("account_nm")) == name and r.get("ord") is not None:
+                return r["ord"]
+        return None
+    o_cl, o_ncl, o_tl = _ord("유동부채"), _ord("비유동부채"), _ord("부채총계")
+    o_ca = _ord("유동자산"); o_cash = next((r["ord"] for r in bs if "현금및현금성자산" in _norm_nm(r.get("account_nm")) and r.get("ord") is not None), None)
+    hdr_first = True if (o_ca is None or o_cash is None) else o_ca < o_cash
+    def pos_cur(o):
+        if o is None or o_cl is None or o_ncl is None:
+            return None
+        if hdr_first:
+            return "유동" if o_cl < o < o_ncl else "비유동" if o > o_ncl and (o_tl is None or o < o_tl) else None
+        return "유동" if o < o_cl else "비유동" if o_cl < o < o_ncl else None
+    seen, out = set(), []
+    for nm, v, aid, o in use:
+        if (nm, v) in seen:
             continue
-        seen.add(key); tot += v
-    return tot, "+".join(sorted({c[0] for c in use}))[:300]
+        seen.add((nm, v))
+        cur = "유동" if "유동성" in nm else "비유동" if _BOR_NON.search(nm) else "유동" if _BOR_CUR.search(nm) else pos_cur(o)   # '유동성장기부채'는 유동
+        out.append({"nm": nm, "amt": v, "kind": _bor_kind(nm), "cur": cur})
+    return out
+
+
+def _borrowings(rows):
+    """총차입금(근사) v2: 재무상태표에서 차입성 부채를 모은다(세부는 borrow_items). 반환 (금액 or None, 근거 문자열)"""
+    items = borrow_items(rows)
+    if not items:
+        return None, ""
+    return sum(i["amt"] for i in items), "+".join(sorted({i["nm"] for i in items}))[:300]
 
 
 def _norm_nm(nm):
