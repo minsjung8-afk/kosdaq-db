@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -196,6 +196,11 @@ def main():
             delta.run()
         except Exception as e:  # noqa
             print("[daily] delta 실패:", e)
+        try:                                       # 2026-10-24: 신용평가서 공시 당일 반영(금감원 최근 3일 목록, DART 호출 없음)
+            import fss_rating
+            fss_rating.run_delta(con=con, days=3)
+        except Exception as e:  # noqa
+            print("[daily] 신용평가 델타 실패:", e)
     if a.job == "catchup":                   # 야간: 미수집분을 mezz → biz → fin → kpi 순으로, DART 한도 도달 시 중단(다음날 이어서)
         import common, mezz, business, financials, quarters
         done = lambda tbl: {r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM {tbl}")}
@@ -260,6 +265,16 @@ def main():
         import notes_v2
         notes_v2.run(set(ccs) if a.codes else None, limit=a.limit, con=con)
         print("KPI 재계산:", __import__("financials").rebuild_kpi_all(con), "건", flush=True)
+    if a.job == "rawdump":                    # 진단: 지정 종목의 fin_raw 손익 행(연결·별도, 최근 분기)을 로그에 출력 — DART 호출 없음
+        for cc, sc in pairs:
+            print(f"=== {sc} {cc}", flush=True)
+            for r in con.execute("""SELECT bsns_year, reprt_code, fs_div, sj_div, account_nm, thstrm_amount, frmtrm_amount, rcept_no FROM fin_raw
+                                    WHERE corp_code=? AND sj_div IN ('IS','CIS') AND reprt_code<>'11011' AND bsns_year>='2025'
+                                    AND account_nm IN ('매출액','수익(매출액)','영업수익','매출','영업이익','영업이익(손실)','당기순이익','당기순이익(손실)','반기순이익','분기순이익')
+                                    ORDER BY bsns_year, reprt_code, fs_div, sj_div, ord"""):
+                print("  ", dict(r), flush=True)
+            for r in con.execute("SELECT * FROM fin_cum_ok WHERE corp_code=?", (cc,)):
+                print("   cum_ok", tuple(r), flush=True)
     if a.job == "invest":                     # 타법인 출자 현황 — 최신 분기보고서 기준 갱신
         import business
         have = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM other_invest WHERE reprt_code IN ('11012','11013','11014')")}

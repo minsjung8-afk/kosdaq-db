@@ -258,6 +258,18 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k["nwc_proj"] = (k["nwc"] + (k.get("contract_assets") or 0) - (k.get("contract_liab") or 0) - (k.get("advances") or 0)) \
             if k.get("nwc") is not None else None        # 수주산업형: +미청구공사 −초과청구공사 −선수금
         # 현금흐름: CAPEX(순액) = 유·무형자산 취득 − 유·무형자산 처분(절대값 기준), FCF = 영업활동CF − CAPEX(순액)
+        # 2026-10-24: 계정명 변형·자산별 세분 표시(토지의 취득, 기계장치의 취득 …) 폴백 — dq 'Capex 없음' 180사 대응
+        if k.get("capex_ppe") is None or k.get("capex_int") is None or k.get("disp_ppe") is None:
+            cf = [(_norm_nm(r["account_nm"]), r["thstrm_amount"]) for r in rows if r["sj_div"] == "CF" and r["account_nm"] and r["thstrm_amount"] is not None]
+            def _sum(pat, excl=r"(처분|매각|감소|회수|보증금|대여|상환|배당|이자|차입|예금|주식|채권|출자|지분|파생|리스부채)"):
+                vals = [v for nm, v in cf if _re.search(pat, nm) and not _re.search(excl, nm)]
+                return sum(abs(v) for v in vals) if vals else None
+            if k.get("capex_ppe") is None:
+                k["capex_ppe"] = _sum(r"^(유형자산|토지|건물|구축물|기계장치|차량운반구|비품|공구와기구|공구|시설장치|건설중인자산|임차시설|투자부동산|사용권자산)(의|에대한)?(취득|증가|매입|구입)")
+            if k.get("capex_int") is None:
+                k["capex_int"] = _sum(r"^(무형자산|산업재산권|소프트웨어|개발비|회원권|영업권|기타의?무형자산|특허권|상표권|라이선스|라이센스)(의|에대한)?(취득|증가|매입|구입)")
+            if k.get("disp_ppe") is None:
+                k["disp_ppe"] = _sum(r"^(유형자산|토지|건물|구축물|기계장치|차량운반구|비품|공구와기구|공구|시설장치|투자부동산)(의|에대한)?(처분|매각|감소)", excl=r"(손실|이익|취득|증가|보증금)")
         cp = [abs(k[x]) for x in ("capex_ppe", "capex_int") if k.get(x) is not None]
         dp = [abs(k[x]) for x in ("disp_ppe", "disp_int") if k.get(x) is not None]
         k["capex_disp"] = sum(dp) if dp else None

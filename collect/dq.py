@@ -50,8 +50,8 @@ def run(con=None, sample=12):
                 add("Capex 없음", cc, k["bsns_year"])
             if k.get("da") is None and k.get("op_income") is not None:
                 add("상각비 없음(EBITDA 불가)", cc, k["bsns_year"])
-        if k.get("borrowings") is None and (k.get("int_exp") or 0) != 0:
-            add("총차입금 없음(이자비용 있음)", cc, f"이자 {k['int_exp']/1e8:,.0f}억")
+        if k.get("borrowings") is None and abs(k.get("int_exp") or 0) >= 1e8:     # 이자비용 1억 이상인데 차입금이 안 잡힌 경우만(소액 이자는 리스·미지급 등)
+            add("총차입금 없음(이자비용 1억↑)", cc, f"이자 {k['int_exp']/1e8:,.0f}억")
         A, L, E = k.get("total_assets"), k.get("total_liab"), k.get("equity")
         if A and L is not None and E is not None and abs(A - L - E) > abs(A) * 0.01:
             add("자산≠부채+자본", cc, f"{A/1e8:,.0f} vs {(L+E)/1e8:,.0f}억")

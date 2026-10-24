@@ -33,10 +33,10 @@ def search_name(c) -> str:
     return s or c["corp_name"]
 
 
-def fetch(name: str, years=3, page=1, unit=100) -> str:
+def fetch(name: str, years=3, page=1, unit=100, sdate=None) -> str:
     today = date.today()
     params = {"menuNo": "200411", "pageIndex": page, "pageUnit": unit, "searchCompany": "", "searchAssGbn": "", "searchTargetCoNm": name,
-              "searchTargetTypeKor": "", "searchCnd": "1", "sdate": (today - timedelta(days=365 * years)).isoformat(),
+              "searchTargetTypeKor": "", "searchCnd": "1", "sdate": sdate or (today - timedelta(days=365 * years)).isoformat(),
               "edate": today.isoformat()}
     r = requests.get(URL + "?" + urlencode(params), headers=UA, timeout=30)
     r.raise_for_status()
@@ -193,3 +193,42 @@ def run(corp_codes=None, years=3, resume=True):
 if __name__ == "__main__":
     rows, total = parse(fetch("에스케이해운"))
     print(total, rows[:3])
+
+
+def run_delta(con=None, days=3, max_pages=20):
+    """매일(daily): 최근 N일 금감원 신용평가서 공시 전체 목록(회사명 필터 없음, 100행/페이지)에서 당사 수록 회사 완전일치 행만 저장.
+    월 2회 전수 조회(rating) 사이의 등급 변동·신규 평가서를 1일 지연으로 반영. HTTP 1~5콜, DART 호출 없음.
+    반환: (신규 행 수, 변동 회사 corp_code 집합)."""
+    con = con or connect()
+    _ensure_target(con)
+    sdate = (date.today() - timedelta(days=days)).isoformat()
+    rows, page = [], 1
+    while True:
+        r, total = parse(fetch("", page=page, sdate=sdate))
+        rows += r
+        if len(rows) >= total or not r or page >= max_pages:
+            break
+        page += 1
+        time.sleep(PAUSE)
+    cs = [dict(x) for x in con.execute("SELECT corp_code, corp_name, corp_name_full FROM company")]
+    by_key = {}
+    for c in cs:
+        for k in {norm(search_name(c)), norm(c.get("corp_name"))} - {""}:
+            by_key.setdefault(k, c)
+    have = {(r[0], r[1], r[2], r[3], r[4]) for r in con.execute("SELECT corp_code, agency, target_type, disc_dt, grade FROM credit_rating WHERE disc_dt >= ?", (sdate,))}
+    new, changed = 0, set()
+    for x in rows:
+        c = by_key.get(norm(x["target"]))
+        if not c:
+            continue
+        key = (c["corp_code"], x["agency"], x["ttype"], x["disc_dt"], x["grade"])
+        if key in have:
+            continue
+        con.execute("""INSERT OR REPLACE INTO credit_rating (corp_code, agency, target_type, eval_kind, disc_dt, grade, watch, outlook, fetched_at, file_url, target)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (c["corp_code"], x["agency"], x["ttype"], x["kind"], x["disc_dt"], x["grade"], x["watch"], x["outlook"], now(), x["file_url"], x["target"]))
+        have.add(key); new += 1; changed.add(c["corp_code"])
+    con.commit()                                   # 요약(rating_summary)은 summarize 증분이 disc_dt 비교로 알아서 재생성(다음 00:10 catchup)
+    log(con, "-", "rating_delta", "ok", f"{sdate}~ 목록 {len(rows)}행 · 신규 {new}행 · {len(changed)}사")
+    print(f"[rating-delta] 최근 {days}일 금감원 목록 {len(rows)}행 → 당사 회사 신규 {new}행 ({len(changed)}사)" + (": " + ", ".join(sorted({x['target'] for x in rows if by_key.get(norm(x['target'])) and by_key[norm(x['target'])]['corp_code'] in changed})[:10]) if changed else ""), flush=True)
+    return new, changed
