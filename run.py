@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -221,7 +221,8 @@ def main():
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
-                 ("da", lambda: __import__("da_xbrl").run(con=con)),   # 상각비(XBRL) — 건당 수초로 느려 분기·주석·요약 뒤로(2026-10-23)
+                 ("da", lambda: __import__("da_xbrl").run(con=con)),
+                 ("da_notes", lambda: __import__("notes_v2").run(con=con)),   # XBRL에 없는 상각비는 주석 변동표에서(2026-10-24)   # 상각비(XBRL) — 건당 수초로 느려 분기·주석·요약 뒤로(2026-10-23)
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2011-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 2011년까지(2026-10-23 사용자 요청) — KRX는 연속 호출 수백 건 후 차단되므로 야간 분할
         import os as _os
         _cont = Path(__file__).resolve().with_name("continue.txt")
@@ -239,7 +240,7 @@ def main():
                 break
             except Exception as e:  # noqa
                 print(f"[catchup] {name} 오류: {e}", flush=True)
-            if name in ("biz", "summarize", "fin", "fin_ofs", "fin_yoy", "da", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
+            if name in ("biz", "summarize", "fin", "fin_ofs", "fin_yoy", "da", "da_notes", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
                 con.commit(); publish(f"catchup {name}")
         else:   # 모든 단계 정상 완료 → 이어하기 불필요
             if _cont.exists() and not _os.environ.get("KOSDAQ_IN_CHAIN"):
@@ -255,6 +256,10 @@ def main():
         import business
         have = {r[0] for r in con.execute("SELECT corp_code FROM notes_latest")} if con.execute("SELECT name FROM sqlite_master WHERE name='notes_latest'").fetchone() else set()
         business.run_notes(con, [c for c in ccs if c not in have], limit=a.limit)
+    if a.job == "da_notes":                   # 주석 변동표 상각비(유형·무형·사용권) + 주석 표 구조 보존 재수집 — DART만, AI 없음
+        import notes_v2
+        notes_v2.run(set(ccs) if a.codes else None, limit=a.limit, con=con)
+        print("KPI 재계산:", __import__("financials").rebuild_kpi_all(con), "건", flush=True)
     if a.job == "invest":                     # 타법인 출자 현황 — 최신 분기보고서 기준 갱신
         import business
         have = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM other_invest WHERE reprt_code IN ('11012','11013','11014')")}

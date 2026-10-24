@@ -48,6 +48,9 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
                                            "cfi REAL", "cff REAL", "capex REAL", "capex_ppe REAL", "capex_int REAL", "fcf REAL", "capex_disp REAL", "tax_paid REAL")] + \
                  [("fin_raw", "rcept_no TEXT"), ("business", "rating_text TEXT"), ("business", "full_z BLOB"),
                   ("other_invest", "reprt_code TEXT"), ("other_invest", "rcept_no TEXT"), ("business", "notes_z BLOB")]
+    con.execute("""CREATE TABLE IF NOT EXISTS da_notes (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT,
+                   dep REAL, amort REAL, rou REAL, da REAL, rcept_no TEXT, src TEXT, fetched_at TEXT,
+                   PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))""")
     for tbl, col in migrations:                                   # 기존 DB 마이그레이션
         try:
             con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")

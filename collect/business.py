@@ -201,7 +201,9 @@ def _notes_worker(cc, old_rcept):
         return None, None, None, False
     if old_rcept == rcept:
         return rcept, nm, None, False
-    return rcept, nm, extract_notes(fetch_document_xml(rcept)), True
+    from notes_v2 import extract_notes_v2, to_text          # 2026-10-24: 표 구조 보존(v2) — notes_z(평문)와 notes_j(JSON) 둘 다 저장
+    secs = extract_notes_v2(fetch_document_xml(rcept))
+    return rcept, nm, (to_text(secs), secs), True
 
 
 def run_notes(con, corp_codes, limit=None, workers=4):
@@ -210,6 +212,11 @@ def run_notes(con, corp_codes, limit=None, workers=4):
     from concurrent.futures import ThreadPoolExecutor
     con.execute("""CREATE TABLE IF NOT EXISTS notes_latest (corp_code TEXT PRIMARY KEY, rcept_no TEXT, report_nm TEXT,
                    notes_z BLOB, char_len INTEGER, fetched_at TEXT)""")
+    try:
+        con.execute("ALTER TABLE notes_latest ADD COLUMN notes_j BLOB")
+    except Exception:  # noqa
+        pass
+    import json as _json
     old = {r[0]: r[1] for r in con.execute("SELECT corp_code, rcept_no FROM notes_latest")}
     cs = list(corp_codes)[:limit] if limit else list(corp_codes)
     print(f"[notes] 주석 원문 대상 {len(cs)}사 · 병렬 {workers}", flush=True)
@@ -224,8 +231,9 @@ def run_notes(con, corp_codes, limit=None, workers=4):
                 try:
                     rcept, nm, notes, changed = f.result()
                     if changed:
-                        con.execute("INSERT OR REPLACE INTO notes_latest VALUES (?,?,?,?,?,?)",
-                                    (cc, rcept, nm, zpack(notes) if notes else None, len(notes or ""), now()))
+                        txt, secs = notes if notes else ("", [])
+                        con.execute("INSERT OR REPLACE INTO notes_latest (corp_code, rcept_no, report_nm, notes_z, char_len, fetched_at, notes_j) VALUES (?,?,?,?,?,?,?)",
+                                    (cc, rcept, nm, zpack(txt) if txt else None, len(txt or ""), now(), zpack(_json.dumps(secs, ensure_ascii=False)) if secs else None))
                         n += 1
                 except Exception as e:  # noqa
                     log(con, cc, "notes", "fail", e)

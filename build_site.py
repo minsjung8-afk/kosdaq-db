@@ -440,33 +440,82 @@ _NOTES_ORDER = ("차입금", "사채", "우발", "담보", "보증", "약정", "
 
 
 def _notes_raw(con, cc, per_sec=7000, total=30000):
-    """notes_latest(주석 원문, zlib) → 절별 발췌 [{t,b}] — 비용 0. 절 우선순위: 차입금·사채·우발·담보·보증·약정·소송·리스·파생, 절당 7천자·합계 2.4만자 상한."""
+    """notes_latest → 절별 발췌 — 비용 0.
+    v2(notes_j, 표 구조 보존)가 있으면 [{t, g, fs, blocks:[{p}|{tbl:{unit,rows}}]}], 없으면 평문 [{t, g, b}].
+    g: 'debt'(3-1) | 'mezz'(3-2) | 'asset'(표시 안 함, 상각비 추출용). 특수관계자·계열·매입채무·제재 절은 제외(사용자 결정 2026-10-23)."""
     try:
-        r = con.execute("SELECT rcept_no, report_nm, notes_z FROM notes_latest WHERE corp_code=?", (cc,)).fetchone()
+        r = con.execute("SELECT rcept_no, report_nm, notes_z, notes_j FROM notes_latest WHERE corp_code=?", (cc,)).fetchone()
     except Exception:  # noqa
-        return None
-    if not r or not r["notes_z"]:
+        try:
+            r = con.execute("SELECT rcept_no, report_nm, notes_z, NULL AS notes_j FROM notes_latest WHERE corp_code=?", (cc,)).fetchone()
+        except Exception:  # noqa
+            return None
+    if not r:
         return None
     from common import ztext
+    def grp(t):
+        tt = t.replace(" ", "")
+        if any(k in tt for k in _NOTES_SKIP):
+            return None
+        if re.search(r"전환사채|신주인수권|교환사채|파생|전환우선주|상환전환|복합금융", tt):
+            return "mezz"
+        if re.search(r"유형자산|무형자산|사용권자산|투자부동산|현금흐름", tt):
+            return "asset"
+        return "debt"
+    def pri(t):
+        tt = t.replace(" ", "")
+        return next((i for i, k in enumerate(_NOTES_ORDER) if k in tt), 99)
+    if r["notes_j"]:
+        try:
+            secs = json.loads(ztext(r["notes_j"]) or "[]")
+        except Exception:  # noqa
+            secs = []
+        out, used, trunc = [], 0, False
+        # 연결 주석 우선, 같은 제목의 별도 절은 뒤에(둘 다 표시 — 제목에 [연결]/[별도] 표기)
+        items = []
+        for sc in secs:
+            g = grp(sc.get("t", ""))
+            if not g or g == "asset":
+                continue
+            items.append((0 if sc.get("fs") in (None, "CFS") else 1, pri(sc["t"]), sc, g))
+        items.sort(key=lambda x: (x[0], x[1]))
+        for _, _, sc, g in items:
+            if used >= total:
+                trunc = True; break
+            blocks, size = [], 0
+            for b in sc.get("blocks", []):
+                if "p" in b:
+                    txt = b["p"][:2500]; blocks.append({"p": txt}); size += len(txt)
+                else:
+                    rows = b["tbl"]["rows"][:40]
+                    if len(b["tbl"]["rows"]) > 40:
+                        trunc = True
+                    blocks.append({"tbl": {"unit": b["tbl"].get("unit", 1), "rows": rows}}); size += sum(len(" ".join(x)) for x in rows)
+                if size > per_sec:
+                    trunc = True; break
+            t = sc["t"] + (" [별도]" if sc.get("fs") == "OFS" else " [연결]" if sc.get("fs") == "CFS" else "")
+            out.append({"t": t, "g": g, "fs": sc.get("fs"), "blocks": blocks}); used += size
+        return {"rcept_no": r["rcept_no"], "report_nm": r["report_nm"], "sections": out, "truncated": trunc, "v": 2} if out else None
+    if not r["notes_z"]:
+        return None
     txt = ztext(r["notes_z"]) or ""
     secs = []
     for part in txt.split("\n### ")[0:]:
         part = part[4:] if part.startswith("### ") else part
         t, _, b = part.partition("\n")
         t = t.strip(); b = b.strip()
-        if not t or not b or any(k in t.replace(" ", "") for k in _NOTES_SKIP):
+        g = grp(t) if t else None
+        if not t or not b or not g or g == "asset":
             continue
-        pri = next((i for i, k in enumerate(_NOTES_ORDER) if k in t.replace(" ", "")), 99)
-        grp = "mezz" if re.search(r"전환사채|신주인수권|교환사채|파생|전환우선주|상환전환|복합금융", t.replace(" ", "")) else "debt"   # 메자닌 관련 절은 3-2로
-        secs.append((pri, t, b, grp))
+        secs.append((pri(t), t, b, g))
     secs.sort(key=lambda x: x[0])
     out, used, trunc = [], 0, False
-    for _, t, b, grp in secs:
+    for _, t, b, g in secs:
         if used >= total:
             trunc = True; break
         if len(b) > per_sec:
             b = b[:per_sec] + " …(이하 생략)"; trunc = True
-        out.append({"t": t, "b": b, "g": grp}); used += len(b)
+        out.append({"t": t, "b": b, "g": g}); used += len(b)
     return {"rcept_no": r["rcept_no"], "report_nm": r["report_nm"], "sections": out, "truncated": trunc} if out else None
 
 

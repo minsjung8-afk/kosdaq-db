@@ -177,6 +177,17 @@ const 억=v=>v==null?'-':(v/1e8).toLocaleString('ko-KR',{maximumFractionDigits:0
 const pct=v=>v==null?'-':v.toFixed(1)+'%';
 const num=v=>v==null?'-':Math.round(Number(v)).toLocaleString('ko-KR');
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// 주석 원문 발췌 렌더러(v2: 문단+표 블록 / v1: 평문). KW: 하이라이트 정규식
+function notesSec(sec,KW){
+  const body=sec.blocks?sec.blocks.map(b=>{
+    if(b.p) return `<div style="font-size:12px;line-height:1.6;white-space:pre-wrap;margin:4px 0">${esc(b.p).replace(KW,'<mark style="background:#fff1c2;padding:0 1px">$1</mark>')}</div>`;
+    const rows=b.tbl.rows, u=b.tbl.unit; const un=u===1e3?'천원':u===1e6?'백만원':u===1e8?'억원':u===1e9?'십억원':u===1e4?'만원':'원';
+    const isNum=c=>/^[(\-△▲]?[\d,]+(\.\d+)?\)?$/.test((c||'').replace(/\s/g,''));
+    return `<div class="src" style="margin:4px 0 2px">단위 ${un}</div><div class="twrap" style="margin:0 0 8px"><table style="font-size:11.5px"><tr>${rows[0].map(c=>`<th>${esc(c)}</th>`).join('')}</tr>${rows.slice(1).map(r=>`<tr>${r.map((c,i)=>`<td${isNum(c)?' class="n"':''} style="${i===0?'font-weight:600;color:var(--navy2);white-space:nowrap':''}">${esc(c)}</td>`).join('')}</tr>`).join('')}</table></div>`;
+  }).join(''):`<div style="font-size:12px;line-height:1.6;white-space:pre-wrap">${esc(sec.b||'').replace(KW,'<mark style="background:#fff1c2;padding:0 1px">$1</mark>')}</div>`;
+  const len=sec.blocks?sec.blocks.reduce((a,b)=>a+(b.p?b.p.length:b.tbl.rows.length*30),0):(sec.b||'').length;
+  return `<details${sec.blocks&&sec.blocks.some(b=>b.tbl)&&/차입금|사채|만기/.test(sec.t)?' open':''} style="margin:0 0 4px;border:1px solid var(--line);border-radius:6px;background:#fbfcfe"><summary style="cursor:pointer;padding:6px 10px;font-weight:700;font-size:12.5px;color:var(--navy2)">${esc(sec.t)} <small style="color:var(--mute);font-weight:400">${sec.blocks?sec.blocks.filter(b=>b.tbl).length+'표':len.toLocaleString()+'자'}</small></summary><div style="padding:4px 12px 10px;max-height:560px;overflow:auto">${body}</div></details>`;
+}
 let items=[],cur=null;
 
 fetch('data/companies.json').then(r=>r.json()).then(j=>{
@@ -458,8 +469,8 @@ async function open(code){
    const nrDebt=nr&&nr.sections?nr.sections.filter(x=>x.g!=='mezz'):[];
    if(nrDebt.length){   // 주석 원문 발췌(비용 0): 절 제목별 접기 — 구조화 결과의 대조용 또는 구조화 전 1차 자료
      const KW=/(차입금|사채|우발|담보|보증|약정|소송|리스|파생|만기|한도|연체|기한의 이익)/g;
-     h+=`<div class="src" style="margin:${ns?'12px':'2px'} 0 4px"><b>주석 원문 발췌</b> · ${esc(nr.report_nm||'')} ${nr.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${nr.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · 차입금·사채·우발채무·담보·보증·약정·소송·리스 절만(전환사채·파생은 3-2) · 표는 평문으로 펼쳐져 있어 숫자 열 순서는 원문 확인${nr.truncated?' · 일부 절은 길이 제한으로 잘림':''}</div>`;
-     h+=nrDebt.map(sec=>`<details style="margin:0 0 4px;border:1px solid var(--line);border-radius:6px;background:#fbfcfe"><summary style="cursor:pointer;padding:6px 10px;font-weight:700;font-size:12.5px;color:var(--navy2)">${esc(sec.t)} <small style="color:var(--mute);font-weight:400">${(sec.b||'').length.toLocaleString()}자</small></summary><div style="padding:4px 12px 10px;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:420px;overflow:auto">${esc(sec.b).replace(KW,'<mark style="background:#fff1c2;padding:0 1px">$1</mark>')}</div></details>`).join('');
+     h+=`<div class="src" style="margin:${ns?'12px':'2px'} 0 4px"><b>주석 원문 발췌</b> · ${esc(nr.report_nm||'')} ${nr.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${nr.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · 차입금·사채·우발채무·담보·보증·약정·소송·리스 절(전환사채·파생은 3-2) · 연결 주석 먼저, 같은 절의 별도 주석은 [별도] 표기 · 차입금·만기 표는 펼쳐 둠${nr.truncated?' · 일부 절은 길이 제한으로 잘림':''}</div>`;
+     h+=nrDebt.map(sec=>notesSec(sec,KW)).join('');
    }
    h+=`</section>`;}
     const mo=d.mezz_out||[], mi=d.mezz_issue||[];
@@ -489,7 +500,7 @@ async function open(code){
     {const nr2=d.notes_raw, nrM=nr2&&nr2.sections?nr2.sections.filter(x=>x.g==='mezz'):[];   // 메자닌 관련 주석 원문(전환사채·신주인수권부사채·교환사채·파생상품부채) — 비용 0
      if(nrM.length){ const KW2=/(전환사채|신주인수권|교환사채|파생|전환가|행사가|조기상환|풋|콜|리픽싱|만기|사채할인|전환권)/g;
        h+=`<div class="src" style="margin:10px 0 4px"><b>주석 원문 발췌(메자닌)</b> · ${esc(nr2.report_nm||'')} ${nr2.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${nr2.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · 재무제표 주석의 전환사채·신주인수권부사채·교환사채·파생상품부채 절 · 위 표(공시·자본금 변동사항 기준)와 장부금액·전환권대가 대조용</div>`;
-       h+=nrM.map(sec=>`<details style="margin:0 0 4px;border:1px solid var(--line);border-radius:6px;background:#fbfcfe"><summary style="cursor:pointer;padding:6px 10px;font-weight:700;font-size:12.5px;color:var(--navy2)">${esc(sec.t)} <small style="color:var(--mute);font-weight:400">${(sec.b||'').length.toLocaleString()}자</small></summary><div style="padding:4px 12px 10px;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:420px;overflow:auto">${esc(sec.b).replace(KW2,'<mark style="background:#fff1c2;padding:0 1px">$1</mark>')}</div></details>`).join('');
+       h+=nrM.map(sec=>notesSec(sec,KW2)).join('');
      }}
     h+=`</section>`;
   }

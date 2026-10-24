@@ -235,6 +235,11 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                                 (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
                 if x:
                     k["da"] = x[0]
+                else:            # 2026-10-24: 주석 변동표(유형·무형·사용권자산)에서 뽑은 상각비(da_notes) 폴백
+                    x = con.execute("SELECT da FROM da_notes WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND da IS NOT NULL",
+                                    (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
+                    if x:
+                        k["da"] = x[0]
             except Exception:  # noqa
                 pass
         k["ebitda"] = (k["op_income"] + k["da"]) if k.get("op_income") is not None and k["da"] is not None else None
