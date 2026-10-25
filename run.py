@@ -254,7 +254,7 @@ def main():
                     print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
     if a.job == "audit_fs":                  # 감사보고서(pblntf_ty F) 본문 표 → fin_raw/KPI. 기본: 비상장 중 연간 KPI 없는 회사. --codes로 지정, --dry-run으로 점검만
         import audit_fs
-        audit_fs.run([p[0] for p in pairs] if a.codes else None, year=a.year - 1, con=con, dry=a.dry_run, new_only=not a.codes, source="web" if a.web else "api")
+        audit_fs.run([p[0] for p in pairs] if a.codes else None, year=a.year - 1, con=con, dry=a.dry_run, new_only=("recheck" if a.force else not a.codes), source="web" if a.web else "api")   # --force: 빈 KPI(CF·순이익) 회사 재파싱
     if a.job == "daily":                     # 평일 아침: 시세 + 수시공시 델타(전환청구·리픽싱·5%보고·주요이벤트)
         import prices, delta, subst
         prices.run(pairs, a.year, markets=a.market)
