@@ -235,7 +235,7 @@ def _norm_nm(nm):
     """계정명 정규화: 공백·주석표시 '(주석15)'·앞 번호 'Ⅰ.','1.','(1)' 제거 — 정확 일치 매칭 누락 방지"""
     import re
     s = (nm or "").replace(" ", "").replace("\u3000", "")
-    s = re.sub(r"\((주석|주)[^)]*\)", "", s)
+    s = re.sub(r"\((주석|주|Note|\*)[^)]*\)|<[^>]*>|\[[^\]]*\]", "", s)
     s = re.sub(r"^(\(\d+\)|([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+|\d+|[가-하])[.)])", "", s)
     return s
 
@@ -250,7 +250,22 @@ def _pick(rows, ids, names, sj=None):
             an = _norm_nm(r["account_nm"])
             if an == nm.replace(" ", "") and (sj is None or r["sj_div"] in sj):
                 return r["thstrm_amount"]
+    pat = _FALLBACK_RE.get(tuple(ids))
+    if pat:                                   # 감사보고서 표의 변형 계정명(2026-10-25: '영업활동으로인한순현금흐름' 등으로 영업CF 누락 6사)
+        for r in rows:
+            if (sj is None or r["sj_div"] in sj) and r.get("thstrm_amount") is not None and pat.fullmatch(_norm_nm(r["account_nm"])):
+                return r["thstrm_amount"]
     return None
+
+
+import re as _re
+_FALLBACK_RE = {
+    ("ifrs-full_CashFlowsFromUsedInOperatingActivities",): _re.compile(r"영업활동(으로|에서|으로부터|으로부터의)?(인한|의|발생한|창출된|조달된)?(순)?현금(흐름|유입|유출|유입\(유출\)|흐름합계)"),
+    ("ifrs-full_CashFlowsFromUsedInInvestingActivities",): _re.compile(r"투자활동(으로|에서|으로부터)?(인한|의|발생한)?(순)?현금(흐름|유입|유출|유입\(유출\)|흐름합계)"),
+    ("ifrs-full_CashFlowsFromUsedInFinancingActivities",): _re.compile(r"재무활동(으로|에서|으로부터)?(인한|의|발생한)?(순)?현금(흐름|유입|유출|유입\(유출\)|흐름합계)"),
+    ("ifrs-full_Assets",): _re.compile(r"(자산|총자산)(총계|합계|총액|계)?(\(.*\))?"),
+    ("ifrs-full_ProfitLoss",): _re.compile(r"(연결)?(당기|당해연도|당기의)?순(이익|손실|손익)(\(.*\))?"),
+}
 
 
 def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
