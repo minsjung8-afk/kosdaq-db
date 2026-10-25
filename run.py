@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -185,6 +185,42 @@ def main():
                     print(f"[newlist] {nm} 오류: {e}", flush=True)
         else:
             print("[newlist] 신규 상장 없음", flush=True)
+    if a.job == "unlisted_add":              # 비상장 등급사 추가(사용자 결정 2026-10-25: 1군 일반기업 77사부터): data/unlisted_seed.csv → company(market=UNLISTED, stock_code='U'+고유번호) → 미니 파이프라인
+        import csv, listing, financials, quarters, business, mezz, fss_rating
+        seed = list(csv.DictReader(open(Path(__file__).resolve().with_name("unlisted_seed.csv"), encoding="utf-8")))
+        if a.codes:
+            seed = [r for r in seed if r["corp_code"] in set(a.codes)]
+        have = {r[0] for r in con.execute("SELECT corp_code FROM company")}
+        new = []
+        for r in seed:
+            cc = r["corp_code"].strip()
+            if cc in have:
+                continue
+            nm = r["corp_name"].replace("(주)", "").replace("주식회사", "").strip()
+            try:
+                listing.upsert_company(con, cc, "U" + cc, {"corp_name": nm, "market": "UNLISTED"})
+                new.append(cc)
+            except Exception as e:  # noqa
+                print(f"[unlisted_add] {nm}({cc}) 개황 실패: {e}", flush=True)
+        print(f"[unlisted_add] 신규 {len(new)}사 / 시드 {len(seed)}사 (이미 있음 {len(seed)-len(new)})", flush=True)
+        if new:
+            for nm, fn in (("fin", lambda: financials.run_annual_fast(new, a.year - 1, con=con)),      # 사업보고서 제출사는 API로 바로(감사보고서만 내는 회사는 skip 기록 → 2차 파서 대상)
+                           ("fin_prev", lambda: financials.run_annual_fast(new, a.year - 2, con=con)),
+                           ("fin_ofs", lambda: financials.run_ofs(new, a.year - 1, con=con)),
+                           ("quarters", lambda: quarters.run(new, con=con)),
+                           ("biz", lambda: business.run(new, a.year - 1)),
+                           ("mezz", lambda: mezz.run(set(new), new_only=True)),
+                           ("rating", lambda: fss_rating.run(set(new))),
+                           ("notes", lambda: business.run_notes(con, new)),
+                           ("da_notes", lambda: __import__("notes_v2").run(set(new), con=con)),
+                           ("summarize", lambda: __import__("summarize").run_all(set(new), model="haiku", force=False))):
+                try:
+                    print(f"[unlisted_add] {nm} 시작 ({len(new)}사)", flush=True); fn(); con.commit()
+                except Exception as e:  # noqa
+                    print(f"[unlisted_add] {nm} 오류: {e}", flush=True)
+            miss = [c for c in new if not con.execute("SELECT 1 FROM fin_kpi WHERE corp_code=? AND reprt_code='11011' LIMIT 1", (c,)).fetchone()]
+            names = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+            print(f"[unlisted_add] 재무 미확보(사업보고서 없음 → 감사보고서 파서 필요) {len(miss)}사: " + ", ".join(names.get(c, c) for c in miss), flush=True)
     if a.job == "daily":                     # 평일 아침: 시세 + 수시공시 델타(전환청구·리픽싱·5%보고·주요이벤트)
         import prices, delta, subst
         prices.run(pairs, a.year, markets=a.market)
