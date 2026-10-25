@@ -194,6 +194,15 @@ def main():
     if a.job == "unlisted_add":              # 비상장 등급사 추가(사용자 결정 2026-10-25: 1군 일반기업 77사부터): data/unlisted_seed.csv → company(market=UNLISTED, stock_code='U'+고유번호) → 미니 파이프라인
         import csv, listing, financials, quarters, business, mezz, fss_rating
         seed = list(csv.DictReader(open(Path(__file__).resolve().with_name("unlisted_seed.csv"), encoding="utf-8")))
+        if a.type == "전체등급":            # 2026-10-25 사용자 결정: 1군 기준(비금융·비공공·비SPC) + ICR·회사채·CP 중 하나라도 있는 비상장사 전부 추가
+            import unlisted2
+            extra = [{"corp_code": r["DART고유번호"], "corp_name": r["회사명"], "grade": r["대표등급"]}
+                     for r in unlisted2.run(days=a.limit or 456) if r["구분"] == "일반기업" and r["DART고유번호"]]
+            known = {r["corp_code"] for r in seed}
+            for r in extra:                       # 같은 회사가 표기 2가지로 잡히는 경우(대륜E&S·대륜이엔에스) 1번만
+                if r["corp_code"] not in known:
+                    known.add(r["corp_code"]); seed.append(r)
+            print(f"[unlisted_add] 등급 전수 명단 추가 후보 {len(extra)}사 → 시드 합계 {len(seed)}사", flush=True)
         if a.codes:
             seed = [r for r in seed if r["corp_code"] in set(a.codes)]
         if a.debug:                          # --debug <고유번호…>: 잘못 등록된 비상장사 제거(시드 고유번호 오류 정정용, UNLISTED만) 후 시드대로 재등록
