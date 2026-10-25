@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -269,6 +269,9 @@ def main():
                     __import__("audit_fs").run(miss, year=a.year - 1, con=con)
                 except Exception as e:  # noqa
                     print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
+    if a.job == "review":                    # 최근 분기·반기 검토의견(상장사, 1콜/사) — --codes 지정 시 그 회사만, 기본은 미조회 상장사 전부
+        import business
+        business.run_review(con, [p[0] for p in pairs] if a.codes else None, verbose=bool(a.codes))
     if a.job == "coverage":                  # 항목별 수록 현황·실패 사유 진단(2026-10-25 사용자 요청: 메자닌·차입금·사업내용 등 미진한 부분 팔로업) — DART 호출 없음
         def has(sql):
             try:
@@ -351,6 +354,7 @@ def main():
                  ("summarize", lambda: (__import__("summarize").run_all(None, model="haiku", force=False),
                                         __import__("summarize").run_unlisted(None, model="haiku", force=False))),   # 새로 받은 사업보고서만 Haiku 요약 + 사업보고서 없는 비상장사(감사보고서·신평서 기반)
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
+                 ("review", lambda: business.run_review(con)),   # 최근 분기·반기 검토의견(미조회분만, 2026-10-26)
                  ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
                  ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),
                  ("fin_yoy", lambda: financials.run_yoy(ccs, con=con)),       # 전년동기 BS 보강   # 별도 재무 보강(연결만 있는 회사)

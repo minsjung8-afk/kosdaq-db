@@ -272,6 +272,7 @@ def company_detail(con, c):
     d = {
         "company": {**c, "adres": re.sub(r"&nbsp;?|\s+", " ", c.get("adres") or "").strip()},   # DART 주소의 &nbsp 제거
         "audit": q(con, "SELECT bsns_year, adtor, adt_opinion, emphs_matter, core_adt_matter FROM audit_opinion WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 3", cc),
+        "review": _review(con, cc),
         "shareholders": _shareholders(con, cc),
         "minor": (q(con, "SELECT * FROM minor_shareholder WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc) or [None])[0],
         "business": {"year": b.get("bsns_year"), "rcept_no": b.get("rcept_no"),
@@ -311,6 +312,9 @@ def company_detail(con, c):
                                ORDER BY trmend_book_amt DESC LIMIT 8""", cc, cc),   # 최신 보고서(접수번호 최대) 세트
     }
     d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], d["ratings"])
+    rv = d.get("review")
+    if rv and rv.get("opinion") and not re.match(r"^\s*적정", rv["opinion"]):     # 반기·분기 검토의견 비적정 — 다음 연말 감사의견의 선행 신호
+        d["flags"].insert(0, (f"{rv['period']} 검토의견 비적정", "red", f"{rv['bsns_year']} {rv['period']} {rv['opinion']} ({rv.get('adtor') or ''})"))
     halt = [r for r in prices[-60:] if r["close"] and not r["volume"] and r["open"] == r["high"] == r["low"] == r["close"]]   # 거래정지일(시·고·저 평탄화된 행)
     if prices and prices[-1] in halt:
         n = 0
@@ -377,6 +381,21 @@ def _rank(sorted_vals, v, lower_better=False):
     else:
         rank = (n - bisect.bisect_right(sorted_vals, v)) + 1   # 자기보다 큰 값의 수 + 1
     return {"rank": min(rank, n), "n": n, "v": v}
+
+
+_RC_NM = {"11012": "반기", "11013": "1분기", "11014": "3분기"}
+
+
+def _review(con, cc):
+    """최근 분기·반기 검토의견(2026-10-26) — audit_review 없으면 None"""
+    try:
+        r = con.execute("""SELECT bsns_year, reprt_code, adtor, opinion FROM audit_review WHERE corp_code=? AND opinion IS NOT NULL
+                           ORDER BY bsns_year DESC, CASE reprt_code WHEN '11014' THEN 3 WHEN '11012' THEN 2 ELSE 1 END DESC LIMIT 1""", (cc,)).fetchone()
+    except Exception:  # noqa
+        return None
+    if not r:
+        return None
+    return {"bsns_year": r[0], "period": _RC_NM.get(r[1], r[1]), "adtor": r[2], "opinion": r[3]}
 
 
 def _flags(c, kpi, ps, audit, events, ratings):
