@@ -285,8 +285,17 @@ def main():
                 return {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM other_invest WHERE reprt_code IN ('11012','11013','11014')")}
             except Exception:  # noqa
                 return set()
+        def audit_only(con, _c={}):
+            if "v" not in _c:              # 재무가 감사보고서 파서로만 들어온 비상장사(사업보고서 미제출)
+                try:
+                    _c["v"] = {r[0] for r in con.execute("""SELECT DISTINCT r.corp_code FROM fin_raw r JOIN company c ON c.corp_code=r.corp_code
+                               WHERE c.market='UNLISTED' AND r.account_id='-표준계정코드 미사용-'
+                               AND r.corp_code NOT IN (SELECT corp_code FROM fin_raw WHERE account_id<>'-표준계정코드 미사용-')""")}
+                except Exception:  # noqa
+                    _c["v"] = set()
+            return _c["v"]
         steps = [("mezz", lambda: mezz.run(ccs, new_only=True)),
-                 ("biz", lambda: business.run([c for c in ccs if c not in done("business")], a.year - 1)),
+                 ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
                  ("summarize", lambda: __import__("summarize").run_all(None, model="haiku", force=False)),   # 새로 받은 사업보고서만 Haiku 요약(기존은 건너뜀)
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
