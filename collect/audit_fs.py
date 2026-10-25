@@ -140,26 +140,31 @@ def parse_statements(xml_text):
     found = {}
     cur_sj = None
     pos = 0
-    for tm in TABLE_RE.finditer(xml_text):
-        seg = xml_text[pos:tm.start()]
-        for line in _strip(seg).splitlines():
-            t = line.replace(" ", "").replace("　", "")
+    diag = []
+
+    def scan(text):
+        nonlocal cur_sj
+        for line in _strip(text).splitlines():
+            t = re.sub(r"[\s|\u3000]+", "", line)          # 표 셀 구분자(|)·공백 제거
             if not t or len(t) > 30:
                 continue
             for rx, sj in _TITLE_MAP:
                 if rx.search(t):
                     cur_sj = sj
+                    diag.append(t)
                     break
+    for tm in TABLE_RE.finditer(xml_text):
+        scan(xml_text[pos:tm.start()])
         if cur_sj == "NOTES" and found:
             break
         pos = tm.end()
-        if cur_sj in (None, "SCE", "NOTES"):
-            continue
-        unit = _unit_of(_strip(xml_text[max(0, tm.start() - 800):tm.start()]))
-        rows = parse_table(tm.group(0), unit)
+        unit = _unit_of(_strip(xml_text[max(0, tm.start() - 1500):tm.start()]))
+        rows = parse_table(tm.group(0), unit) if cur_sj not in (None, "SCE", "NOTES") else None
         if not rows:
+            scan(tm.group(0))        # 제목('재 무 상 태 표'·'제 N 기 … 현재'·단위)이 작은 표 안에 있는 양식
             continue
         found.setdefault(cur_sj, {"unit": unit, "rows": []})["rows"].extend(rows)   # 쪽 나뉜 표는 이어붙임
+    found["_diag"] = diag
     return found
 
 
@@ -193,15 +198,26 @@ def fetch_year(con, cc, year, dry=False):
     """한 사업연도: 연결·별도 감사보고서 → fin_raw(당기 + 전기 보충) → KPI. 반환 {fs: 행수}"""
     reps = find_audit_reports(cc, year)
     got = {}
+    if dry and not any(reps.values()):
+        js = dart_get("list", corp_code=cc, bgn_de=f"{year + 1}0101", end_de=f"{year + 1}1231", page_count=100)
+        print(f"  {year} 감사보고서 없음 · 그 해 공시: {[r['report_nm'][:20] for r in js.get('list', [])][:12]}", flush=True)
     for fs in ("CFS", "OFS"):
         rc = reps.get(fs)
         if not rc:
             continue
         xml = fetch_document_xml(rc)
         st = parse_statements(xml)
+        diag = st.pop("_diag", [])
         lst = to_api_rows(st, rc)
         if dry:
-            print(f"  [{fs}] {rc} " + " ".join(f"{k}:{len(v['rows'])}행(단위{v['unit']})" for k, v in st.items()), flush=True)
+            print(f"  [{fs}] {rc} " + " ".join(f"{k}:{len(v['rows'])}행(단위{v['unit']})" for k, v in st.items()) +
+                  f" · 제목감지 {diag[:8]} · 표 {len(TABLE_RE.findall(xml))}개 · {len(xml)//1000}KB", flush=True)
+            if not st:
+                for i, tm in enumerate(TABLE_RE.finditer(xml)):
+                    if i >= 12:
+                        break
+                    rws = [[t for t, _ in _cells(tr)] for tr in TR_RE.findall(tm.group(0))][:2]
+                    print(f"     표{i} {rws}"[:200], flush=True)
             for sj in ("BS", "IS", "CIS", "CF"):
                 for nm, c, p in (st.get(sj) or {}).get("rows", [])[:4]:
                     print(f"     {sj} {nm} | {c} | {p}", flush=True)
