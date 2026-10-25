@@ -414,7 +414,7 @@ def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6):
                 con.execute("""INSERT INTO business (corp_code, bsns_year, rcept_no, reprt_code, overview_text, summary_json, summary_md, summarized_at, fetched_at)
                                VALUES (?,?,?,?,?,?,?,?,?)
                                ON CONFLICT(corp_code, bsns_year) DO UPDATE SET summary_json=excluded.summary_json, summary_md=excluded.summary_md,
-                               summarized_at=excluded.summarized_at, overview_text=COALESCE(business.overview_text, excluded.overview_text),
+                               summarized_at=excluded.summarized_at, overview_text=COALESCE(excluded.overview_text, business.overview_text),
                                rcept_no=COALESCE(business.rcept_no, excluded.rcept_no)""",
                             (cc, y, arc, "11011", ov or None, json.dumps(js, ensure_ascii=False), js.get("summary_md"), now(), now()))
                 n += 1
