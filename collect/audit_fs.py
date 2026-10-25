@@ -19,12 +19,14 @@ import financials
 _CELL_A_RE = re.compile(r"<T([DHEU])\b([^>]*)>(.*?)</T[DHEU]>", re.S | re.I)
 _COLSPAN_RE = re.compile(r"COLSPAN\s*=\s*\"?(\d+)", re.I)
 
+_TP = r"^(\d+\.|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.?)?(연결|별도)?"          # 앞 번호('4.', 'Ⅳ.')·연결/별도
+_TS = r"(\([^)]{0,12}\))?$"                                # 뒤 괄호('(간접법)', '(계속)')
 _TITLE_MAP = [   # 정규화(공백 제거) 제목 → sj_div. 긴 이름을 먼저 본다
-    (re.compile(r"^(연결)?재무상태표$"), "BS"),
-    (re.compile(r"^(연결)?포괄손익계산서$"), "CIS"),
-    (re.compile(r"^(연결)?손익계산서$"), "IS"),
-    (re.compile(r"^(연결)?현금흐름표$"), "CF"),
-    (re.compile(r"^(연결)?자본변동표$"), "SCE"),
+    (re.compile(_TP + r"(재무상태표|대차대조표)" + _TS), "BS"),
+    (re.compile(_TP + r"포괄손익계산서" + _TS), "CIS"),
+    (re.compile(_TP + r"손익계산서" + _TS), "IS"),
+    (re.compile(_TP + r"현금흐름표" + _TS), "CF"),
+    (re.compile(_TP + r"(자본변동표|이익잉여금처분계산서|결손금처리계산서|이익잉여금처분계산서\(안\))" + _TS), "SCE"),
     (re.compile(r"^((연결)?재무제표(에대한)?주석|주석)$"), "NOTES"),
 ]
 _CUR_RE = re.compile(r"(당\s*\)?\s*기|당\s*기|당기말|당분기|당반기)")
@@ -270,8 +272,9 @@ def fetch_year(con, cc, year, dry=False, chain=None):
         warn = validate(st) if st else ["재무제표 표 없음"]
         a, ap = _row(st, "BS", "자산총계")
         if chain is not None:
-            if (fs, year) in chain and ap is not None and chain[(fs, year)] is not None and abs(chain[(fs, year)] - ap) > abs(ap) * 0.005 + 1000:
-                warn.append(f"연도연쇄 불일치({year}전기 {ap:,.0f} vs 전년보고서 당기 {chain[(fs, year)]:,.0f})")
+            # chain[(fs, Y)] = 다음 해 보고서가 '전기'로 적은 Y년 자산총계 → Y년 보고서의 '당기'(a)와 같아야 함
+            if (fs, year) in chain and a is not None and chain[(fs, year)] is not None and abs(chain[(fs, year)] - a) > abs(a) * 0.005 + 1000:
+                warn.append(f"연도연쇄 불일치({year} 당기 {a:,.0f} vs 다음해 보고서 전기 {chain[(fs, year)]:,.0f} — 재작성·정정 가능)")
             chain[(fs, year - 1)] = ap
         if warn:
             print(f"  [{fs}] {year} {rc} 검증경고: {'; '.join(warn)}", flush=True)
