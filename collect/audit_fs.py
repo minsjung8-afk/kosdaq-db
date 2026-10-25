@@ -144,7 +144,7 @@ def parse_statements(xml_text):
     pos = 0
     diag = []
 
-    def scan(text):
+    def scan(text, in_table=False):
         nonlocal cur_sj
         for line in _strip(text).splitlines():
             t = re.sub(r"[\s|\u3000]+", "", line)          # 표 셀 구분자(|)·공백 제거
@@ -152,6 +152,8 @@ def parse_statements(xml_text):
                 continue
             for rx, sj in _TITLE_MAP:
                 if rx.search(t):
+                    if in_table and sj == "NOTES":
+                        break                               # 2026-10-25: 자본변동표 머리행의 '주 석' 열을 주석 절 시작으로 오인 → 현금흐름표 누락(30여 사)
                     cur_sj = sj
                     diag.append(t)
                     break
@@ -161,11 +163,21 @@ def parse_statements(xml_text):
             break
         pos = tm.end()
         unit = _unit_of(_strip(xml_text[max(0, tm.start() - 1500):tm.start()]))
-        rows = parse_table(tm.group(0), unit) if cur_sj not in (None, "SCE", "NOTES") else None
+        sj = cur_sj
+        rows = parse_table(tm.group(0), unit) if sj not in ("NOTES",) else None
+        if rows and sj in (None, "SCE"):
+            nms = [r[0] for r in rows]                      # 제목을 못 찾은 표: 내용으로 현금흐름표 판별(영업·투자/재무활동 행)
+            if any("영업활동" in n for n in nms) and any(("투자활동" in n or "재무활동" in n) for n in nms):
+                sj = "CF"
+                diag.append("CF(내용판별)")
+            else:
+                rows = None
         if not rows:
-            scan(tm.group(0))        # 제목('재 무 상 태 표'·'제 N 기 … 현재'·단위)이 작은 표 안에 있는 양식
+            scan(tm.group(0), in_table=True)        # 제목('재 무 상 태 표'·'제 N 기 … 현재'·단위)이 작은 표 안에 있는 양식
             continue
-        found.setdefault(cur_sj, {"unit": unit, "rows": []})["rows"].extend(rows)   # 쪽 나뉜 표는 이어붙임
+        if sj == "CF" and cur_sj != "CF":
+            cur_sj = "CF"
+        found.setdefault(sj, {"unit": unit, "rows": []})["rows"].extend(rows)   # 쪽 나뉜 표는 이어붙임
     found["_diag"] = diag
     return found
 
@@ -318,9 +330,15 @@ def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_ba
         cs = list(corp_codes)
     else:
         q = "SELECT corp_code FROM company WHERE market='UNLISTED'"
-        if new_only:
+        if new_only == "recheck":       # 재파싱: 최근 연간 KPI에 영업CF·순이익·총자산 중 빈 값이 있는 비상장사(파서 개선 후 재적재용)
+            q += """ AND corp_code IN (SELECT corp_code FROM fin_kpi WHERE reprt_code='11011' AND bsns_year>=?
+                     AND (cfo IS NULL OR net_income IS NULL OR total_assets IS NULL))
+                     AND corp_code IN (SELECT DISTINCT corp_code FROM fin_raw WHERE account_id='-표준계정코드 미사용-')"""   # 감사보고서 출처만(API 적재분은 건드리지 않음)
+            cs = [r[0] for r in con.execute(q, (str(year - 1),))]
+        elif new_only:
             q += " AND corp_code NOT IN (SELECT corp_code FROM fin_kpi WHERE reprt_code='11011')"
-        cs = [r[0] for r in con.execute(q)]
+        if new_only != "recheck":
+            cs = [r[0] for r in con.execute(q)]
     names = dict(con.execute("SELECT corp_code, corp_name FROM company"))
     print(f"[audit_fs] 대상 {len(cs)}사 · 기준연도 {year} · {'점검만' if dry else '적재'}", flush=True)
     ok = 0
