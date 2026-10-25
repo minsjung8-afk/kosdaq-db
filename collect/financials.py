@@ -11,9 +11,9 @@ KPI_MAP = {
     "cogs":         (["ifrs-full_CostOfSales"], ["매출원가", "영업원가"]),
     "net_income":   (["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실", "연결당기순이익", "연결당기순이익(손실)",
                                                "연결당기순손익", "당기순이익(순손실)", "당기순손실(이익)", "연결당기순손실"]),   # 감사보고서 표(표준계정코드 없음) 대응
-    "total_assets": (["ifrs-full_Assets"], ["자산총계"]),
-    "total_liab":   (["ifrs-full_Liabilities"], ["부채총계"]),
-    "equity":       (["ifrs-full_Equity"], ["자본총계"]),
+    "total_assets": (["ifrs-full_Assets"], ["자산총계", "자산합계", "자산총액", "총자산"]),
+    "total_liab":   (["ifrs-full_Liabilities"], ["부채총계", "부채합계", "부채총액", "총부채"]),
+    "equity":       (["ifrs-full_Equity"], ["자본총계", "자본합계", "자본총액", "총자본"]),
     "cash":         (["ifrs-full_CashAndCashEquivalents"], ["현금및현금성자산"]),
     "cfo":          (["ifrs-full_CashFlowsFromUsedInOperatingActivities"], ["영업활동현금흐름", "영업활동으로 인한 현금흐름"]),
     "cfi":          (["ifrs-full_CashFlowsFromUsedInInvestingActivities"], ["투자활동현금흐름", "투자활동으로 인한 현금흐름", "투자활동으로인한현금흐름"]),

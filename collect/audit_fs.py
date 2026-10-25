@@ -261,9 +261,9 @@ def validate(st):
     """파싱 결과 자동 검증 → 경고 목록. 숫자가 틀린 채 조용히 들어가는 것을 막는다.
     ① 자산총계 = 부채총계 + 자본총계(0.5% 이내) ② 손익: 매출·당기순이익 존재 ③ 현금흐름: 영업활동 행 존재"""
     warn = []
-    a, ap = _row(st, "BS", "자산총계")
-    l, lp = _row(st, "BS", "부채총계")
-    e, ep = _row(st, "BS", "자본총계")
+    a, ap = _row(st, "BS", "자산총계", "자산합계", "자산총액", "총자산")
+    l, lp = _row(st, "BS", "부채총계", "부채합계", "부채총액", "총부채")
+    e, ep = _row(st, "BS", "자본총계", "자본합계", "자본총액", "총자본")
     le, _ = _row(st, "BS", "부채와자본총계", "부채및자본총계", "자본과부채총계", "부채자본총계")
     if a is None:
         warn.append("자산총계 없음")
@@ -314,7 +314,7 @@ def fetch_year(con, cc, year, dry=False, chain=None):
         st = parse_statements(xml)
         diag = st.pop("_diag", [])
         warn = validate(st) if st else ["재무제표 표 없음"]
-        a, ap = _row(st, "BS", "자산총계")
+        a, ap = _row(st, "BS", "자산총계", "자산합계", "자산총액", "총자산")
         if chain is not None:
             # chain[(fs, Y)] = 다음 해 보고서가 '전기'로 적은 Y년 자산총계 → Y년 보고서의 '당기'(a)와 같아야 함
             if (fs, year) in chain and a is not None and chain[(fs, year)] is not None and abs(chain[(fs, year)] - a) > abs(a) * 0.005 + 1000:
