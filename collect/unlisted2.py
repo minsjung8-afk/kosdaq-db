@@ -26,7 +26,7 @@ from fss_rating import parse  # noqa: E402
 URL = "https://www.fss.or.kr/fss/job/creditRatingReport/list.do"
 TYPES = ("기업신용평가", "일반사채", "기업어음", "전자단기사채")
 ABS = re.compile(r"유동화|ABS|ABCP|ABSTB|자산담보", re.I)
-TR = [("케이티앤지", "KT&G"), ("에이치디씨", "HDC"), ("에이치엘디앤아이", "HL디앤아이"), ("에이치엠엠", "HMM"), ("에스케이", "SK"), ("지에스", "GS"),
+TR = [("케이티앤지", "KT&G"), ("엘아이지", "LIG"), ("케이지", "KG"), ("에이치비", "HB"), ("에스디비", "SDB"), ("와이지", "YG"), ("제이와이피", "JYP"), ("디와이", "DY"), ("케이지씨", "KGC"), ("에이치디씨", "HDC"), ("에이치엘디앤아이", "HL디앤아이"), ("에이치엠엠", "HMM"), ("에스케이", "SK"), ("지에스", "GS"),
       ("엘지", "LG"), ("씨제이", "CJ"), ("케이티", "KT"), ("에이치디", "HD"), ("디비", "DB"), ("엘에스", "LS"), ("케이비", "KB"), ("비엔케이", "BNK"),
       ("디지비", "DGB"), ("에이치엘", "HL"), ("엘엑스", "LX"), ("케이씨씨", "KCC"), ("에이제이", "AJ"), ("오씨아이", "OCI"), ("티와이", "TY"),
       ("에이케이", "AK"), ("디엘", "DL"), ("엔에이치", "NH"), ("아이비케이", "IBK"), ("제이비", "JB"), ("에스비에스", "SBS"), ("에스지씨", "SGC"),
@@ -69,10 +69,34 @@ def dart_corps():
     z = zipfile.ZipFile(io.BytesIO(r.content))
     xml = z.read(z.namelist()[0]).decode("utf-8", errors="ignore")
     idx = {}
-    for m in re.finditer(r"<corp_code>(\d+)</corp_code>\s*<corp_name>(.*?)</corp_name>.*?<stock_code>\s*(\S*?)\s*</stock_code>", xml, flags=re.S):
-        for k in keys(m.group(2)):
-            idx.setdefault(k, []).append((m.group(1), m.group(2), m.group(3).strip() or None))
+    import html as _h
+    for m in re.finditer(r"<corp_code>(\d+)</corp_code>\s*<corp_name>(.*?)</corp_name>.*?<stock_code>\s*(\S*?)\s*</stock_code>\s*<modify_date>(\d*)</modify_date>", xml, flags=re.S):
+        nm = _h.unescape(m.group(2))                       # XML의 &amp; → & (대륜E&S·KT&G 매칭 누락 원인)
+        for k in keys(nm):
+            idx.setdefault(k, []).append((m.group(1), nm, m.group(3).strip() or None, m.group(4)))
     return idx
+
+
+def pick(hits, db):
+    """동명 여러 사: ① DB에 있는 코드 ② 종목코드 있는 코드(상장·상장폐지) 1개 ③ DART 최근 갱신(modify_date) 코드"""
+    if len(hits) <= 1:
+        return hits[0] if hits else None
+    in_db = [h for h in hits if h[0] in db]
+    if len(in_db) == 1:
+        return in_db[0]
+    st = [h for h in hits if h[2]]
+    if len(st) == 1:
+        return st[0]
+    # ④ 최근 15개월 공시가 있는 코드가 하나뿐이면 그것(DART list 1콜/후보, 최대 6) — 휴면 동명 법인 배제
+    try:
+        from common import dart_get
+        bgn = (date.today() - timedelta(days=456)).strftime("%Y%m%d")
+        live = [h for h in hits[:6] if dart_get("list", corp_code=h[0], bgn_de=bgn, page_count=1).get("list")]
+        if len(live) == 1:
+            return live[0]
+    except Exception as e:  # noqa
+        print(f"[unlisted2] 동명 확인 실패 {hits[0][1]}: {e}", flush=True)
+    return None                    # 판별 불가 → 'DART 동명 확인필요'로 남기고 자동 추가하지 않음
 
 
 def run(days=456, out_path="unlisted_candidates.xlsx"):
@@ -108,8 +132,11 @@ def run(days=456, out_path="unlisted_candidates.xlsx"):
             for h in idx.get(k, []):
                 hits[h[0]] = h
         hits = list(hits.values())
-        cc = hits[0][0] if len(hits) == 1 else ""
-        stock = hits[0][2] if len(hits) == 1 else None
+        nm0 = _base(d["name"])
+        need = not (nm0.endswith("지점") or SPC.search(d["name"]) or FIN.search(nm0) or PUB.search(nm0))
+        h = pick(hits, db) if (need or len(hits) <= 1) else (next((x for x in hits if x[0] in db), None))
+        cc = h[0] if h else ""
+        stock = h[2] if h else None
         nm = _base(d["name"])
         mk = db.get(cc, (None, None))
         if cc and mk[0] == "UNLISTED":
@@ -129,7 +156,8 @@ def run(days=456, out_path="unlisted_candidates.xlsx"):
         else:
             g = "일반기업"
         sub = "ICR보유" if d["ICR"] else "사채·CP만"
-        note = "" if cc else (f"DART 동명 {len(hits)}사: " + ",".join(h[0] for h in hits[:4]) if hits else "DART 미확인")
+        note = ("DART 미확인" if not hits else f"DART 동명 {len(hits)}사 확인필요: " + ",".join(x[0] for x in hits[:4])) if not cc else \
+               (f"동명 {len(hits)}사 중 선택" if len(hits) > 1 else "")
         grade = (d["ICR"] or d["BOND"] or d["CP"])[1]
         out.append({"구분": g, "세부": sub, "회사명": d["name"], "대표등급": grade, "ICR": d["ICR"][1] if d["ICR"] else "",
                     "회사채": d["BOND"][1] if d["BOND"] else "", "CP": d["CP"][1] if d["CP"] else "",
