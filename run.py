@@ -203,6 +203,11 @@ def main():
                 if r["corp_code"] not in known:
                     known.add(r["corp_code"]); seed.append(r)
             print(f"[unlisted_add] 등급 전수 명단 추가 후보 {len(extra)}사 → 시드 합계 {len(seed)}사", flush=True)
+        exf = Path(__file__).resolve().with_name("unlisted_exclude.csv")   # 2026-10-25 사용자 결정: 보증부 등급(은행·계열사 지급보증·연대보증)만 있는 회사는 제외 — 등급이 보증인 신용도라서
+        excl = {r["corp_code"] for r in csv.DictReader(open(exf, encoding="utf-8"))} if exf.exists() else set()
+        if excl:
+            seed = [r for r in seed if r["corp_code"] not in excl]
+            print(f"[unlisted_add] 제외 명단 {len(excl)}사 적용(보증부 등급만 보유 등)", flush=True)
         if a.codes:
             seed = [r for r in seed if r["corp_code"] in set(a.codes)]
         if a.debug:                          # --debug <고유번호…>: 잘못 등록된 비상장사 제거(시드 고유번호 오류 정정용, UNLISTED만) 후 시드대로 재등록
