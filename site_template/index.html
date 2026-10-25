@@ -251,7 +251,7 @@ function render(list){
   $('#cnt').textContent=`${list.length}개`;
   $('#list').innerHTML=list.slice(0,300).map(i=>`<div class="row${cur===i.code?' on':''}${i.delisted?' dlr':''}" data-c="${i.code}">
     <span class="nm"><span class="mk ${esc(i.market||'')}">${i.market==='KOSPI'?'코스피':i.market==='KONEX'?'코넥스':i.market==='UNLISTED'?'비상장':'코스닥'}</span>${esc(i.name)}${i.delisted?`<span class="dl" title="KRX 상장 목록에서 제외 확인일 ${esc(i.delisted)} · 재무·공시 데이터는 보존">상장폐지</span>`:''}${i.rating?`<span class="rt"${i.rt_st?` style="opacity:.55;text-decoration:line-through" title="${esc(i.rt_st)}"`:''}>${esc(i.rating)}</span>${i.rt_st?`<span class="src" style="font-size:10px;margin-left:3px">${i.rt_st==='등급 취소'?'취소':'만료'}</span>`:''}`:''}</span><span class="cd">${i.code}</span>
-    <span class="sub"><span>${esc(i.sector||'')}</span>${i.market==='UNLISTED'?'':`<span>시총 ${억(i.mcap)}억</span>`}<span>매출 ${억(i.rev)}억</span><span>부채비율 ${pct(i.debt)}</span>${i.per!=null?`<span>PER ${Number(i.per).toFixed(1)}</span>`:''}${i.ev_ebitda!=null?`<span>EV/EBITDA ${Number(i.ev_ebitda).toFixed(1)}</span>`:''}${i.red?`<span class="neg">⚑${i.red}</span>`:''}${i.amber?`<span style="color:var(--warn)">⚑${i.amber}</span>`:''}${i.opinion&&i.opinion!=='적정'?`<span class="neg">${esc(i.opinion)}</span>`:''}</span></div>`).join('')
+    <span class="sub"><span>${esc(i.sector||'')}</span>${i.market==='UNLISTED'?'':`<span>시총 ${억(i.mcap)}억</span>`}<span>매출 ${억(i.rev)}억</span><span>부채비율 ${pct(i.debt)}</span>${i.per!=null?`<span>PER ${Number(i.per).toFixed(1)}</span>`:''}${i.ev_ebitda!=null?`<span>EV/EBITDA ${Number(i.ev_ebitda).toFixed(1)}</span>`:''}${i.red?`<span class="neg">⚑${i.red}</span>`:''}${i.amber?`<span style="color:var(--warn)">⚑${i.amber}</span>`:''}${i.opinion&&!/^적정/.test(i.opinion)?`<span class="neg">${esc(i.opinion)}</span>`:''}</span></div>`).join('')
     +(list.length>300?'<div class="row"><span class="cd">상위 300개만 표시 · 검색어를 좁히세요</span></div>':'');
 }
 $('#list').addEventListener('click',e=>{const r=e.target.closest('.row');if(r&&r.dataset.c)open(r.dataset.c)});
@@ -261,7 +261,7 @@ async function open(code){
   const d=await fetch(`data/c/${code}.json`).then(r=>r.json()).catch(()=>null);
   if(!d){$('#main').innerHTML='<div class="empty">상세 데이터가 없습니다.</div>';return}
   const c=d.company, ps=d.price_summary||{}, kp=d.kpi.CFS||d.kpi.OFS||[], last=[...kp].reverse().find(r=>r.kind==='annual')||kp[kp.length-1]||{}, ao=d.audit[0];
-  const opClass=o=>!o?'':o==='적정'?'good':/한정/.test(o)?'warn':'bad';
+  const opClass=o=>!o?'':/^적정/.test(o)?'good':/한정/.test(o)?'warn':'bad';   // DART 값은 '적정의견'·'한정의견'·'의견거절'
   // 대표 등급: 장기(단기사채 제외)·비정정 최신 → 단기·비정정 최신 → 정정 포함 (build_site.current_rating과 같은 규칙, 2026-10-25)
   const isLong=r=>/기업신용평가|사채/.test(r.target_type||'')&&!/단기사채/.test(r.target_type||''), RT=d.ratings||[], RP=RT.filter(r=>!/정정/.test(r.eval_kind||''));
   const curRt=('rating_cur' in d)?d.rating_cur:(RP.find(isLong)||RP[0]||RT.find(isLong)||RT[0]), rtSt=d.rating_status;
