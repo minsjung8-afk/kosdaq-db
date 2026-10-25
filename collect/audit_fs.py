@@ -127,6 +127,12 @@ def parse_table(tbl_xml, unit, cont=None):
         if len(rows) < 6:
             return None
         cur, prev, hi = hc
+        hn = len(_expand(rows[hi]))
+        dn = max((len(_expand(r)) for r in rows[hi + 1:hi + 12]), default=hn)
+        if hn >= 2 and dn > hn and (dn - 1) % (hn - 1) == 0:      # 머리행은 '과목|당기|전기' 3칸인데 본문은 '과목|세부|합계|세부|합계' 5칸인 양식(colspan 없이) — 천일정기 2026-10-25
+            k = (dn - 1) // (hn - 1)
+            rm = lambda sp: None if sp is None else (1 + (sp[0] - 1) * k, 1 + (sp[1] - 1) * k)
+            cur, prev = rm(cur), rm(prev)
         _LAST_HC["v"] = {"cur": cur, "prev": prev, "ncol": max(len(_expand(r)) for r in rows[hi + 1:hi + 6] or [[]])}
     elif cont and rows and max(len(_expand(r)) for r in rows) >= cont["cur"][1] and max(len(_expand(r)) for r in rows) <= cont["ncol"] + 1:   # 열 수가 당기 열을 덮으면(빈 끝 셀 생략 양식 포함)
         cur, prev, hi = cont["cur"], cont["prev"], -1
@@ -384,6 +390,8 @@ def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_ba
                      AND (cfo IS NULL OR net_income IS NULL OR total_assets IS NULL))
                      AND corp_code IN (SELECT DISTINCT corp_code FROM fin_raw WHERE account_id='-표준계정코드 미사용-')"""   # 감사보고서 출처만(API 적재분은 건드리지 않음)
             cs = [r[0] for r in con.execute(q, (str(year - 1),))]
+        elif new_only == "all":           # 전체 재파싱: 감사보고서 출처 재무가 있는 회사 전부(파서 개선 후 일괄 교정, 2026-10-25 머리행 3칸·본문 5칸 양식 교정)
+            q += " AND corp_code IN (SELECT DISTINCT corp_code FROM fin_raw WHERE account_id='-표준계정코드 미사용-')"
         elif new_only:
             q += " AND corp_code NOT IN (SELECT corp_code FROM fin_kpi WHERE reprt_code='11011')"
         if new_only != "recheck":
