@@ -9,7 +9,8 @@ KPI_MAP = {
                      ["매출액", "수익(매출액)", "영업수익", "매출", "수익", "영업수익(매출액)", "매출액(영업수익)", "매출및지분법손익", "순영업수익"]),
     "op_income":    (["dart_OperatingIncomeLoss"], ["영업이익", "영업이익(손실)", "영업손익", "영업손실"]),
     "cogs":         (["ifrs-full_CostOfSales"], ["매출원가", "영업원가"]),
-    "net_income":   (["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)"]),
+    "net_income":   (["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실", "연결당기순이익", "연결당기순이익(손실)",
+                                               "연결당기순손익", "당기순이익(순손실)", "당기순손실(이익)", "연결당기순손실"]),   # 감사보고서 표(표준계정코드 없음) 대응
     "total_assets": (["ifrs-full_Assets"], ["자산총계"]),
     "total_liab":   (["ifrs-full_Liabilities"], ["부채총계"]),
     "equity":       (["ifrs-full_Equity"], ["자본총계"]),

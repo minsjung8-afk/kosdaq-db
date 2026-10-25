@@ -244,7 +244,7 @@ def validate(st):
     else:
         if not any(re.search(r"^(매출액?|영업수익|수익\(매출액\)|매출및지분법손익)$", n) for n in is_rows):
             warn.append("매출 행 없음")
-        if not any(n.startswith("당기순이익") or n.startswith("당기순손익") or n.startswith("당기순손실") for n in is_rows):
+        if not any(re.match(r"(연결)?당기순(이익|손익|손실)", n) for n in is_rows):
             warn.append("당기순이익 행 없음")
     cf_rows = [nm for nm, _, _ in (st.get("CF") or {}).get("rows", [])]
     if not cf_rows:
