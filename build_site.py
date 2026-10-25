@@ -509,7 +509,9 @@ def _notes_raw(con, cc, per_sec=7000, total=30000):
         tt = t.replace(" ", "")
         if any(k in tt for k in _NOTES_SKIP):
             return None
-        if re.search(r"전환사채|신주인수권|교환사채|파생|전환우선주|상환전환|복합금융", tt):
+        if "파생" in tt and not re.search(r"전환사채|신주인수권|교환사채|전환우선주|상환전환|복합금융", tt):
+            return None                      # 파생금융상품 절은 표시 안 함(사용자 결정 2026-10-26: 메자닌 칸만 남김)
+        if re.search(r"전환사채|신주인수권|교환사채|전환우선주|상환전환|복합금융", tt):
             return "mezz"
         if re.search(r"유형자산|무형자산|사용권자산|투자부동산|현금흐름", tt):
             return "asset"
