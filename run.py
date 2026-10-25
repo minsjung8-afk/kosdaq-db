@@ -155,8 +155,12 @@ def main():
         import quarters
         quarters.run([p[0] for p in corp_pairs(con)] if not a.codes else ccs, limit=a.limit, con=con)   # --limit = 미수집 회사 중 N사
     if a.job == "unlisted":                  # 비상장 등급사 드라이런(명단 xlsx, DB 변경 없음)
-        import unlisted
-        unlisted.run(years=(a.years[0] if a.years else 3), max_pages=a.max_pages, ttype=a.type)
+        if a.type == "전체등급":            # 2026-10-25: ICR + 일반사채 + 기업어음 + 전자단기사채 전수(15개월, --limit로 일수 지정)
+            import unlisted2
+            unlisted2.run(days=a.limit or 456)
+        else:
+            import unlisted
+            unlisted.run(years=(a.years[0] if a.years else 3), max_pages=a.max_pages, ttype=a.type)
     if a.job == "delta":
         import delta
         delta.run(days=a.limit)
