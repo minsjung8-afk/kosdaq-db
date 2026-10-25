@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -93,6 +93,7 @@ def main():
     ap.add_argument("--codes", nargs="*", help="대상 종목코드 지정 (예: --codes 060310 006840) — 모든 작업 공통")
     ap.add_argument("--hop", type=int, default=0, help="chain: 자동 이어하기 횟수(무한 반복 방지, 8회까지)")
     ap.add_argument("--steps", nargs="*", help="chain: 순서대로 실행할 작업 (예: --steps da quarters \"price:--start 2016-01-01\")")
+    ap.add_argument("--dry-run", action="store_true", help="audit_fs: 적재 없이 파싱 결과(표별 행수·앞 4행)만 출력")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
 
@@ -103,7 +104,7 @@ def main():
     con = connect()
     pairs = corp_pairs(con, a.limit)
     if a.codes:
-        want = set(a.codes); pairs = [p for p in corp_pairs(con) if p[1] in want]
+        want = set(a.codes); pairs = [p for p in corp_pairs(con) if p[1] in want or p[0] in want]   # 종목코드 또는 DART 고유번호(비상장은 U+고유번호)
         print(f"[run] 대상 종목 지정: {len(pairs)}사", flush=True)
     if a.new_only and a.job in ("fin", "biz", "rating", "news"):   # mezz는 모듈 내부에서 처리
         tbl = {"fin": "fin_raw", "biz": "business", "rating": "credit_rating", "news": "news"}.get(a.job)   # fin은 fin_raw 기준(quarters가 fin_kpi에 요약행을 먼저 넣을 수 있음)
@@ -220,7 +221,15 @@ def main():
                     print(f"[unlisted_add] {nm} 오류: {e}", flush=True)
             miss = [c for c in new if not con.execute("SELECT 1 FROM fin_kpi WHERE corp_code=? AND reprt_code='11011' LIMIT 1", (c,)).fetchone()]
             names = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
-            print(f"[unlisted_add] 재무 미확보(사업보고서 없음 → 감사보고서 파서 필요) {len(miss)}사: " + ", ".join(names.get(c, c) for c in miss), flush=True)
+            print(f"[unlisted_add] 사업보고서 재무 미확보 {len(miss)}사 → 감사보고서 파서(audit_fs): " + ", ".join(names.get(c, c) for c in miss), flush=True)
+            if miss:
+                try:
+                    __import__("audit_fs").run(miss, year=a.year - 1, con=con)
+                except Exception as e:  # noqa
+                    print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
+    if a.job == "audit_fs":                  # 감사보고서(pblntf_ty F) 본문 표 → fin_raw/KPI. 기본: 비상장 중 연간 KPI 없는 회사. --codes로 지정, --dry-run으로 점검만
+        import audit_fs
+        audit_fs.run([p[0] for p in pairs] if a.codes else None, year=a.year - 1, con=con, dry=a.dry_run, new_only=not a.codes)
     if a.job == "daily":                     # 평일 아침: 시세 + 수시공시 델타(전환청구·리픽싱·5%보고·주요이벤트)
         import prices, delta, subst
         prices.run(pairs, a.year, markets=a.market)
