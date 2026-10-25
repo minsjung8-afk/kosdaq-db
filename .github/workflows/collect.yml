@@ -15,7 +15,7 @@ on:
         description: "run.py job"
         default: "price"
         type: choice
-        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted, quarters, subst, fin_fast, rating_fix, da, chain, fin_ofs, fin_yoy, notes_struct, newlist, notes, invest, da_notes, rawdump, unlisted_add]
+        options: [init, fin, kpi, biz, mezz, price, rating, news, summarize, site, all, delta, daily, catchup, unlisted, quarters, subst, fin_fast, rating_fix, da, chain, fin_ofs, fin_yoy, notes_struct, newlist, notes, invest, da_notes, rawdump, unlisted_add, audit_fs]
       args:
         description: "추가 인자 (예: --years 2024 2025 / --limit 50 / --market KOSPI KONEX --new-only / unlisted: --type 기업신용평가)"
         default: ""
