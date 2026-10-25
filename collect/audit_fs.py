@@ -194,20 +194,87 @@ def find_audit_reports(corp_code, bsns_year):
     return out
 
 
-def fetch_year(con, cc, year, dry=False):
-    """한 사업연도: 연결·별도 감사보고서 → fin_raw(당기 + 전기 보충) → KPI. 반환 {fs: 행수}"""
-    reps = find_audit_reports(cc, year)
+SOURCE = "api"        # 'api'(OpenDART) | 'web'(dart.fss.or.kr 폴백). API 연결 실패가 나면 run()이 자동으로 'web'으로 전환
+_WEB_NOTE = "DART웹"
+
+
+def _src_find(cc, year):
+    if SOURCE == "web":
+        import dart_web
+        return dart_web.find_audit_reports(cc, year)
+    return find_audit_reports(cc, year)
+
+
+def _src_doc(rc):
+    if SOURCE == "web":
+        import dart_web
+        return dart_web.fetch_fs_html(rc)
+    return fetch_document_xml(rc)
+
+
+def _row(st, sj, *names):
+    for nm, c, p in (st.get(sj) or {}).get("rows", []):
+        if nm in names:
+            return c, p
+    return None, None
+
+
+def validate(st):
+    """파싱 결과 자동 검증 → 경고 목록. 숫자가 틀린 채 조용히 들어가는 것을 막는다.
+    ① 자산총계 = 부채총계 + 자본총계(0.5% 이내) ② 손익: 매출·당기순이익 존재 ③ 현금흐름: 영업활동 행 존재"""
+    warn = []
+    a, ap = _row(st, "BS", "자산총계")
+    l, lp = _row(st, "BS", "부채총계")
+    e, ep = _row(st, "BS", "자본총계")
+    le, _ = _row(st, "BS", "부채와자본총계", "부채및자본총계", "자본과부채총계", "부채자본총계")
+    if a is None:
+        warn.append("자산총계 없음")
+    elif l is not None and e is not None:
+        if abs(a - (l + e)) > abs(a) * 0.005 + 1000:
+            warn.append(f"자산≠부채+자본 ({a:,.0f} vs {l + e:,.0f})")
+    elif le is not None and abs(a - le) > abs(a) * 0.005 + 1000:
+        warn.append("자산총계≠부채와자본총계")
+    else:
+        warn.append("부채·자본총계 없음")
+    is_rows = [nm for sj in ("IS", "CIS") for nm, _, _ in (st.get(sj) or {}).get("rows", [])]
+    if not is_rows:
+        warn.append("손익계산서 없음")
+    else:
+        if not any(re.search(r"^(매출액?|영업수익|수익\(매출액\)|매출및지분법손익)$", n) for n in is_rows):
+            warn.append("매출 행 없음")
+        if not any(n.startswith("당기순이익") or n.startswith("당기순손익") or n.startswith("당기순손실") for n in is_rows):
+            warn.append("당기순이익 행 없음")
+    cf_rows = [nm for nm, _, _ in (st.get("CF") or {}).get("rows", [])]
+    if not cf_rows:
+        warn.append("현금흐름표 없음")
+    elif not any("영업활동" in n for n in cf_rows):
+        warn.append("영업활동현금흐름 행 없음")
+    return warn
+
+
+def fetch_year(con, cc, year, dry=False, chain=None):
+    """한 사업연도: 연결·별도 감사보고서 → fin_raw(당기 + 전기 보충) → KPI. 반환 {fs: 행수}.
+    chain: {(fs, year): 자산총계} — 연도 연쇄 검증(올해 보고서의 전기 = 전년 보고서의 당기)용"""
+    reps = _src_find(cc, year)
     got = {}
-    if dry and not any(reps.values()):
+    if dry and not any(reps.values()) and SOURCE == "api":
         js = dart_get("list", corp_code=cc, bgn_de=f"{year + 1}0101", end_de=f"{year + 1}1231", page_count=100)
         print(f"  {year} 감사보고서 없음 · 그 해 공시: {[r['report_nm'][:20] for r in js.get('list', [])][:12]}", flush=True)
     for fs in ("CFS", "OFS"):
         rc = reps.get(fs)
         if not rc:
             continue
-        xml = fetch_document_xml(rc)
+        xml = _src_doc(rc)
         st = parse_statements(xml)
         diag = st.pop("_diag", [])
+        warn = validate(st) if st else ["재무제표 표 없음"]
+        a, ap = _row(st, "BS", "자산총계")
+        if chain is not None:
+            if (fs, year) in chain and ap is not None and chain[(fs, year)] is not None and abs(chain[(fs, year)] - ap) > abs(ap) * 0.005 + 1000:
+                warn.append(f"연도연쇄 불일치({year}전기 {ap:,.0f} vs 전년보고서 당기 {chain[(fs, year)]:,.0f})")
+            chain[(fs, year - 1)] = ap
+        if warn:
+            print(f"  [{fs}] {year} {rc} 검증경고: {'; '.join(warn)}", flush=True)
         lst = to_api_rows(st, rc)
         if dry:
             print(f"  [{fs}] {rc} " + " ".join(f"{k}:{len(v['rows'])}행(단위{v['unit']})" for k, v in st.items()) +
@@ -225,6 +292,8 @@ def fetch_year(con, cc, year, dry=False):
             continue
         if not dry:
             financials.store_raw(con, cc, year, "11011", fs, lst, prev=True)
+            if warn:
+                log(con, cc, "audit_fs_warn", "warn", f"{year} {fs} {rc}: " + "; ".join(warn))
         got[fs] = len(lst)
     if got and not dry:
         financials.build_kpi(con, cc, str(year), "11011")
@@ -233,10 +302,13 @@ def fetch_year(con, cc, year, dry=False):
     return got
 
 
-def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_back=2):
-    """대상: 비상장(market=UNLISTED) 중 연간 KPI가 없는 회사(new_only). year(기본 전년도)와 그 전 해의 감사보고서로 3개년 적재."""
+def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_back=2, source="api"):
+    """대상: 비상장(market=UNLISTED) 중 연간 KPI가 없는 회사(new_only). year(기본 전년도)와 그 전 해의 감사보고서로 3개년 적재.
+    source: 'api'(기본) | 'web'. API 연결 실패가 2회 연속이면 자동으로 web(dart.fss.or.kr) 폴백으로 전환해 계속한다."""
+    global SOURCE
     import common
     from datetime import date
+    SOURCE = source
     con = con or connect()
     year = year or date.today().year - 1
     if corp_codes:
@@ -253,8 +325,9 @@ def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_ba
     for i, cc in enumerate(cs, 1):
         try:
             got = {}
+            chain = {}
             for y in range(year, year - years_back, -1):
-                g = fetch_year(con, cc, y, dry=dry)
+                g = fetch_year(con, cc, y, dry=dry, chain=chain)
                 got.update({f"{y}:{k}": v for k, v in g.items()})
             if got:
                 ok += 1
@@ -270,9 +343,15 @@ def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_ba
                 break
             if "연결 실패" in str(e) or "Max retries" in str(e):
                 conn_fail += 1
+                if SOURCE == "api" and conn_fail >= 2:
+                    SOURCE = "web"; conn_fail = 0
+                    print("[audit_fs] OpenDART 연결 실패 연속 — dart.fss.or.kr 웹 폴백으로 전환(이 회사부터 재시도)", flush=True)
+                    cs.insert(i, cc)        # 현재 회사를 다시 시도
+                    continue
                 if conn_fail >= 5:
-                    print("[audit_fs] DART 연결 실패 5회 연속 — 중단(다음 실행에서 이어감)", flush=True); break
-    print(f"[audit_fs] 완료 {ok}/{len(cs)} · DART {common.CALLS}콜", flush=True)
+                    print("[audit_fs] 연결 실패 5회 연속 — 중단(다음 실행에서 이어감)", flush=True); break
+    import dart_web
+    print(f"[audit_fs] 완료 {ok}/{len(cs)} · DART API {common.CALLS}콜 · 웹 {dart_web.CALLS}콜 · 소스 {SOURCE}", flush=True)
     if not dry:
         try:
             kp = con.execute("SELECT COUNT(*) FROM fin_kpi WHERE reprt_code='11011' AND corp_code IN (SELECT corp_code FROM company WHERE market='UNLISTED')").fetchone()[0]
