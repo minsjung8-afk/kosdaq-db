@@ -89,6 +89,8 @@ def run(con=None, sample=12):
         for cc in names:
             if cc not in summ:
                 add("사업요약 없음", cc)
+            if names[cc][2] == "UNLISTED":        # 비상장 등급사(2026-10-25): 시세·대용가 없음이 정상
+                continue
             if cc not in ps:
                 add("시세 없음", cc)
             elif cc not in sub:
