@@ -267,7 +267,7 @@ def _report_key(report_nm):
     if not m:
         return None, None
     y, mm = m.group(1), m.group(2)
-    if "사업" in report_nm:
+    if "사업" in report_nm or "감사보고서" in report_nm:      # 감사보고서(비상장사 주석) = 연간
         return y, "11011"
     return y, {"03": "11013", "06": "11012", "09": "11014"}.get(mm)
 

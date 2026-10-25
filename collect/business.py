@@ -197,6 +197,15 @@ def _notes_worker(cc, old_rcept):
     """스레드(HTTP만): 최신 정기보고서 확인(1콜) → 새 보고서면 원문(1콜)에서 주석 추출. 반환 (rcept, nm, notes|None, changed)"""
     from mezz import latest_periodic_report
     rcept, nm = latest_periodic_report(cc)
+    if not rcept:                    # 2026-10-25: 정기보고서가 없는 비상장사(감사보고서만 제출) → 최근 감사보고서 원문의 주석(연결 우선)
+        from datetime import date as _d
+        import audit_fs
+        for y in (_d.today().year - 1, _d.today().year - 2):
+            reps = audit_fs.find_audit_reports(cc, y)
+            fs = "CFS" if reps.get("CFS") else "OFS" if reps.get("OFS") else None
+            if fs:
+                rcept, nm = reps[fs], f"{'연결' if fs == 'CFS' else ''}감사보고서 ({y}.12)"
+                break
     if not rcept:
         return None, None, None, False
     if old_rcept == rcept:
