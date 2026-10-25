@@ -281,7 +281,7 @@ async function open(code){
       <div class="kvs" style="font-size:13px;margin-top:6px"><b>PER</b><span>${x(v.per)}${v.per==null?' <small style="font-weight:400;color:var(--mute)">적자</small>':''}</span><b>PBR</b><span>${v.pbr==null?'N/A':v.pbr.toFixed(2)+'x'}</span><b>EV/${v.ev_basis||'EBITDA'}${v.ev_basis==='영업이익'?' <small style="color:var(--warn)">*</small>':''}</b><span>${x(v.ev_ebitda)}</span></div>
       <div class="foot">EV ${억(v.ev)}억 = 시총 ${억(v.mcap)}억 ${nb<0?'−':'+'} 순차입금 ${억(Math.abs(nb))}억${v.ev_basis==='영업이익'?'<br>* EBITDA 산출 불가 → 영업이익 기준':''}</div></div>`;})()}
     ${c.market==='UNLISTED'?'':`<div class="tile"><div class="k">1년 수익률</div><div class="v ${ps.chg_1y<0?'neg':''}">${pct(ps.chg_1y)}</div><div class="kvs"><b>변동성 (60일, 연율)</b><span>${pct(ps.vol_60d)}</span><b>일평균 거래대금 (3M)</b><span>${억(ps.avg_value_3m)}억</span></div></div>`}
-    <div class="tile"><div class="k">감사의견 ${ao?ao.bsns_year:''}</div><div class="v"><span class="pill ${opClass(ao&&ao.adt_opinion)}">${esc(ao?ao.adt_opinion:'-')}</span></div><div class="d">${esc(ao?ao.adtor:'')}</div></div>
+    <div class="tile"><div class="k">감사의견 ${ao?ao.bsns_year:''}</div><div class="v"><span class="pill ${opClass(ao&&ao.adt_opinion)}">${esc(ao?ao.adt_opinion:'-')}</span></div><div class="d">${esc(ao?ao.adtor:'')}${d.review?`<br><span class="${/^적정/.test(d.review.opinion)?'':'neg'}">${esc(d.review.bsns_year)} ${esc(d.review.period)} 검토: ${esc(d.review.opinion)}</span>`:''}</div></div>
   </div>`;
   // 1 개요
   h+=`<section><h3>1. 개요</h3><div class="kv">
