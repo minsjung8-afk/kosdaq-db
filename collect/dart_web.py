@@ -136,7 +136,7 @@ def fetch_fs_html(rcept_no):
 def find_audit_reports(corp_code, bsns_year):
     """감사보고서 접수번호 {'OFS': rcept|None, 'CFS': rcept|None} — audit_fs.find_audit_reports와 같은 규격"""
     y = int(bsns_year)
-    rows = search_reports(corp_code, f"{y + 1}0101", f"{y + 1}1231", public_type="F001")
+    rows = search_reports(corp_code, f"{y}0101", f"{y + 1}1231", public_type="F001")   # 비12월 결산 대응
     pat = re.compile(rf"(\[[^\]]*\]\s*)?(연결)?감사보고서\s*\({y}\.\d{{2}}\)")
     out = {"OFS": None, "CFS": None}
     for r in sorted(rows, key=lambda r: r["rcept_dt"]):

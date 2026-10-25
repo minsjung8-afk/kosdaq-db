@@ -198,13 +198,37 @@ def to_api_rows(stmts, rcept_no):
 def find_audit_reports(corp_code, bsns_year):
     """해당 사업연도 감사보고서 접수번호 {'OFS': rcept|None, 'CFS': rcept|None} (정정본 포함 최신)"""
     y = int(bsns_year)
-    js = dart_get("list", corp_code=corp_code, bgn_de=f"{y + 1}0101", end_de=f"{y + 1}1231", pblntf_ty="F", page_count=100)
+    # 조회 구간: 그 해 1월 ~ 다음 해 12월 — 결산월이 12월이 아닌 회사(6월 결산 에이션패션 등)는 같은 해 9월에 제출(2026-10-25)
+    js = dart_get("list", corp_code=corp_code, bgn_de=f"{y}0101", end_de=f"{y + 1}1231", pblntf_ty="F", page_count=100)
     pat = re.compile(rf"^(\[[^\]]*\]\s*)?(연결)?감사보고서\s*\({y}\.\d{{2}}\)")
-    out = {"OFS": None, "CFS": None}
+    out = {"OFS": None, "CFS": None, "ANNUAL": None}
     for r in sorted(js.get("list", []), key=lambda r: r["rcept_dt"]):
         m = pat.search(r["report_nm"].strip())
         if m:
             out["CFS" if m.group(2) else "OFS"] = r["rcept_no"]
+    if not out["OFS"] and not out["CFS"]:   # 감사보고서 없음 → XBRL 재무가 없는 사업보고서 제출사(서진캠·중앙일보 등): 사업보고서 본문 재무제표 절을 읽는다
+        js = dart_get("list", corp_code=corp_code, bgn_de=f"{y}0101", end_de=f"{y + 1}1231", pblntf_ty="A", page_count=100)
+        pa = re.compile(rf"사업보고서\s*\({y}\.\d{{2}}\)")
+        for r in sorted(js.get("list", []), key=lambda r: r["rcept_dt"]):
+            if pa.search(r["report_nm"]):
+                out["ANNUAL"] = r["rcept_no"]
+    return out
+
+
+_SEC2_RE = re.compile(r"<SECTION-2[^>]*>(.*?)</SECTION-2>", re.S | re.I)
+
+
+def annual_sections(xml):
+    """사업보고서 → {'CFS': 연결재무제표 절 XML, 'OFS': 재무제표 절 XML} ('III. 재무에 관한 사항' 하위 '2. 연결재무제표'·'4. 재무제표')"""
+    out = {}
+    for m in _SEC2_RE.finditer(xml):
+        t = re.search(r"<TITLE[^>]*>(.*?)</TITLE>", m.group(1), re.S | re.I)
+        title = re.sub(r"<[^>]+>|\s", "", t.group(1)) if t else ""
+        title = re.sub(r"^\d+\.", "", title)
+        if title == "연결재무제표" and "CFS" not in out:
+            out["CFS"] = m.group(1)
+        elif title == "재무제표" and "OFS" not in out:
+            out["OFS"] = m.group(1)
     return out
 
 
@@ -274,11 +298,19 @@ def fetch_year(con, cc, year, dry=False, chain=None):
     if dry and not any(reps.values()) and SOURCE == "api":
         js = dart_get("list", corp_code=cc, bgn_de=f"{year + 1}0101", end_de=f"{year + 1}1231", page_count=100)
         print(f"  {year} 감사보고서 없음 · 그 해 공시: {[r['report_nm'][:20] for r in js.get('list', [])][:12]}", flush=True)
+    ann = {}
+    if reps.get("ANNUAL") and not reps.get("OFS") and not reps.get("CFS"):
+        try:
+            ann = annual_sections(_src_doc(reps["ANNUAL"]))
+        except Exception as e:  # noqa
+            print(f"  {year} 사업보고서 재무제표 절 실패: {e}", flush=True)
+        for fs in ann:
+            reps[fs] = reps["ANNUAL"]
     for fs in ("CFS", "OFS"):
         rc = reps.get(fs)
         if not rc:
             continue
-        xml = _src_doc(rc)
+        xml = ann.get(fs) or _src_doc(rc)
         st = parse_statements(xml)
         diag = st.pop("_diag", [])
         warn = validate(st) if st else ["재무제표 표 없음"]
