@@ -605,12 +605,43 @@ def _site_meta(con, index):
     return {k: v for k, v in m.items() if v is not None}
 
 
+def _is_cancel(r):
+    return bool(re.search(r"취소|철회|WD|^NR$", (r.get("grade") or "") + " " + (r.get("eval_kind") or "")))
+
+
+def _is_long(r):
+    t = r.get("target_type") or ""
+    return bool(re.search(r"기업신용평가|사채", t)) and "단기사채" not in t
+
+
+def rating_status(ratings, today=None):
+    """대표 등급의 유효 상태(2026-10-25 사용자 요청: 유효 등급 없는 회사는 회사명 옆 등급 오른쪽에 '취소'·'유효기간 만료' 표시).
+    ① 대표 등급과 같은 종류(장기/단기)에서 그 뒤 '취소·철회' 공시가 있으면 → 등급 취소
+    ② 대표 등급 공시일로부터 1년 넘게 새 공시가 없으면 → 유효기간 만료(추정 — 신용평가 유효기간은 통상 1년, 정확한 기한은 평가서 기재)"""
+    from datetime import date, datetime
+    cur = current_rating(ratings)
+    today = today or date.today()
+    cancels = [r for r in ratings if _is_cancel(r)]
+    if cur:
+        same = [r for r in cancels if _is_long(r) == _is_long(cur) and (r.get("disc_dt") or "") >= (cur.get("disc_dt") or "")]
+        if same:
+            return {"kind": "cancel", "label": "등급 취소", "date": same[0]["disc_dt"], "tip": f"{same[0]['agency']} {same[0]['disc_dt']} {same[0].get('target_type') or ''} 등급 취소 공시"}
+        try:
+            dd = datetime.strptime(cur["disc_dt"][:10], "%Y-%m-%d").date()
+            if (today - dd).days > 365:
+                return {"kind": "expired", "label": "유효기간 만료", "date": cur["disc_dt"], "tip": f"최근 공시 {cur['disc_dt']} 후 1년 경과 · 새 평가 공시 없음(유효기간 통상 1년, 정확한 기한은 평가서 확인)"}
+        except Exception:  # noqa
+            pass
+    elif cancels:
+        return {"kind": "cancel", "label": "등급 취소", "date": cancels[0]["disc_dt"], "tip": f"{cancels[0]['agency']} {cancels[0]['disc_dt']} 등급 취소 공시"}
+    return None
+
+
 def current_rating(ratings):
     """대표 등급(공시일 내림차순 목록에서): ① 장기(기업신용평가·회사채, 단기사채 제외) 중 '정정' 아닌 최신 ② 단기(CP·전단채) 중 정정 아닌 최신 ③ 정정 포함.
     2026-10-25: '전자단기사채'가 '사채'에 걸려 장기로 잡히고, 옛 평가의 '본평가(정정)' 재공시(공시일만 최신)가 대표가 되어 부도(D)난 중앙일보가 A3로 표시되던 문제 수정"""
-    def is_long(r):
-        t = r.get("target_type") or ""
-        return bool(re.search(r"기업신용평가|사채", t)) and "단기사채" not in t
+    is_long = _is_long
+    ratings = [r for r in ratings if not _is_cancel(r)]
     plain = [r for r in ratings if "정정" not in (r.get("eval_kind") or "")]
     for pool in ([r for r in plain if is_long(r)], plain, [r for r in ratings if is_long(r)], ratings):
         if pool:
@@ -632,17 +663,19 @@ def build():
     index = []
     for c in q(con, "SELECT * FROM company ORDER BY corp_name"):
         d = company_detail(con, c)
-        (SITE / "data" / "c" / f"{c['stock_code']}.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
         _rows = d["kpi"].get("CFS") or d["kpi"].get("OFS") or [{}]
         k = next((r for r in reversed(_rows) if r.get("kind") == "annual"), _rows[-1])   # 검색 인덱스는 최근 연간 기준
         ps = d["price_summary"] or {}
         ao = d["audit"][0] if d["audit"] else {}
         cur_rt = current_rating(d["ratings"])
+        d["rating_cur"] = cur_rt
+        d["rating_status"] = rating_status(d["ratings"])
+        (SITE / "data" / "c" / f"{c['stock_code']}.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
         index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"], "delisted": c.get("delisted_dt"),
                       "rev": k.get("revenue"), "op": k.get("op_income"), "debt": k.get("debt_ratio"),
                       "mcap": ps.get("mcap"), "opinion": ao.get("adt_opinion"), "year": k.get("bsns_year"),
                       "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None,
-                      "rating": cur_rt["grade"] if cur_rt else None,
+                      "rating": cur_rt["grade"] if cur_rt else None, "rt_st": (d.get("rating_status") or {}).get("label"),
                       "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"),
                       "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber")})
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
