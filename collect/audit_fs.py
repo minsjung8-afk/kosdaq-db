@@ -114,16 +114,24 @@ def _clean_nm(nm):
     return re.sub(r"[\s\xa0　]+", "", s)
 
 
-def parse_table(tbl_xml, unit):
-    """표 XML → [(계정명, 당기, 전기)] 또는 None(재무제표 표가 아님)"""
+_LAST_HC = {}
+
+
+def parse_table(tbl_xml, unit, cont=None):
+    """표 XML → [(계정명, 당기, 전기)] 또는 None(재무제표 표가 아님).
+    cont: 쪽 나뉨으로 머리행 없이 이어지는 표 — 직전 표의 당기·전기 열 위치({'cur','prev','ncol'})를 재사용(2026-10-25 천일정기: 자산총계·부채 이후 행 누락)"""
     rows = [_cells(tr) for tr in TR_RE.findall(tbl_xml)]
     rows = [r for r in rows if any(t for t, _ in r)]
-    if len(rows) < 6:
+    hc = _header_cols(rows) if len(rows) >= 2 else None
+    if hc:
+        if len(rows) < 6:
+            return None
+        cur, prev, hi = hc
+        _LAST_HC["v"] = {"cur": cur, "prev": prev, "ncol": max(len(_expand(r)) for r in rows[hi + 1:hi + 6] or [[]])}
+    elif cont and rows and abs(max(len(_expand(r)) for r in rows) - cont["ncol"]) <= 0:
+        cur, prev, hi = cont["cur"], cont["prev"], -1
+    else:
         return None
-    hc = _header_cols(rows)
-    if not hc:
-        return None
-    cur, prev, hi = hc
     out = []
     for cells in rows[hi + 1:]:
         phys = _expand(cells)
@@ -134,7 +142,7 @@ def parse_table(tbl_xml, unit):
         if c is None and p is None:
             continue
         out.append((nm, None if c is None else c * unit, None if p is None else p * unit))
-    return out if len(out) >= 5 else None
+    return out if (len(out) >= 5 or (hi == -1 and out)) else None
 
 
 def parse_statements(xml_text):
@@ -143,6 +151,7 @@ def parse_statements(xml_text):
     cur_sj = None
     pos = 0
     diag = []
+    _LAST_HC.clear()
 
     def scan(text, in_table=False):
         nonlocal cur_sj
@@ -164,12 +173,20 @@ def parse_statements(xml_text):
         pos = tm.end()
         unit = _unit_of(_strip(xml_text[max(0, tm.start() - 1500):tm.start()]))
         sj = cur_sj
-        rows = parse_table(tm.group(0), unit) if sj not in ("NOTES",) else None
+        cont = _LAST_HC.get("v") if (sj in ("BS", "IS", "CIS", "CF") and sj in found) else None
+        rows = parse_table(tm.group(0), unit, cont) if sj not in ("NOTES",) else None
         if rows and sj in (None, "SCE"):
             nms = [r[0] for r in rows]                      # 제목을 못 찾은 표: 내용으로 현금흐름표 판별(영업·투자/재무활동 행)
+            ns = [re.sub(r"\s", "", n) for n in nms]
             if any("영업활동" in n for n in nms) and any(("투자활동" in n or "재무활동" in n) for n in nms):
                 sj = "CF"
                 diag.append("CF(내용판별)")
+            elif "BS" not in found and any(re.search(r"자산(총계|합계)$", n) for n in ns) and any(re.search(r"(부채|자본)(총계|합계)", n) for n in ns):
+                sj = "BS"                                   # 2026-10-25: 제목을 못 찾은 사업보고서 재무제표(중앙일보) — 내용으로 재무상태표 판별
+                diag.append("BS(내용판별)")
+            elif "IS" not in found and "CIS" not in found and any(re.search(r"영업(이익|손실|손익)", n) for n in ns) and any(re.search(r"당기순(이익|손실|손익)", n) for n in ns):
+                sj = "IS"
+                diag.append("IS(내용판별)")
             else:
                 rows = None
         if not rows:
@@ -349,7 +366,7 @@ def fetch_year(con, cc, year, dry=False, chain=None):
     return got
 
 
-def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_back=2, source="api"):
+def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_back=2, source="api", market="UNLISTED"):
     """대상: 비상장(market=UNLISTED) 중 연간 KPI가 없는 회사(new_only). year(기본 전년도)와 그 전 해의 감사보고서로 3개년 적재.
     source: 'api'(기본) | 'web'. API 연결 실패가 2회 연속이면 자동으로 web(dart.fss.or.kr) 폴백으로 전환해 계속한다."""
     global SOURCE
@@ -361,7 +378,7 @@ def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_ba
     if corp_codes:
         cs = list(corp_codes)
     else:
-        q = "SELECT corp_code FROM company WHERE market='UNLISTED'"
+        q = f"SELECT corp_code FROM company WHERE market='{market}' AND delisted_dt IS NULL"   # market=KONEX: XBRL 재무가 없는 코넥스사(2026-10-25 진단: 연간재무 14/105)
         if new_only == "recheck":       # 재파싱: 최근 연간 KPI에 영업CF·순이익·총자산 중 빈 값이 있는 비상장사(파서 개선 후 재적재용)
             q += """ AND corp_code IN (SELECT corp_code FROM fin_kpi WHERE reprt_code='11011' AND bsns_year>=?
                      AND (cfo IS NULL OR net_income IS NULL OR total_assets IS NULL))

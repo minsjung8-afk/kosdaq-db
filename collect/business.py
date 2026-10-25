@@ -57,8 +57,12 @@ def extract_business_section(xml_text: str):
         if "사업의 내용" in title.replace(" ", "") or "사업의내용" in title.replace(" ", ""):
             target = s
             break
-    if target is None:
-        return None, None
+    if target is None:                       # 폴백(2026-10-25 진단: '사업의 내용 섹션 미검출' 198건): SECTION 중첩이 다른 문서 — 제목 위치부터 다음 대분류 제목(III. 재무에 관한 사항 등) 전까지
+        m = re.search(r"<TITLE[^>]*>\s*(II|Ⅱ|2)?\s*[.．]?\s*사업의\s*내용\s*</TITLE>", xml_text, flags=re.I)
+        if not m:
+            return None, None
+        nxt = re.search(r"<TITLE[^>]*>\s*(III|Ⅲ|3)\s*[.．]\s*[^<]{2,30}</TITLE>", xml_text[m.end():], flags=re.I)
+        target = xml_text[m.start(): m.end() + (nxt.start() if nxt else 200000)]
     full = _strip(target)
     overview = None
     subs = re.findall(r"<SECTION-2[^>]*>(.*?)</SECTION-2>", target, flags=re.S | re.I)
@@ -290,7 +294,8 @@ def fetch_business(con, corp_code, bsns_year, pre=None):
 def fetch_audit_opinion(con, corp_code, bsns_year):
     js = dart_get("accnutAdtorNmNdAdtOpinion", corp_code=corp_code, bsns_year=bsns_year, reprt_code="11011")
     for r in js.get("list", []):
-        if r.get("bsns_year") != bsns_year and r.get("bsns_year"):
+        by = (r.get("bsns_year") or "").replace(" ", "")
+        if by and by != bsns_year and "당기" not in by:   # API의 bsns_year는 '제56기(당기)'·'제55기(전기)' 형식 — 연도와 비교해 전부 버려져 감사의견 0건이던 문제(2026-10-25)
             continue
         con.execute("INSERT OR REPLACE INTO audit_opinion VALUES (?,?,?,?,?,?,?)",
                     (corp_code, bsns_year, r.get("adtor"), r.get("adt_opinion"),
