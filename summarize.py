@@ -200,11 +200,14 @@ def _call(client, model, content, tries=4):
             time.sleep(20 * (k + 1) if "429" in str(e) or "overloaded" in str(e).lower() else 5)
 
 
-def _latest_ratings(con):
+def _latest_ratings(con, include_cp=False):
+    """include_cp: 기업어음만 있는 회사도(비상장 요약용 — 에스피엘 등 CP만 보유, 2026-10-25)"""
+    cp = " OR r.target_type LIKE '%기업어음%'" if include_cp else ""
     rows = con.execute("""SELECT r.corp_code, r.agency, r.disc_dt, r.grade, r.file_url,
-                          CASE WHEN r.target_type LIKE '%기업신용평가%' THEN 0 ELSE 1 END AS pri
+                          CASE WHEN r.target_type LIKE '%기업신용평가%' THEN 0 WHEN r.target_type LIKE '%사채%' THEN 1 ELSE 2 END AS pri
                           FROM credit_rating r WHERE r.file_url IS NOT NULL
-                          AND (r.target_type LIKE '%기업신용평가%' OR r.target_type LIKE '%사채%')
+                          AND COALESCE(r.eval_kind,'') NOT LIKE '%정정%'
+                          AND (r.target_type LIKE '%기업신용평가%' OR r.target_type LIKE '%사채%'""" + cp + """)
                           AND COALESCE(r.grade,'') NOT IN ('취소','철회','WD','NR','-')
                           AND COALESCE(r.eval_kind,'') NOT LIKE '%취소%' AND COALESCE(r.eval_kind,'') NOT LIKE '%철회%'
                           ORDER BY r.corp_code, pri, r.disc_dt DESC""").fetchall()
@@ -311,7 +314,8 @@ def _audit_overview(xml):
     m = _OV_RE.search(t, i if i >= 0 else 0)
     if not m:
         return ""
-    s = t[max(0, m.start() - 10):]
+    ls = t.rfind("\n", max(0, m.start() - 15), m.start())     # 제목 줄 시작('1. 일반사항')부터 — 앞 표 잔재('…도건설 |') 제외(2026-10-25)
+    s = t[ls + 1 if ls >= 0 else m.start():]
     nxt = re.search(r"\n\s*2\s*[.．]\s*\S", s[200:])          # 다음 주석 항목('2. 재무제표 작성기준' 등) 전까지
     return s[:200 + nxt.start()][:6000] if nxt else s[:6000]
 
@@ -341,7 +345,7 @@ def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6):
     client = anthropic.Anthropic()
     mid = MODELS.get(model, model)
     con = connect()
-    rat = _latest_ratings(con)
+    rat = _latest_ratings(con, include_cp=True)
     q = """SELECT c.corp_code, c.corp_name,
                   (SELECT r.rcept_no FROM fin_raw r WHERE r.corp_code=c.corp_code AND r.reprt_code='11011' AND r.account_id='-표준계정코드 미사용-'
                     AND r.rcept_no NOT LIKE '%:전기' ORDER BY r.bsns_year DESC, r.fs_div LIMIT 1) AS arc,

@@ -430,6 +430,12 @@ def _flags(c, kpi, ps, audit, events, ratings):
         if any(e.get("flag") == f for e in recent):
             out.append((lab + " 공시(1년)", "red" if f != "소송" else "amber", ""))
     if ratings:
+        cr = current_rating(ratings)
+        g = (cr.get("grade") or "").strip() if cr else ""
+        if g in ("D", "SD", "RD"):          # 부도 등급(중앙일보 2026-06 최종부도 사례)
+            out.insert(0, ("신용등급 D (부도)", "red", f"{cr['agency']} {cr['disc_dt']} {cr.get('target_type') or ''}"))
+        elif re.match(r"^C{1,3}([+-]|$)", g):
+            out.insert(0, (f"신용등급 {g} (CCC 이하)", "red", f"{cr['agency']} {cr['disc_dt']}"))
         r0 = ratings[0]
         if r0.get("watch") or (r0.get("outlook") and "부정" in r0["outlook"]):
             out.append(("등급전망 부정적/감시", "amber", f"{r0['agency']} {r0['grade']} {r0.get('outlook') or ''} {r0.get('watch') or ''}"))
@@ -599,6 +605,19 @@ def _site_meta(con, index):
     return {k: v for k, v in m.items() if v is not None}
 
 
+def current_rating(ratings):
+    """대표 등급(공시일 내림차순 목록에서): ① 장기(기업신용평가·회사채, 단기사채 제외) 중 '정정' 아닌 최신 ② 단기(CP·전단채) 중 정정 아닌 최신 ③ 정정 포함.
+    2026-10-25: '전자단기사채'가 '사채'에 걸려 장기로 잡히고, 옛 평가의 '본평가(정정)' 재공시(공시일만 최신)가 대표가 되어 부도(D)난 중앙일보가 A3로 표시되던 문제 수정"""
+    def is_long(r):
+        t = r.get("target_type") or ""
+        return bool(re.search(r"기업신용평가|사채", t)) and "단기사채" not in t
+    plain = [r for r in ratings if "정정" not in (r.get("eval_kind") or "")]
+    for pool in ([r for r in plain if is_long(r)], plain, [r for r in ratings if is_long(r)], ratings):
+        if pool:
+            return pool[0]
+    return None
+
+
 def build():
     con = connect()
     if SITE.exists():
@@ -618,8 +637,7 @@ def build():
         k = next((r for r in reversed(_rows) if r.get("kind") == "annual"), _rows[-1])   # 검색 인덱스는 최근 연간 기준
         ps = d["price_summary"] or {}
         ao = d["audit"][0] if d["audit"] else {}
-        LONG = ("기업신용평가", "회사채", "사채")
-        cur_rt = next((r for r in d["ratings"] if any(k in (r["target_type"] or "") for k in LONG)), None)
+        cur_rt = current_rating(d["ratings"])
         index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"], "delisted": c.get("delisted_dt"),
                       "rev": k.get("revenue"), "op": k.get("op_income"), "debt": k.get("debt_ratio"),
                       "mcap": ps.get("mcap"), "opinion": ao.get("adt_opinion"), "year": k.get("bsns_year"),
