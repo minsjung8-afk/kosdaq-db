@@ -56,7 +56,7 @@ aside input:focus{outline:2px solid var(--navy2);outline-offset:-1px}
 .row .nm{font-weight:700;color:var(--fg);font-size:13px}
 .row .cd{color:var(--mute);font-size:11.5px;font-variant-numeric:tabular-nums}
 .row .sub{grid-column:1/-1;font-size:11px;color:#8a94a3;display:flex;gap:10px;flex-wrap:wrap}
-.mk{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;color:#fff;vertical-align:1px}.mk.KOSDAQ{background:var(--navy2)}.mk.KOSPI{background:#b23a3a}.mk.KONEX{background:#7b8699}
+.mk{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;color:#fff;vertical-align:1px}.mk.KOSDAQ{background:var(--navy2)}.mk.KOSPI{background:#b23a3a}.mk.KONEX{background:#7b8699}.mk.UNLISTED{background:#5b6b3a}
 .dl{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px;color:#fff;background:#6b7280;vertical-align:1px}.row.dlr .nm{color:var(--mute)}
 .rt{font-size:10.5px;padding:1px 7px;border-radius:20px;margin-left:6px;font-weight:700;color:var(--warn);border:1px solid #f0c9ae;background:var(--warn-bg);vertical-align:1px}
 /* 본문 */
@@ -157,7 +157,7 @@ a{color:var(--navy2)}
 <header><div class="hin"><div>
   <div class="eyebrow">Listed Company Credit Review · Financials · Market · Ratings</div>
   <h1>상장사 심사참고 DB</h1>
-  <div class="lead" id="lead">코스피·코스닥·코넥스 상장사의 재무·차입·메자닌·주가·신용등급을 한 화면에 — 심사 참고용 요약이며, 원문은 각 항목의 DART·금감원 링크로 확인하세요.</div>
+  <div class="lead" id="lead">코스피·코스닥·코넥스 상장사와 신용등급 보유 비상장사의 재무·차입·메자닌·주가·신용등급을 한 화면에 — 심사 참고용 요약이며, 원문은 각 항목의 DART·금감원 링크로 확인하세요.</div>
   <div class="srcline"><span class="lbl">SOURCE</span>
     <span class="chip">DART 전자공시 OpenAPI<small>재무·사업보고서·주석·지분·주요사항</small></span>
     <span class="chip">KRX 정보데이터시스템<small>일별시세·대용가</small></span>
@@ -167,7 +167,7 @@ a{color:var(--navy2)}
  </div><div class="meta" id="meta">불러오는 중</div></div></header>
 <div id="band"></div>
 <aside>
-  <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div></div>
+  <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button><button class="mbtn" data-m="UNLISTED">비상장</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div></div>
   <div id="list"></div>
 </aside>
 <main id="main"><div class="empty">왼쪽에서 종목을 고르세요. 재무는 DART 사업보고서(연결 우선), 주가는 KRX 일별시세 기준이며 심사 참고용 요약입니다. 원문은 각 항목의 DART 링크로 확인하세요.</div></main>
@@ -200,7 +200,7 @@ function renderBand(m){
   const qn={'03':'1분기','06':'반기','09':'3분기'};
   const lq=m.latest_q?`${m.latest_q.slice(0,4)} ${qn[m.latest_q.slice(5)]||''}보고서`:'';
   const cells=[
-    ['수록 회사',`${n(m.count)}개사`,(['KOSPI','KOSDAQ','KONEX'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준')+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'')],
+    ['수록 회사',`${n(m.count)}개사`,(['KOSPI','KOSDAQ','KONEX','UNLISTED'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스',UNLISTED:'비상장'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준')+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'')],
     ['재무 기준',m.fin_year?`${m.fin_year} 사업보고서`:'-',(lq?`최신 ${lq.replace('보고서','')} · `:'')+`${n(m.fin_annual)}사 · DART`],
     ['분기 손익 (12분기)',`${n(m.fin_q)}사`,'누적 차감 복원 · LTM · DART'],
     ['주가 기준일',m.price_asof||'-','종가·거래량·시총 · KRX 일별시세'],
@@ -209,7 +209,7 @@ function renderBand(m){
   $('#band').innerHTML=cells.map(([k,v,s])=>`<div class="bc"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s" title="${esc(s)}">${esc(s)}</div></div>`).join('');
 }
 let mkt='',sortKey='name',sortDesc=false;
-const MK={KOSDAQ:0,KOSPI:1,KONEX:2};
+const MK={KOSDAQ:0,KOSPI:1,KONEX:2,UNLISTED:3};
 // 신용등급 → 서열 점수(높을수록 우량). AAA=22 … D=1. 표기 변형(A+ / A1 등 CP·기업어음 등급, 감시·전망 꼬리표) 정리
 const RT_ORDER=['AAA','AA+','AA','AA-','A+','A','A-','BBB+','BBB','BBB-','BB+','BB','BB-','B+','B','B-','CCC+','CCC','CCC-','CC','C','D'];
 function rtScore(g){ if(!g) return null; let t=String(g).toUpperCase().replace(/\s+/g,'').replace(/[(（].*$/,'');
@@ -250,8 +250,8 @@ document.querySelectorAll('.mbtn').forEach(b=>b.onclick=()=>{mkt=b.dataset.m;doc
 function render(list){
   $('#cnt').textContent=`${list.length}개`;
   $('#list').innerHTML=list.slice(0,300).map(i=>`<div class="row${cur===i.code?' on':''}${i.delisted?' dlr':''}" data-c="${i.code}">
-    <span class="nm"><span class="mk ${esc(i.market||'')}">${i.market==='KOSPI'?'코스피':i.market==='KONEX'?'코넥스':'코스닥'}</span>${esc(i.name)}${i.delisted?`<span class="dl" title="KRX 상장 목록에서 제외 확인일 ${esc(i.delisted)} · 재무·공시 데이터는 보존">상장폐지</span>`:''}${i.rating?`<span class="rt">${esc(i.rating)}</span>`:''}</span><span class="cd">${i.code}</span>
-    <span class="sub"><span>${esc(i.sector||'')}</span><span>시총 ${억(i.mcap)}억</span><span>매출 ${억(i.rev)}억</span><span>부채비율 ${pct(i.debt)}</span>${i.per!=null?`<span>PER ${Number(i.per).toFixed(1)}</span>`:''}${i.ev_ebitda!=null?`<span>EV/EBITDA ${Number(i.ev_ebitda).toFixed(1)}</span>`:''}${i.red?`<span class="neg">⚑${i.red}</span>`:''}${i.amber?`<span style="color:var(--warn)">⚑${i.amber}</span>`:''}${i.opinion&&i.opinion!=='적정'?`<span class="neg">${esc(i.opinion)}</span>`:''}</span></div>`).join('')
+    <span class="nm"><span class="mk ${esc(i.market||'')}">${i.market==='KOSPI'?'코스피':i.market==='KONEX'?'코넥스':i.market==='UNLISTED'?'비상장':'코스닥'}</span>${esc(i.name)}${i.delisted?`<span class="dl" title="KRX 상장 목록에서 제외 확인일 ${esc(i.delisted)} · 재무·공시 데이터는 보존">상장폐지</span>`:''}${i.rating?`<span class="rt">${esc(i.rating)}</span>`:''}</span><span class="cd">${i.code}</span>
+    <span class="sub"><span>${esc(i.sector||'')}</span>${i.market==='UNLISTED'?'':`<span>시총 ${억(i.mcap)}억</span>`}<span>매출 ${억(i.rev)}억</span><span>부채비율 ${pct(i.debt)}</span>${i.per!=null?`<span>PER ${Number(i.per).toFixed(1)}</span>`:''}${i.ev_ebitda!=null?`<span>EV/EBITDA ${Number(i.ev_ebitda).toFixed(1)}</span>`:''}${i.red?`<span class="neg">⚑${i.red}</span>`:''}${i.amber?`<span style="color:var(--warn)">⚑${i.amber}</span>`:''}${i.opinion&&i.opinion!=='적정'?`<span class="neg">${esc(i.opinion)}</span>`:''}</span></div>`).join('')
     +(list.length>300?'<div class="row"><span class="cd">상위 300개만 표시 · 검색어를 좁히세요</span></div>':'');
 }
 $('#list').addEventListener('click',e=>{const r=e.target.closest('.row');if(r&&r.dataset.c)open(r.dataset.c)});
@@ -267,17 +267,17 @@ async function open(code){
   const rtBadge=curRt?`<span class="pill" style="margin-left:10px;vertical-align:middle;font-size:14px;color:var(--accent);border-color:var(--accent)">${esc(curRt.grade)}${curRt.outlook?' '+esc(curRt.outlook):''}</span><span class="src" style="margin-left:6px">${esc(curRt.agency)} · ${curRt.disc_dt}</span>`:`<span class="src" style="margin-left:10px">유효 공시등급 없음</span>`;
   const fl=d.flags||[];
   const flagStrip=fl.length?`<div class="flags">${fl.map(([n,l,t])=>`<span class="flag ${l}" title="${esc(t)}">${esc(n)}${t?` <small>${esc(t)}</small>`:''}</span>`).join('')}</div>`:`<div class="flags"><span class="flag ok">경고 플래그 없음</span></div>`;
-  let h=`<h2>${esc(c.corp_name)}${c.delisted_dt?'<span class="dl" style="font-size:12px;vertical-align:middle">상장폐지</span>':''}${rtBadge}</h2><div class="sub-title">${c.stock_code} · ${esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
+  let h=`<h2>${esc(c.corp_name)}${c.delisted_dt?'<span class="dl" style="font-size:12px;vertical-align:middle">상장폐지</span>':''}${rtBadge}</h2><div class="sub-title">${c.market==='UNLISTED'?'비상장 · DART '+esc(c.corp_code):c.stock_code+' · '+esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
   h+=flagStrip;
   h+=`<div class="tiles">
-    <div class="tile"><div class="k">시가총액</div><div class="v">${억(ps.mcap)}<small>억</small></div><div class="d">${ps.asof||''}</div></div>
+    ${c.market==='UNLISTED'?`<div class="tile"><div class="k">상장 여부</div><div class="v" style="font-size:16px">비상장</div><div class="d">신용등급 보유 · 시세·대용가 없음</div></div>`:`<div class="tile"><div class="k">시가총액</div><div class="v">${억(ps.mcap)}<small>억</small></div><div class="d">${ps.asof||''}</div></div>`}
     <div class="tile"><div class="k">매출액 (${last.label||last.bsns_year||'-'}, ${d.kpi.CFS?'연결':'별도'})</div><div class="v">${억(last.revenue)}<small>억</small></div><div class="d">영업이익 ${억(last.op_income)}억</div></div>
     <div class="tile"><div class="k">부채비율 (${last.label||last.bsns_year||'-'})</div><div class="v">${pct(last.debt_ratio)}</div><div class="kvs"><b>순차입금/EBITDA</b><span>${last.nd_ebitda!=null?last.nd_ebitda.toFixed(1)+'x':'-'}</span><b>차입금의존도</b><span>${pct(last.borrow_dep)}</span><b>유동비율</b><span>${pct(last.cur_ratio)}</span></div></div>
     ${(()=>{const v=d.valuation; if(!v) return `<div class="tile"><div class="k">밸류에이션</div><div class="v">-</div><div class="d">시세·재무 필요</div></div>`;
       const x=n=>n==null?'N/A':n.toFixed(1)+'x'; const nb=v.net_borrowings||0; return `<div class="tile"><div class="k">밸류에이션 (${esc(v.basis)} · ${v.fs})</div>
       <div class="kvs" style="font-size:13px;margin-top:6px"><b>PER</b><span>${x(v.per)}${v.per==null?' <small style="font-weight:400;color:var(--mute)">적자</small>':''}</span><b>PBR</b><span>${v.pbr==null?'N/A':v.pbr.toFixed(2)+'x'}</span><b>EV/${v.ev_basis||'EBITDA'}${v.ev_basis==='영업이익'?' <small style="color:var(--warn)">*</small>':''}</b><span>${x(v.ev_ebitda)}</span></div>
       <div class="foot">EV ${억(v.ev)}억 = 시총 ${억(v.mcap)}억 ${nb<0?'−':'+'} 순차입금 ${억(Math.abs(nb))}억${v.ev_basis==='영업이익'?'<br>* EBITDA 산출 불가 → 영업이익 기준':''}</div></div>`;})()}
-    <div class="tile"><div class="k">1년 수익률</div><div class="v ${ps.chg_1y<0?'neg':''}">${pct(ps.chg_1y)}</div><div class="kvs"><b>변동성 (60일, 연율)</b><span>${pct(ps.vol_60d)}</span><b>일평균 거래대금 (3M)</b><span>${억(ps.avg_value_3m)}억</span></div></div>
+    ${c.market==='UNLISTED'?'':`<div class="tile"><div class="k">1년 수익률</div><div class="v ${ps.chg_1y<0?'neg':''}">${pct(ps.chg_1y)}</div><div class="kvs"><b>변동성 (60일, 연율)</b><span>${pct(ps.vol_60d)}</span><b>일평균 거래대금 (3M)</b><span>${억(ps.avg_value_3m)}억</span></div></div>`}
     <div class="tile"><div class="k">감사의견 ${ao?ao.bsns_year:''}</div><div class="v"><span class="pill ${opClass(ao&&ao.adt_opinion)}">${esc(ao?ao.adt_opinion:'-')}</span></div><div class="d">${esc(ao?ao.adtor:'')}</div></div>
   </div>`;
   // 1 개요
@@ -531,6 +531,7 @@ async function open(code){
   if((d.other_invest||[]).length){ const oi=d.other_invest[0]; const RN2={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const oiSrc=`${oi.bsns_year} ${RN2[oi.reprt_code||'11011']}`+(oi.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${oi.rcept_no}" target="_blank" rel="noopener" style="color:#fff;text-decoration:underline">${oi.rcept_no}</a>`:'');
     h+=`<section><h3>3-3. 타법인 출자 <span style="font-weight:400;font-size:12px;opacity:.85">기준 ${oiSrc} · 장부가 상위</span></h3><div class="twrap"><table><tr><th>출자회사</th><th>목적</th><th>최초취득</th><th class="n">지분율</th><th class="n">장부가(억)</th><th class="n">피출자사 순이익(억)</th></tr>${d.other_invest.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.purpose||'-')}</td><td>${esc(r.acqs_de||'-')}</td><td class="n">${pct(r.trmend_qota_rt)}</td><td class="n">${억(r.trmend_book_amt)}</td><td class="n ${r.recent_ni<0?'neg':''}">${억(r.recent_ni)}</td></tr>`).join('')}</table></div></section>`;}
   // 4 주가
+  if(c.market!=='UNLISTED'){
   h+=`<section><h3>4. 주가추이 · 담보가치 참고</h3>`;
   if(d.prices.length){
     const rets=[['1주','chg_1w'],['1개월','chg_1m'],['3개월','chg_3m'],['6개월','chg_6m'],['1년','chg_1y'],['2년','chg_2y'],['3년','chg_3y']];
@@ -575,6 +576,7 @@ async function open(code){
       ${mr.length?`<div class="twrap"><table><tr><th>공시일</th><th>보고자</th><th>사유</th><th class="n">보유비율</th><th class="n">증감</th><th class="n">약정(담보 등)</th><th></th></tr>${mr.slice(0,8).map(r=>`<tr><td>${r.rcept_dt}</td><td>${esc(r.repror||'')}</td><td>${esc(r.report_resn||'')}</td><td class="n">${pct(r.stkrt)}</td><td class="n ${r.stkrt_irds<0?'neg':''}">${r.stkrt_irds!=null?(r.stkrt_irds>0?'+':'')+r.stkrt_irds+'%p':'-'}</td><td class="n">${r.ctr_stkrt?`<span class="warn">${pct(r.ctr_stkrt)}</span>`:'-'}</td><td><a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">보고서</a></td></tr>`).join('')}</table></div><div class="src" style="margin-top:4px">약정 = 보고서의 '주요체결약정' 주식 비율(담보제공·대차 등). 상대방·종류는 보고서 본문 확인 · 5% 미만 주주의 담보제공은 공시 의무 없음</div>`:'<div class="src">대량보유 보고 미수집(biz 작업 후 표시)</div>'}</div></div>`;}}
   else h+=`<div class="src">주가 미수집</div>`;
   h+=`</section>`;
+  }
   // 5 공시 타임라인
   h+=`<section><h3>5. 주요 공시 타임라인 (심사 키워드 필터)</h3>`;
   if(d.events.length){const lvl=f=>['감사의견','관리종목','최대주주변경','횡령배임','거래정지','상장폐지','회생'].includes(f)?'red':['유상증자','CB','BW','EB','소송','채무','담보제공'].includes(f)?'amber':'';
