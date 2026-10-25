@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -269,6 +269,40 @@ def main():
                     __import__("audit_fs").run(miss, year=a.year - 1, con=con)
                 except Exception as e:  # noqa
                     print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
+    if a.job == "coverage":                  # 항목별 수록 현황·실패 사유 진단(2026-10-25 사용자 요청: 메자닌·차입금·사업내용 등 미진한 부분 팔로업) — DART 호출 없음
+        def has(sql):
+            try:
+                return {r[0] for r in con.execute(sql)}
+            except Exception as e:  # noqa
+                print(f"[coverage] 쿼리 오류: {e}", flush=True); return set()
+        live = con.execute("SELECT corp_code, market FROM company WHERE delisted_dt IS NULL").fetchall()
+        checks = {
+            "사업내용 요약": has("SELECT corp_code FROM business WHERE summary_json IS NOT NULL"),
+            "사업보고서 원문": has("SELECT corp_code FROM business WHERE full_text IS NOT NULL OR full_z IS NOT NULL"),
+            "연간 재무": has("SELECT corp_code FROM fin_kpi WHERE reprt_code='11011'"),
+            "총차입금(최근연간)": has("""SELECT k.corp_code FROM fin_kpi k WHERE k.reprt_code='11011' AND k.borrowings IS NOT NULL
+                                     AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi WHERE corp_code=k.corp_code AND reprt_code='11011')"""),
+            "영업CF(최근연간)": has("""SELECT k.corp_code FROM fin_kpi k WHERE k.reprt_code='11011' AND k.cfo IS NOT NULL
+                                     AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi WHERE corp_code=k.corp_code AND reprt_code='11011')"""),
+            "메자닌 점검": has("SELECT corp_code FROM mezz_checked"),
+            "주석 원문": has("SELECT corp_code FROM notes_latest"),
+            "차입금 구조화": has("SELECT corp_code FROM notes_struct"),
+            "감사의견": has("SELECT corp_code FROM audit_opinion"),
+        }
+        mk = {}
+        for cc, m in live:
+            mk.setdefault(m, []).append(cc)
+        for m, ccs in sorted(mk.items()):
+            line = " · ".join(f"{k} {sum(1 for c in ccs if c in v)}/{len(ccs)}" for k, v in checks.items())
+            print(f"[coverage] {m}: {line}", flush=True)
+        for k in ("사업내용 요약", "총차입금(최근연간)", "메자닌 점검", "차입금 구조화"):
+            miss = [cc for cc, m in live if m != "UNLISTED" and cc not in checks[k]]
+            nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+            print(f"[coverage] 상장 {k} 누락 {len(miss)}사 예: {', '.join(nm.get(c, c) for c in miss[:25])}", flush=True)
+        for job, n in con.execute("SELECT job, COUNT(*) FROM fetch_log WHERE status='fail' GROUP BY job ORDER BY 2 DESC").fetchall():
+            top = con.execute("""SELECT substr(COALESCE(msg,''),1,70) m, COUNT(*) n FROM fetch_log WHERE status='fail' AND job=?
+                                 GROUP BY m ORDER BY n DESC LIMIT 4""", (job,)).fetchall()
+            print(f"[coverage] 실패 {job} {n}건: " + " / ".join(f"{r[0]}({r[1]})" for r in top), flush=True)
     if a.job == "audit_fs":                  # 감사보고서(pblntf_ty F) 본문 표 → fin_raw/KPI. 기본: 비상장 중 연간 KPI 없는 회사. --codes로 지정, --dry-run으로 점검만
         import audit_fs
         audit_fs.run([p[0] for p in pairs] if a.codes else None, year=a.year - 1, con=con, dry=a.dry_run, new_only=("recheck" if a.force else not a.codes), source="web" if a.web else "api")   # --force: 빈 KPI(CF·순이익) 회사 재파싱
