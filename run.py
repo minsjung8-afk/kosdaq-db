@@ -121,6 +121,18 @@ def main():
     if a.job == "kpi":
         import financials
         print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")
+        try:   # 진단(2026-10-25): 비상장 최근 연간 KPI에서 영업CF·자산총계·순이익이 빈 회사와 해당 표의 계정명
+            for cc, nm, y, fs, cfo, ta, ni in con.execute("""SELECT k.corp_code, c.corp_name, k.bsns_year, k.fs_div, k.cfo, k.total_assets, k.net_income FROM fin_kpi k JOIN company c USING(corp_code)
+                                          WHERE c.market='UNLISTED' AND k.reprt_code='11011' AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi WHERE corp_code=k.corp_code AND reprt_code='11011')
+                                          AND (k.cfo IS NULL OR k.total_assets IS NULL OR k.net_income IS NULL)""").fetchall():
+                miss = [n for n, v in (("CF", cfo), ("BS", ta), ("IS", ni)) if v is None]
+                for sj in miss:
+                    sjs = ("IS", "CIS") if sj == "IS" else (sj,)
+                    names = [r[0] for r in con.execute(f"SELECT account_nm FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=? AND sj_div IN ({','.join('?'*len(sjs))}) ORDER BY ord LIMIT 40",
+                                                       (cc, y, fs, *sjs)).fetchall()]
+                    print(f"[kpi진단] {nm} {y} {fs} {sj} 누락 · 계정 {len(names)}개: {' | '.join(names)[:600]}", flush=True)
+        except Exception as e:  # noqa
+            print(f"[kpi진단] 오류: {e}", flush=True)
         try:   # 진단: 이자비용은 있는데 총차입금이 비는 연간 행 수와, 그 회사들의 재무상태표 부채 계정명 상위
             miss = con.execute("""SELECT COUNT(*) FROM fin_kpi WHERE reprt_code='11011' AND borrowings IS NULL AND COALESCE(int_exp,0)<>0""").fetchone()[0]
             tot = con.execute("SELECT COUNT(*) FROM fin_kpi WHERE reprt_code='11011'").fetchone()[0]
