@@ -94,6 +94,7 @@ def main():
     ap.add_argument("--hop", type=int, default=0, help="chain: 자동 이어하기 횟수(무한 반복 방지, 8회까지)")
     ap.add_argument("--steps", nargs="*", help="chain: 순서대로 실행할 작업 (예: --steps da quarters \"price:--start 2016-01-01\")")
     ap.add_argument("--dry-run", action="store_true", help="audit_fs: 적재 없이 파싱 결과(표별 행수·앞 4행)만 출력")
+    ap.add_argument("--web", action="store_true", help="audit_fs: OpenDART 대신 dart.fss.or.kr 웹에서 바로 수집(API 장애 시)")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
 
@@ -240,7 +241,7 @@ def main():
                     print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
     if a.job == "audit_fs":                  # 감사보고서(pblntf_ty F) 본문 표 → fin_raw/KPI. 기본: 비상장 중 연간 KPI 없는 회사. --codes로 지정, --dry-run으로 점검만
         import audit_fs
-        audit_fs.run([p[0] for p in pairs] if a.codes else None, year=a.year - 1, con=con, dry=a.dry_run, new_only=not a.codes)
+        audit_fs.run([p[0] for p in pairs] if a.codes else None, year=a.year - 1, con=con, dry=a.dry_run, new_only=not a.codes, source="web" if a.web else "api")
     if a.job == "daily":                     # 평일 아침: 시세 + 수시공시 델타(전환청구·리픽싱·5%보고·주요이벤트)
         import prices, delta, subst
         prices.run(pairs, a.year, markets=a.market)
