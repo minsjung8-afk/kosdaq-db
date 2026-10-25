@@ -133,6 +133,17 @@ def run(days=456, out_path="unlisted_candidates.xlsx"):
                 hits[h[0]] = h
         hits = list(hits.values())
         nm0 = _base(d["name"])
+        web_listed = False
+        if not hits and not (nm0.endswith("지점") or SPC.search(d["name"]) or FIN.search(nm0) or PUB.search(nm0)):
+            try:                                # corpCode.xml에 없는 이름 = 대개 사명 변경(신평 공시는 옛 사명) → DART 웹 검색은 옛 사명도 찾는다
+                import dart_web
+                w = dart_web.corp_lookup(re.sub(r"\(주\)|주식회사", "", d["name"]).strip())
+                time.sleep(0.5)
+                if len(w) == 1:
+                    hits = [(w[0][0], w[0][2], None if w[0][1] in ("기", "") else "Y", "")]
+                    web_listed = w[0][1] in ("유", "코", "넥")
+            except Exception as e:  # noqa
+                print(f"[unlisted2] 웹 사명 조회 실패 {d['name']}: {e}", flush=True)
         need = not (nm0.endswith("지점") or SPC.search(d["name"]) or FIN.search(nm0) or PUB.search(nm0))
         h = pick(hits, db) if (need or len(hits) <= 1) else (next((x for x in hits if x[0] in db), None))
         cc = h[0] if h else ""
@@ -151,7 +162,7 @@ def run(days=456, out_path="unlisted_candidates.xlsx"):
             g = "금융"
         elif PUB.search(nm):
             g = "공공"
-        elif stock and cc not in db:
+        elif (stock and cc not in db) or web_listed:
             g = "상장사(DB 미수록)"
         else:
             g = "일반기업"

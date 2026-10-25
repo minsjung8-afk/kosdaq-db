@@ -144,3 +144,22 @@ def find_audit_reports(corp_code, bsns_year):
         if m:
             out["CFS" if m.group(2) else "OFS"] = r["rcept_no"]
     return out
+
+
+def corp_lookup(name, bgn_de="20250101", end_de=None):
+    """회사명(옛 사명 포함)으로 DART 웹 공시검색 → [(고유번호, 시장표시(유/코/넥/기/''), 현재 사명)] — corpCode.xml에 없는 옛 사명 매칭용.
+    예: 에이치디현대케미칼 → 01032422(에이치앤엘어드밴스드), 에이치엘디앤아이한라 → 00161116(HL D&I, 유가)"""
+    from datetime import date
+    data = {"currentPage": "1", "maxResults": "30", "maxLinks": "5", "sort": "date", "series": "desc",
+            "textCrpNm": name, "startDate": bgn_de, "endDate": end_de or date.today().strftime("%Y%m%d")}
+    h = _text(_post(BASE + "/dsab007/detailSearch.ax", data))
+    out = {}
+    for m in _ROW_RE.finditer(h):
+        row = m.group(1)
+        cik = re.search(r"openCorpInfoNew\('(\d+)'", row)
+        if not cik or cik.group(1) in out:
+            continue
+        cn = re.search(r"openCorpInfoNew\('\d+'[^>]*>\s*([^<]+)<", row)
+        mk = re.search(r'class="tag[^"]*"[^>]*>([^<]+)<', row)
+        out[cik.group(1)] = (cik.group(1), (mk.group(1).strip() if mk else ""), (cn.group(1).strip() if cn else ""))
+    return list(out.values())
