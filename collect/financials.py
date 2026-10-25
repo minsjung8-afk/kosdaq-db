@@ -284,6 +284,13 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         _da_from_rows(rows, k)
         # 차입금 근사: BS 계정명 키워드 합(중복 방지: 정확 일치만)
         k["borrowings"], k["_bor_src"] = _borrowings(rows)
+        if k["borrowings"] is None and k.get("total_liab") is not None:
+            # 2026-10-25 확인(고영·PN풍년·YW·KNN 등 사업보고서 원문 대조): 재무상태표에 차입성 계정이 아예 없거나 금액이 0이면 '차입금 없음' = 0.
+            # 차입성으로 보이는 계정에 금액이 있는데 못 잡은 경우는 비워 둔다(진단 대상)
+            hit = [r for r in rows if r["sj_div"] == "BS" and (r.get("thstrm_amount") or 0) != 0
+                   and _re.search(r"차입|사채|리스부채|어음|유동화", _norm_nm(r["account_nm"])) and not _re.search(r"매입채무|미지급|선수|충당|이연|채권", _norm_nm(r["account_nm"]))]
+            if not hit:
+                k["borrowings"], k["_bor_src"] = 0, "차입성 계정 없음"
         eq, rev = k.get("equity"), k.get("revenue")
         k["debt_ratio"] = round(k["total_liab"] / eq * 100, 1) if k.get("total_liab") and eq else None
         k["op_margin"] = round(k["op_income"] / rev * 100, 1) if k.get("op_income") is not None and rev else None
