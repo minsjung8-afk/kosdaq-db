@@ -288,3 +288,137 @@ def run_all(corp_codes=None, model="haiku", force=False, workers=10, limit=None)
                 print(f"[summarize] {i}/{len(todo)} · 성공 {n} · 실패 {fail} · {int(time.time() - t0)}초", flush=True)
     con.commit()
     print(f"[summarize] 완료 {n}/{len(todo)} · 실패 {fail}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# 비상장 감사보고서 제출사 요약(2026-10-25 사용자 요청): 사업보고서가 없어 'II. 사업의 내용'이 없는 회사 →
+# [A] 신용평가서 PDF(사업·재무 서술이 가장 풍부) + [B] 감사보고서 주석 '회사의 개요' + [C] 감사보고서 재무 요약(KPI)로 같은 스키마 요약.
+# 결과는 business 행(rcept_no=감사보고서, overview_text=회사의 개요)으로 저장 → 사이트 '사업현황'에 그대로 표시, 야간 사업보고서 재조회 대상에서도 빠짐.
+UNLISTED_PROMPT = COMBINED_PROMPT.replace(
+    "[B] 사업보고서 'II. 사업의 내용'을 함께 읽고",
+    "[B] 감사보고서 주석 '회사의 개요'와 [C] 감사보고서 재무 요약을 함께 읽고(이 회사는 비상장사로 사업보고서가 없다)").replace(
+    '"사업보고서" / "양쪽"', '"감사보고서" / "양쪽"')
+
+_OV_RE = __import__("re").compile(r"(일반\s*사항|회사의\s*개요|회사\s*개요|일반적\s*사항)")
+
+
+def _audit_overview(xml):
+    """감사보고서 원문 → 주석 첫 항목(회사의 개요·일반사항) 평문(최대 6천자)"""
+    import re
+    from business import _strip
+    t = _strip(xml)
+    i = t.find("주석")
+    m = _OV_RE.search(t, i if i >= 0 else 0)
+    if not m:
+        return ""
+    s = t[max(0, m.start() - 10):]
+    nxt = re.search(r"\n\s*2\s*[.．]\s*\S", s[200:])          # 다음 주석 항목('2. 재무제표 작성기준' 등) 전까지
+    return s[:200 + nxt.start()][:6000] if nxt else s[:6000]
+
+
+def _fin_digest(con, cc):
+    rows = con.execute("""SELECT bsns_year, fs_div, revenue, op_income, net_income, total_assets, total_liab, equity, borrowings, cash, cfo, ebitda, debt_ratio
+                          FROM fin_kpi WHERE corp_code=? AND reprt_code='11011' ORDER BY bsns_year DESC, fs_div LIMIT 6""", (cc,)).fetchall()
+    eok = lambda v: "-" if v is None else f"{v / 1e8:,.0f}"
+    out = []
+    for r in rows:
+        out.append(f"{r['bsns_year']} {'연결' if r['fs_div'] == 'CFS' else '별도'}: 매출 {eok(r['revenue'])}억 · 영업이익 {eok(r['op_income'])}억 · 순이익 {eok(r['net_income'])}억 · "
+                   f"자산 {eok(r['total_assets'])}억 · 부채 {eok(r['total_liab'])}억 · 자본 {eok(r['equity'])}억 · 총차입금 {eok(r['borrowings'])}억 · "
+                   f"현금 {eok(r['cash'])}억 · 영업CF {eok(r['cfo'])}억 · EBITDA {eok(r['ebitda'])}억 · 부채비율 {r['debt_ratio'] if r['debt_ratio'] is not None else '-'}%")
+    return "\n".join(out)
+
+
+def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6):
+    """대상: market=UNLISTED 중 사업보고서 원문(business.full_text)이 없는 회사. 감사보고서 접수번호는 fin_raw(감사보고서 파서 적재분)에서."""
+    import time
+    import requests
+    from concurrent.futures import ThreadPoolExecutor
+    from common import UA
+    from business import fetch_document_xml
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ANTHROPIC_API_KEY 없음 - 요약 건너뜀"); return
+    import anthropic  # noqa
+    client = anthropic.Anthropic()
+    mid = MODELS.get(model, model)
+    con = connect()
+    rat = _latest_ratings(con)
+    q = """SELECT c.corp_code, c.corp_name,
+                  (SELECT r.rcept_no FROM fin_raw r WHERE r.corp_code=c.corp_code AND r.reprt_code='11011' AND r.account_id='-표준계정코드 미사용-'
+                    AND r.rcept_no NOT LIKE '%:전기' ORDER BY r.bsns_year DESC, r.fs_div LIMIT 1) AS arc,
+                  (SELECT MAX(r.bsns_year) FROM fin_raw r WHERE r.corp_code=c.corp_code AND r.reprt_code='11011' AND r.account_id='-표준계정코드 미사용-'
+                    AND r.rcept_no NOT LIKE '%:전기') AS ay
+           FROM company c WHERE c.market='UNLISTED'
+             AND c.corp_code NOT IN (SELECT corp_code FROM business WHERE full_z IS NOT NULL OR full_text IS NOT NULL)"""
+    todo = []
+    for r in con.execute(q):
+        cc = r["corp_code"]
+        if corp_codes and cc not in corp_codes:
+            continue
+        old = con.execute("SELECT summary_json FROM business WHERE corp_code=? AND summary_json IS NOT NULL", (cc,)).fetchone()
+        if old and not force:
+            continue
+        if not r["arc"] and cc not in rat:
+            continue                                   # 감사보고서도 등급서도 없으면 요약 근거 없음
+        todo.append((cc, r["corp_name"], r["arc"], r["ay"], rat.get(cc)))
+    print(f"[summarize_unlisted] 대상 {len(todo)}사 (신용평가서 {sum(1 for t in todo if t[4])}) · 모델 {mid} · 병렬 {workers}", flush=True)
+
+    def work(item):
+        cc, nm, arc, ay, rr = item
+        ov = ""
+        if arc:
+            try:
+                ov = _audit_overview(fetch_document_xml(arc))
+            except Exception as e:  # noqa
+                ov = ""
+        pdf_txt = ""
+        if rr:
+            try:
+                pdf = requests.get(rr["file_url"], headers=UA, timeout=(15, 60)).content
+                if pdf[:4] == b"%PDF":
+                    pdf_txt, _ = _pdf_text(pdf)
+            except Exception:  # noqa
+                pdf_txt = ""
+        fin = _fin_digest(con_local(), cc)
+        if len(pdf_txt) < 500 and len(ov) < 200:
+            raise RuntimeError("근거 부족(신용평가서·회사의 개요 모두 없음)")
+        content = (UNLISTED_PROMPT
+                   + ("\n[A] 신용평가서(" + rr["agency"] + " " + rr["disc_dt"] + " " + str(rr["grade"]) + "):\n" + pdf_txt[:45000] if len(pdf_txt) >= 500 else "\n[A] 신용평가서: 없음")
+                   + "\n\n[B] 감사보고서 주석 '회사의 개요'(" + str(ay or "") + "):\n" + (ov or "없음")
+                   + "\n\n[C] 감사보고서 재무 요약(억원):\n" + (fin or "없음"))
+        js = _call(client, mid, content)
+        js["_kind"] = "unlisted_audit"
+        if rr:
+            js["_rating"] = {k: rr[k] for k in ("agency", "disc_dt", "grade", "file_url")}
+        return cc, arc, ay, ov, js
+
+    import threading
+    _tl = threading.local()
+
+    def con_local():
+        if not hasattr(_tl, "con"):
+            _tl.con = connect()
+        return _tl.con
+
+    n = fail = 0
+    t0 = time.time()
+    with ThreadPoolExecutor(workers) as ex:
+        for i, fut in enumerate([ex.submit(work, it) for it in todo], 1):
+            try:
+                cc, arc, ay, ov, js = fut.result()
+                js["_model"] = mid
+                y = str(ay or (time.localtime().tm_year - 1))
+                con.execute("""INSERT INTO business (corp_code, bsns_year, rcept_no, reprt_code, overview_text, summary_json, summary_md, summarized_at, fetched_at)
+                               VALUES (?,?,?,?,?,?,?,?,?)
+                               ON CONFLICT(corp_code, bsns_year) DO UPDATE SET summary_json=excluded.summary_json, summary_md=excluded.summary_md,
+                               summarized_at=excluded.summarized_at, overview_text=COALESCE(business.overview_text, excluded.overview_text),
+                               rcept_no=COALESCE(business.rcept_no, excluded.rcept_no)""",
+                            (cc, y, arc, "11011", ov or None, json.dumps(js, ensure_ascii=False), js.get("summary_md"), now(), now()))
+                n += 1
+            except Exception as e:  # noqa
+                fail += 1
+                print("요약 실패", todo[i - 1][0], todo[i - 1][1], str(e)[:120], flush=True)
+            if i % 20 == 0:
+                con.commit()
+                print(f"[summarize_unlisted] {i}/{len(todo)} · 성공 {n} · 실패 {fail} · {int(time.time() - t0)}초", flush=True)
+    con.commit()
+    print(f"[summarize_unlisted] 완료 {n}/{len(todo)} · 실패 {fail}", flush=True)
