@@ -249,6 +249,7 @@ def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_ba
     names = dict(con.execute("SELECT corp_code, corp_name FROM company"))
     print(f"[audit_fs] 대상 {len(cs)}사 · 기준연도 {year} · {'점검만' if dry else '적재'}", flush=True)
     ok = 0
+    conn_fail = 0            # 연속 연결 실패 수 — DART 장애 시 전체를 헛돌지 않도록 5회 연속이면 중단(다음 실행에서 new_only로 이어감)
     for i, cc in enumerate(cs, 1):
         try:
             got = {}
@@ -257,6 +258,7 @@ def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_ba
                 got.update({f"{y}:{k}": v for k, v in g.items()})
             if got:
                 ok += 1
+            conn_fail = 0
             print(f"[audit_fs] {i}/{len(cs)} {names.get(cc, cc)} {got or '감사보고서 재무제표 없음'}", flush=True)
             if not dry:
                 log(con, cc, "audit_fs", "ok" if got else "empty", str(got))
@@ -266,6 +268,10 @@ def run(corp_codes=None, year=None, con=None, dry=False, new_only=True, years_ba
                 log(con, cc, "audit_fs", "fail", e)
             if common.QUOTA_HIT:
                 break
+            if "연결 실패" in str(e) or "Max retries" in str(e):
+                conn_fail += 1
+                if conn_fail >= 5:
+                    print("[audit_fs] DART 연결 실패 5회 연속 — 중단(다음 실행에서 이어감)", flush=True); break
     print(f"[audit_fs] 완료 {ok}/{len(cs)} · DART {common.CALLS}콜", flush=True)
     if not dry:
         try:
