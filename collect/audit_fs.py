@@ -128,7 +128,7 @@ def parse_table(tbl_xml, unit, cont=None):
             return None
         cur, prev, hi = hc
         _LAST_HC["v"] = {"cur": cur, "prev": prev, "ncol": max(len(_expand(r)) for r in rows[hi + 1:hi + 6] or [[]])}
-    elif cont and rows and abs(max(len(_expand(r)) for r in rows) - cont["ncol"]) <= 0:
+    elif cont and rows and max(len(_expand(r)) for r in rows) >= cont["cur"][1] and max(len(_expand(r)) for r in rows) <= cont["ncol"] + 1:   # 열 수가 당기 열을 덮으면(빈 끝 셀 생략 양식 포함)
         cur, prev, hi = cont["cur"], cont["prev"], -1
     else:
         return None
