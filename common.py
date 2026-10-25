@@ -116,7 +116,13 @@ def dart_get(endpoint: str, retry: int = 3, **params):
                 time.sleep(gap)
             _last_call = time.time()
             CALLS += 1
-        r = requests.get(f"{DART_BASE}/{endpoint}.json", params=params, headers=UA, timeout=30)
+        try:
+            r = requests.get(f"{DART_BASE}/{endpoint}.json", params=params, headers=UA, timeout=30)
+        except requests.RequestException as e:          # 2026-10-25: 연결 거부·타임아웃도 재시도(감사보고서 대량 수집 중 'Max retries exceeded' 연발)
+            if i == retry - 1:
+                raise RuntimeError(f"DART {endpoint} 연결 실패: {type(e).__name__}") from e
+            time.sleep(5 * (i + 1))
+            continue
         if r.status_code != 200:
             time.sleep(2 * (i + 1))
             continue
@@ -139,8 +145,15 @@ def dart_get_binary(endpoint: str, **params) -> bytes:
     params = {"crtfc_key": api_key(), **params}
     with _LOCK:
         CALLS += 1
-    r = requests.get(f"{DART_BASE}/{endpoint}.xml", params=params, headers=UA, timeout=60)
-    r.raise_for_status()
+    for i in range(3):
+        try:
+            r = requests.get(f"{DART_BASE}/{endpoint}.xml", params=params, headers=UA, timeout=60)
+            r.raise_for_status()
+            break
+        except requests.RequestException as e:
+            if i == 2:
+                raise RuntimeError(f"DART {endpoint} 연결 실패: {type(e).__name__}") from e
+            time.sleep(5 * (i + 1))
     if not r.content.startswith(b"PK") and (b"<status>020</status>" in r.content[:500] or b"<status>021</status>" in r.content[:500]):
         QUOTA_HIT = True
         raise RuntimeError("DART 한도 초과")
