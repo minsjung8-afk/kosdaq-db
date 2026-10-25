@@ -191,6 +191,17 @@ def main():
         seed = list(csv.DictReader(open(Path(__file__).resolve().with_name("unlisted_seed.csv"), encoding="utf-8")))
         if a.codes:
             seed = [r for r in seed if r["corp_code"] in set(a.codes)]
+        if a.debug:                          # --debug <고유번호…>: 잘못 등록된 비상장사 제거(시드 고유번호 오류 정정용, UNLISTED만) 후 시드대로 재등록
+            for cc in a.debug:
+                if not con.execute("SELECT 1 FROM company WHERE corp_code=? AND market='UNLISTED'", (cc,)).fetchone():
+                    print(f"[unlisted_add] {cc}: 비상장 등록 없음 — 건너뜀", flush=True); continue
+                n = 0
+                for (tbl,) in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+                    cols = {r[1] for r in con.execute(f"PRAGMA table_info({tbl})")}
+                    if "corp_code" in cols:
+                        n += con.execute(f"DELETE FROM {tbl} WHERE corp_code=?", (cc,)).rowcount
+                print(f"[unlisted_add] {cc} 제거: {n}행", flush=True)
+            con.commit()
         have = {r[0] for r in con.execute("SELECT corp_code FROM company")}
         new = []
         for r in seed:
