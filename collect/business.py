@@ -303,6 +303,69 @@ def fetch_audit_opinion(con, corp_code, bsns_year):
     con.commit()
 
 
+def review_target(today=None):
+    """가장 최근에 제출됐을 정기보고서(분기·반기)의 (사업연도, reprt_code): 분기 45일·반기 45일 제출기한 + 여유 2일"""
+    from datetime import date
+    d = today or date.today()
+    y = d.year
+    if (d.month, d.day) >= (11, 16):
+        return str(y), "11014"
+    if (d.month, d.day) >= (8, 16):
+        return str(y), "11012"
+    if (d.month, d.day) >= (5, 17):
+        return str(y), "11013"
+    return str(y - 1), "11014"
+
+
+def fetch_review_opinion(con, corp_code, bsns_year=None, reprt_code=None):
+    """분기·반기 검토의견(2026-10-26 사용자 요청: 전년 온기 감사의견 + 최근 분기/반기 검토의견 병기).
+    DART '회계감사인의 명칭 및 감사의견' API를 분기·반기 보고서 코드로 조회 → audit_review. 3분기가 없으면(분기 검토 비대상) 반기로 내려간다."""
+    con.execute("""CREATE TABLE IF NOT EXISTS audit_review (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, adtor TEXT, opinion TEXT,
+                   emphs_matter TEXT, fetched_at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code))""")
+    y, rc = (bsns_year, reprt_code) if bsns_year and reprt_code else review_target()
+    order = {"11014": ["11014", "11012"], "11012": ["11012", "11013"], "11013": ["11013"]}.get(rc, [rc])
+    from common import now as _now
+    for code in order:
+        js = dart_get("accnutAdtorNmNdAdtOpinion", corp_code=corp_code, bsns_year=y, reprt_code=code)
+        rows = js.get("list", [])
+        cur = [r for r in rows if "당기" in (r.get("bsns_year") or "") or (r.get("bsns_year") or "") == y] or rows[:1]
+        for r in cur:
+            op = (r.get("adt_opinion") or "").strip()
+            if not op or op in ("-",):
+                continue
+            con.execute("INSERT OR REPLACE INTO audit_review VALUES (?,?,?,?,?,?,?)",
+                        (corp_code, y, code, r.get("adtor"), op, r.get("emphs_matter"), _now()))
+            con.commit()
+            return code
+    con.execute("INSERT OR REPLACE INTO audit_review VALUES (?,?,?,?,?,?,?)", (corp_code, y, rc, None, None, None, _now()))   # 조회했지만 없음(재조회 방지)
+    con.commit()
+    return None
+
+
+def run_review(con, corp_codes=None, verbose=False):
+    y, rc = review_target()
+    con.execute("""CREATE TABLE IF NOT EXISTS audit_review (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, adtor TEXT, opinion TEXT,
+                   emphs_matter TEXT, fetched_at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code))""")
+    have = {r[0] for r in con.execute("SELECT corp_code FROM audit_review WHERE bsns_year=?", (y,))}
+    tg = list(corp_codes) if corp_codes else [r[0] for r in con.execute(
+        "SELECT corp_code FROM company WHERE market IN ('KOSPI','KOSDAQ','KONEX') AND delisted_dt IS NULL") if r[0] not in have]
+    print(f"[review] 대상 {len(tg)}사 · {y} {rc}", flush=True)
+    n = ok = 0
+    for cc in tg:
+        try:
+            if fetch_review_opinion(con, cc, y, rc):
+                ok += 1
+        except Exception as e:  # noqa
+            if "한도" in str(e):
+                print("[review] DART 한도 — 중단", flush=True)
+                break
+        n += 1
+        if verbose:
+            r = con.execute("SELECT reprt_code, adtor, opinion FROM audit_review WHERE corp_code=? AND bsns_year=?", (cc, y)).fetchall()
+            print(f"[review] {cc} → {[tuple(x) for x in r]}", flush=True)
+    print(f"[review] 완료 {n}사 · 검토의견 확보 {ok}", flush=True)
+
+
 def fetch_shareholders(con, corp_code, bsns_year):
     js = dart_get("hyslrSttus", corp_code=corp_code, bsns_year=bsns_year, reprt_code="11011")
     for r in js.get("list", []):
