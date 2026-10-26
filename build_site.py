@@ -259,6 +259,11 @@ def company_detail(con, c):
             rows.append({**L, "label": plabel(L["bsns_year"], L["reprt_code"]), "kind": "interim"})
         if rows:
             kpi[fs] = [{k: v for k, v in r.items() if k not in ("corp_code", "fs_div")} for r in rows]
+    ann5 = {}                                    # 분기 재무가 없는 회사의 연간 손익 추이 그래프용 최근 5개년(2026-10-26, 가벼운 필드만)
+    for fs in ("CFS", "OFS"):
+        a5 = q(con, "SELECT bsns_year, revenue, op_income, net_borrowings, ebitda FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND revenue IS NOT NULL ORDER BY bsns_year DESC LIMIT 5", cc, fs)
+        if len(a5) >= 2:
+            ann5[fs] = sorted(a5, key=lambda r: r["bsns_year"])
     from prices import adjusted_rows  # noqa  수정주가(분할·병합 반영)
     prices = _compact_prices(adjusted_rows(con, sc), con.execute("SELECT date('now','-3 years')").fetchone()[0])   # 최근 3년 일봉 + 그 이전 주봉
     ps = q(con, "SELECT * FROM price_summary WHERE stock_code=? ORDER BY asof DESC LIMIT 1", sc)
@@ -279,6 +284,7 @@ def company_detail(con, c):
                      "dart_url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={b['rcept_no']}" if b.get("rcept_no") else None,
                      "overview": (b.get("overview_text") or "")[:12000], "summary": json.loads(b["summary_json"]) if b.get("summary_json") else None},
         "kpi": kpi,
+        "annual5": ann5,
         "quarters": _quarters(con, cc),
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
