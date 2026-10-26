@@ -107,14 +107,22 @@ def run(start=None, con=None):
                 used = d; print(f"[subst] 직접 조회 성공: 기준 {d} · {len(rows):,}종목", flush=True); break
     # 2) 자택 Mac(국내)이 R2에 올린 파일(subst/latest.json → 워크플로가 subst_latest.json으로 내려줌)
     lf = os.environ.get("SUBST_FILE", "subst_latest.json")
-    if not rows and os.path.exists(lf):
-        try:
-            js = json.load(open(lf, encoding="utf-8"))
-            rows = js.get("rows") or []
-            used = js.get("trd_dd") or (rows[0]["trd_dd"] if rows else None)
-            print(f"[subst] R2 파일 사용: 기준 {used} · {len(rows):,}종목 (수집 {js.get('fetched_at')})", flush=True)
-        except Exception as e:  # noqa
-            print(f"[subst] 로컬 파일 읽기 실패: {e}", flush=True); rows = []
+    # 3) 저장소 subst_manual.json — 자택 Mac이 못 돌았을 때 사용자 브라우저(로그인 세션)에서 받아 커밋한 파일(2026-10-26). R2 파일과 비교해 적용일이 최신인 쪽 사용
+    mf = Path(__file__).resolve().parent.parent / "subst_manual.json"
+    if not rows:
+        cands = []
+        for path, label in ((lf, "R2 파일"), (str(mf), "수동 파일")):
+            if os.path.exists(path):
+                try:
+                    js = json.load(open(path, encoding="utf-8"))
+                    rr = js.get("rows") or []
+                    if rr:
+                        cands.append((js.get("trd_dd") or rr[0]["trd_dd"], label, js, rr))
+                except Exception as e:  # noqa
+                    print(f"[subst] {label} 읽기 실패: {e}", flush=True)
+        if cands:
+            used, label, js, rows = max(cands, key=lambda c: c[0])
+            print(f"[subst] {label} 사용: 기준 {used} · {len(rows):,}종목 (수집 {js.get('fetched_at')}) · 후보 {[(c[1], c[0]) for c in cands]}", flush=True)
     for back in range(0, 8):
         if rows:
             break
