@@ -147,8 +147,36 @@ async function status(env, nAdd = 0) {
 }
 
 // 대기열 처리: GitHub 작업이 비어 있고 정기 작업이 15분 안에 없으면 한 번에 디스패치
+// 정기 작업 디스패치(2026-10-27): GitHub 동시실행은 '실행 1 + 대기 1'이라 새 대기가 기존 대기를 취소한다.
+// 10-27 새벽 catchup이 늦게 돌던 중 06:00 daily(시세)가 대기 → 06:30 subst가 그 대기를 밀어내 10-26 시세가 빠졌다.
+// 판단 순서: ① 같은 작업이 이미 대기 중 → 건너뜀 ② subst인데 daily가 대기 중 → 건너뜀(daily가 대용가 포함)
+//           ③ 다른 작업이 대기 중이고 새 작업이 그것을 포괄하지 못함 → KV 'deferred'에 보관, 10분마다 빈 시간에 디스패치
+//           ④ 그 외(대기 없음, 또는 대기가 subst이고 새 작업이 daily) → 바로 디스패치
+async function dispatchScheduled(env, jobs) {
+  const st = await runState(env);
+  const w = st.waiting.map(jobOf);
+  for (const j of jobs) {
+    if (w.includes(j) || (j === "subst" && w.includes("daily"))) { console.log(`[scheduler] ${j} 건너뜀(대기 중: ${w.join(",")})`); continue; }
+    if (w.length && !(j === "daily" && w.every(x => x === "subst")) && env.ADDQ) {
+      const d = JSON.parse((await env.ADDQ.get("deferred")) || "[]");
+      if (!d.includes(j)) d.push(j);
+      await env.ADDQ.put("deferred", JSON.stringify(d));
+      console.log(`[scheduler] ${j} 보류(대기 중: ${w.join(",")}) → 빈 시간에 실행`); continue;
+    }
+    if (await dispatch(env, j)) w.push(j);
+  }
+}
+
 async function drain(env) {
   if (!env.ADDQ) return;
+  const dfr = JSON.parse((await env.ADDQ.get("deferred")) || "[]");
+  if (dfr.length) {                                   // 보류된 정기 작업 먼저(대기가 비었을 때만)
+    const s0 = await runState(env);
+    if (s0.ok && !s0.waiting.length) {
+      if (await dispatch(env, dfr[0])) await env.ADDQ.put("deferred", JSON.stringify(dfr.slice(1)));
+    }
+    return;
+  }
   const { q, inflight } = await loadQ(env);
   const now = Date.now();
   const st = await runState(env);
@@ -169,7 +197,7 @@ export default {
   async scheduled(event, env, ctx) {
     const now = new Date(event.scheduledTime);
     const jobs = pick(now);
-    if (jobs.length) { ctx.waitUntil(Promise.all(jobs.map(j => dispatch(env, j)))); return; }   // 정기 작업 시각엔 대기열을 건드리지 않음
+    if (jobs.length) { ctx.waitUntil(dispatchScheduled(env, jobs)); return; }   // 정기 작업 시각엔 대기열을 건드리지 않음
     ctx.waitUntil(drain(env));
   },
   // GET /            → 스케줄표·다음 실행 예정(점검용)
