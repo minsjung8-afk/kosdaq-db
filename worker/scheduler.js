@@ -174,6 +174,7 @@ export default {
   },
   // GET /            → 스케줄표·다음 실행 예정(점검용)
   // GET /queue       → 회사 추가 대기열·반영 예상 시각
+  // GET|POST /visit {new} → 방문자수(오늘·누적)
   // POST /enqueue {corp_code, name}  (헤더 X-Auth: RUN_KEY) → 대기열에 넣고 반영 예상 시각 반환
   // POST /run?job=daily&args=...  (헤더 X-Auth: RUN_KEY)  → 즉시 디스패치
   async fetch(req, env) {
@@ -187,6 +188,19 @@ export default {
     if (u.pathname === "/queue") {
       if (!env.ADDQ) return json({ error: "ADDQ 미설정" }, 500);
       return json(await status(env));
+    }
+    if (u.pathname === "/visit") {                                     // 방문자수: 브라우저당 하루 1회만 집계(사이트가 new 여부 판단)
+      if (!env.ADDQ) return json({ error: "ADDQ 미설정" }, 500);
+      const day = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+      let isNew = false;
+      if (req.method === "POST") { try { isNew = !!(await req.json()).new; } catch (e) { /* noop */ } }
+      const [t, a] = await Promise.all([env.ADDQ.get("v:" + day), env.ADDQ.get("v:total")]);
+      let today = +t || 0, total = +a || 0;
+      if (isNew) {
+        today++; total++;
+        await Promise.all([env.ADDQ.put("v:" + day, String(today), { expirationTtl: 40 * 86400 }), env.ADDQ.put("v:total", String(total))]);
+      }
+      return json({ day, today, total });
     }
     if (req.method === "POST" && u.pathname === "/enqueue") {
       if (!authed) return json({ ok: false, msg: "비밀번호가 틀립니다" }, 403);
