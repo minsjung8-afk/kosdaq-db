@@ -15,13 +15,13 @@ from common import connect, log, now, zpack, ztext  # noqa: E402
 from business import _strip, fetch_document_xml, NOTE_KEYS  # noqa: E402
 
 # v2 수집 절: 기존 심사 절 + 상각비용 변동표 절
-NOTE_KEYS_V2 = tuple(NOTE_KEYS) + ("유형자산", "무형자산", "사용권자산", "투자부동산", "현금흐름")
+NOTE_KEYS_V2 = tuple(NOTE_KEYS) + ("유형자산", "무형자산", "사용권자산", "투자부동산", "현금흐름", "비용의성격", "성격별")   # 비용의 성격별 분류(2026-10-26): 상각비 1순위 근거
 UNIT = {"원": 1, "천원": 1_000, "백만원": 1_000_000, "십억원": 1_000_000_000, "억원": 100_000_000, "만원": 10_000}
 CELL_RE = re.compile(r"<T[DHEU]\b[^>]*>(.*?)</T[DHEU]>", re.S | re.I)
 TR_RE = re.compile(r"<TR[^>]*>(.*?)</TR>", re.S | re.I)
 TABLE_RE = re.compile(r"<TABLE[^>]*>(.*?)</TABLE>", re.S | re.I)
 MAX_ROWS, MAX_P, MAX_SEC = 80, 3000, 90
-PARSER_VER = 3          # 3: 주석 항목을 TITLE 기준으로 분할(2026-10-24) — 이보다 낮은 버전으로 보관된 notes_j·notes_annual은 재수집
+PARSER_VER = 4          # 4: 비용의 성격별 분류 절 추가 수집(2026-10-26 HL D&I 반기 연결 상각비 공백) / 3: 주석 항목을 TITLE 기준으로 분할(2026-10-24) — 이보다 낮은 버전으로 보관된 notes_j·notes_annual은 재수집
 
 
 def _unit_of(text):
@@ -224,7 +224,44 @@ def _da_from_table(tbl):
     return None
 
 
-def da_from_secs(secs, fs=None):
+_NAT_ROW = re.compile(r"(감가상각|상각비)")
+_NAT_EX = re.compile(r"(대손|손상|환입|충당|누계|합계|총계)")
+
+
+def _da_from_nature(tbl, interim=False):
+    """'비용의 성격별 분류' 표 1개 → 상각비 합(원). 행: 감가상각비·무형자산상각비·사용권자산상각비·투자부동산상각비(대손상각비 제외).
+    열: 머리글에 '누적'이 있으면 그 열(분기·반기 누적), 없으면 첫 숫자 열(당기). 2026-10-26 HL D&I 2026 반기 연결: 83.1+2.9+2.4=88.5억 확인"""
+    rows, unit = tbl["rows"], tbl.get("unit", 1) or 1
+    if not rows:
+        return None
+    ci = None
+    q3 = any("3개월" in (h or "").replace(" ", "") for hdr in rows[:4] for h in hdr)
+    for hdr in rows[:4]:
+        for i, h in enumerate(hdr):
+            if "누적" in (h or "").replace(" ", ""):
+                ci = i
+                break
+        if ci is not None:
+            break
+    tot, hit = 0.0, False
+    for r in rows:
+        if not r or not _NAT_ROW.search((r[0] or "").replace(" ", "")) or _NAT_EX.search((r[0] or "").replace(" ", "")):
+            continue
+        nums = [(i, _num(c)) for i, c in enumerate(r) if i > 0 and _num(c) is not None]
+        if not nums:
+            continue
+        if ci is not None:
+            v = next((x for i, x in nums if i == ci), None)
+            if v is None and interim and q3 and len(nums) >= 2:
+                v = nums[-1][1]
+        else:                                          # '누적' 머리글이 없으면: 분기·반기에 '3개월' 열이 있을 때만 마지막 열(누적), 그 외엔 첫 열(당기·당반기 누적)
+            v = nums[-1][1] if (interim and q3 and len(nums) >= 2) else nums[0][1]
+        if v is not None:
+            tot += abs(v); hit = True
+    return tot * unit if hit and tot else None
+
+
+def da_from_secs(secs, fs=None, interim=False):
     """[{t, fs, blocks}] → {dep, amort, rou, da}. 각 절에서 상각비 행이 있는 첫 표(=당기 변동표)만 사용. fs 지정 시 그 구분 절만(구분 없는 절은 포함)."""
     res = {"dep": None, "amort": None, "rou": None, "inv": None}
     for s in secs:
@@ -245,6 +282,19 @@ def da_from_secs(secs, fs=None):
     out = {"dep": dep or None, "amort": res["amort"], "rou": res["rou"]}
     parts = [v for v in out.values() if v]
     out["da"] = sum(parts) if parts else None
+    # 비용의 성격별 분류가 있으면 그 값을 우선(손익계산서 비용 기준으로 명시된 금액 — 변동표 오독 위험이 없음)
+    for s in secs:
+        if fs and s.get("fs") and s["fs"] != fs:
+            continue
+        if re.search(r"비용의성격|성격별", s["t"].replace(" ", "")):
+            for b in s["blocks"]:
+                if "tbl" in b:
+                    v = _da_from_nature(b["tbl"], interim)
+                    if v:
+                        out["da"], out["src"] = v, "성격별"
+                        break
+            if out.get("src"):
+                break
     return out
 
 
@@ -277,7 +327,7 @@ def _store_da(con, cc, y, rc, secs, rcept, src):
     tagged = any(s.get("fs") for s in secs)
     n = 0
     for fs in ("CFS", "OFS"):
-        r = da_from_secs(secs, fs=fs) if tagged else da_from_secs(secs)
+        r = da_from_secs(secs, fs=fs, interim=rc != "11011") if tagged else da_from_secs(secs, interim=rc != "11011")
         if r["da"]:
             con.execute("INSERT OR REPLACE INTO da_notes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (cc, y, rc, fs, r["dep"], r["amort"], r["rou"], r["da"], rcept, src, now()))
@@ -352,7 +402,7 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
                                     (zpack(json.dumps(secs, ensure_ascii=False)), zpack(to_text(secs)), len(to_text(secs)), PARSER_VER, cc, rcept))
                         n += 1
                     else:
-                        asset = [x for x in secs if re.search(r"유형자산|무형자산|사용권자산|투자부동산", x["t"].replace(" ", ""))]
+                        asset = [x for x in secs if re.search(r"유형자산|무형자산|사용권자산|투자부동산|비용의성격|성격별", x["t"].replace(" ", ""))]
                         con.execute("INSERT OR REPLACE INTO notes_annual (corp_code, rcept_no, report_nm, secs_j, fetched_at, ver) VALUES (?,?,?,?,?,?)",
                                     (cc, rcept, nm, zpack(json.dumps(asset, ensure_ascii=False)), now(), PARSER_VER))
                     if y and rc and _store_da(con, cc, y, rc, secs, rcept, kind):
