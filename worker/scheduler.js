@@ -130,11 +130,9 @@ async function status(env, nAdd = 0) {
     out.inflight = { codes: inflight.codes, names: inflight.names, started_kst: kst(inflight.at), done_kst: kst(inflight.at + st.med("unlisted_add") * 60000) };
   }
   const n = q.length + nAdd;
-  if (n) {
-    const e = estimate(st, now, n);
-    out.eta = { start_kst: kst(e.start), done_kst: kst(e.done), start: hm(e.start), done: hm(e.done) };
-    out.notes = e.notes;
-  }
+  const e = estimate(st, now, Math.max(n, 1));           // 대기열이 비어 있어도 '지금 신청하면' 예상 시각을 보여 줌
+  out.eta = { start_kst: kst(e.start), done_kst: kst(e.done), start: hm(e.start), done: hm(e.done), if_new: !n };
+  out.notes = e.notes;
   return out;
 }
 
