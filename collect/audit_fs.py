@@ -313,6 +313,30 @@ def validate(st):
     return warn
 
 
+def audit_opinion_from_text(xml):
+    """감사보고서 본문 → (감사인, 감사의견, 강조사항 요지). 비상장사는 OpenDART 감사의견 API(정기보고서 전용)로 못 받으므로 본문에서 읽는다(2026-10-26 삼표산업).
+    판정 순서: 의견거절 → 부적정 → 한정 → 적정(문구 기준). 못 찾으면 의견 None."""
+    t = _strip(xml)
+    head = t[:20000]                                         # 독립된 감사인의 감사보고서(앞부분)
+    op = None
+    if re.search(r"의견\s*거절|의견을\s*표명하지\s*않", head):
+        op = "의견거절"
+    elif re.search(r"부적정\s*의견|공정하게\s*표시하고\s*있지\s*않", head):
+        op = "부적정의견"
+    elif re.search(r"한정\s*의견", head):
+        op = "한정의견"
+    elif re.search(r"공정하게\s*표시하고\s*있습니다", head):
+        op = "적정의견"
+    ms = re.findall(r"([가-힣A-Za-z&·]{2,20}\s?회계법인|[가-힣]{2,10}\s?감사반)", t[:40000])
+    adtor = None
+    if ms:
+        from collections import Counter
+        adtor = Counter(m.replace(" ", "") for m in ms).most_common(1)[0][0]
+    m = re.search(r"강조\s*사항[^\n]{0,10}\n(.{20,300}?)(?:\n|$)", head, re.S)
+    emph = m.group(1).strip()[:200] if m else None
+    return adtor, op, emph
+
+
 def fetch_year(con, cc, year, dry=False, chain=None):
     """한 사업연도: 연결·별도 감사보고서 → fin_raw(당기 + 전기 보충) → KPI. 반환 {fs: 행수}.
     chain: {(fs, year): 자산총계} — 연도 연쇄 검증(올해 보고서의 전기 = 전년 보고서의 당기)용"""
@@ -362,6 +386,15 @@ def fetch_year(con, cc, year, dry=False, chain=None):
             continue
         if not dry:
             financials.store_raw(con, cc, year, "11011", fs, lst, prev=True)
+            try:                                             # 감사의견(본문) — OpenDART API로 받은 값(정기보고서 제출사)이 있으면 건드리지 않음
+                ex = con.execute("SELECT adtor FROM audit_opinion WHERE corp_code=? AND bsns_year=? AND adt_opinion IS NOT NULL", (cc, str(year))).fetchone()
+                if not ex or "감사보고서 본문" in (ex[0] or ""):
+                    adtor, op, emph = audit_opinion_from_text(xml)
+                    if op:
+                        con.execute("INSERT OR REPLACE INTO audit_opinion VALUES (?,?,?,?,?,?,?)",
+                                    (cc, str(year), (adtor or "-") + " (감사보고서 본문)", op, None, emph or "해당없음", None))
+            except Exception as e:  # noqa
+                print(f"  감사의견 본문 판독 실패: {e}", flush=True)
             if warn:
                 log(con, cc, "audit_fs_warn", "warn", f"{year} {fs} {rc}: " + "; ".join(warn))
         got[fs] = len(lst)
