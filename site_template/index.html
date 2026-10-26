@@ -303,9 +303,13 @@ async function open(code){
   else if(d.rating_text){ h+=`<div class="src" style="margin-top:12px">신용등급 — 공시 등급 없음 · 사업보고서 '신용평가에 관한 사항' 발췌</div><div class="summary wide" style="font-size:12.5px">${rawBiz(d.rating_text.slice(0,3000))}</div>`; }
   // 최근 12분기 추이 · LTM (분기 데이터가 있는 만큼 표시)
   const qBlock=(fs)=>{ let h=''; const Q=d.quarters||{}; const lastLbl=a=>{const v=(a||[]).filter(x=>x.rev!=null); return v.length?v[v.length-1].label:''};
-   const qs=Q[fs]||[]; const other=fs==='CFS'?'OFS':'CFS';
+   // 분기 재무가 없는 회사(감사보고서만 있는 비상장사 등)는 연간 재무로 대신 그림 — 최근 5개년(2026-10-26)
+   const annOf=f=>((d.kpi||{})[f]||[]).filter(x=>x.kind==='annual'&&x.revenue!=null).sort((a,b)=>a.bsns_year<b.bsns_year?-1:1).slice(-5);
+   const hasQ=f=>(Q[f]||[]).length>=2, hasA=f=>annOf(f).length>=2;
+   let qs=Q[fs]||[], ann=false; const other=fs==='CFS'?'OFS':'CFS';
+   if(qs.length<2&&hasA(fs)){ qs=annOf(fs).map(x=>({label:x.bsns_year, rev:x.revenue, op:x.op_income, nd:x.net_borrowings})); ann=true; }
    const fsNote=(fs==='OFS'&&Q.CFS&&lastLbl(Q.OFS)>lastLbl(Q.CFS))?' · 연결은 '+lastLbl(Q.CFS)+'까지만 작성(연결대상 소멸)':'';
-   const sel=`<select class="pbtn" style="margin-left:6px" onchange="window.__qsel(this.value)"><option value="CFS" ${fs==='CFS'?'selected':''} ${Q.CFS?'':'disabled'}>연결</option><option value="OFS" ${fs==='OFS'?'selected':''} ${Q.OFS?'':'disabled'}>별도</option></select>`;
+   const sel=`<select class="pbtn" style="margin-left:6px" onchange="window.__qsel(this.value)"><option value="CFS" ${fs==='CFS'?'selected':''} ${hasQ('CFS')||hasA('CFS')?'':'disabled'}>연결</option><option value="OFS" ${fs==='OFS'?'selected':''} ${hasQ('OFS')||hasA('OFS')?'':'disabled'}>별도</option></select>`;
    if(qs.length>=2){
      const W=1100,H=430,L=56,R=96,T=30,B=34,n=qs.length,gw=(W-L-R)/n, cx=i=>L+i*gw+gw/2;
      // 영역: 위 띠(영업이익률 꺾은선) / 아래(매출·영업이익 막대 + 순차입금 꺾은선)
@@ -341,13 +345,14 @@ async function open(code){
        const lq=[...qs].reverse().find(q=>q.nd!=null); const lp=np[np.length-1];
        g+=`<text x="${W-R+8}" y="${(lp[1]-3).toFixed(1)}" font-size="11" fill="#b8862f" font-weight="700">순차입금</text><text x="${W-R+8}" y="${(lp[1]+11).toFixed(1)}" font-size="11" fill="#b8862f">${억(lq.nd)}억</text>`; }
      // 범례
-     g+=`<g font-size="11" fill="#4a5570"><rect x="${L}" y="${T-16}" width="10" height="10" fill="#2a4f80"/><text x="${L+14}" y="${T-7}">분기 매출(억)</text>
-        <rect x="${L+104}" y="${T-16}" width="10" height="10" fill="#1a7d5a"/><text x="${L+118}" y="${T-7}">분기 영업이익(억, 적자 적색)</text>
+     g+=`<g font-size="11" fill="#4a5570"><rect x="${L}" y="${T-16}" width="10" height="10" fill="#2a4f80"/><text x="${L+14}" y="${T-7}">${ann?'연간':'분기'} 매출(억)</text>
+        <rect x="${L+104}" y="${T-16}" width="10" height="10" fill="#1a7d5a"/><text x="${L+118}" y="${T-7}">${ann?'연간':'분기'} 영업이익(억, 적자 적색)</text>
         <line x1="${L+290}" y1="${T-11}" x2="${L+310}" y2="${T-11}" stroke="#0f766e" stroke-width="2"/><text x="${L+314}" y="${T-7}">영업이익률(%)</text>
-        <line x1="${L+410}" y1="${T-11}" x2="${L+430}" y2="${T-11}" stroke="#b8862f" stroke-width="2" stroke-dasharray="6 3"/><text x="${L+434}" y="${T-7}">분기말 순차입금(억, 별도 축)</text></g></svg>`;
+        <line x1="${L+410}" y1="${T-11}" x2="${L+430}" y2="${T-11}" stroke="#b8862f" stroke-width="2" stroke-dasharray="6 3"/><text x="${L+434}" y="${T-7}">${ann?'연말':'분기말'} 순차입금(억, 별도 축)</text></g></svg>`;
      const lt=qs.filter(q=>q.ltm_rev!=null), RN={'11011':'사업','11012':'반기','11013':'1분기','11014':'3분기'};
      const pc=(a,b)=>a!=null&&b?(a/b*100).toFixed(1)+'%':'-';
-     h+=`<div class="cap2" style="margin:14px 0 4px">최근 ${qs.length}분기 손익 추이 · LTM ${sel}<span class="src" style="font-weight:400">${fs==='CFS'?'연결':'별도'} 기준${fsNote} · 억원 · 분기값 = 누적 차감(2Q=반기−1Q, 4Q=연간−3Q누적)</span></div>${g}`;
+     if(ann) h+=`<div class="cap2" style="margin:14px 0 4px">최근 ${qs.length}개년 연간 손익 추이 ${sel}<span class="src" style="font-weight:400">${fs==='CFS'?'연결':'별도'} 기준 · 억원 · 분기 재무가 없어 연간(감사보고서·사업보고서) 기준으로 표시</span></div>${g}`;
+     else h+=`<div class="cap2" style="margin:14px 0 4px">최근 ${qs.length}분기 손익 추이 · LTM ${sel}<span class="src" style="font-weight:400">${fs==='CFS'?'연결':'별도'} 기준${fsNote} · 억원 · 분기값 = 누적 차감(2Q=반기−1Q, 4Q=연간−3Q누적)</span></div>${g}`;
      if(lt.length) h+=`<div class="twrap" style="margin-top:6px"><table class="fin"><tr><th>LTM(최근 4분기 합산)</th>${lt.map(q=>`<th class="n">${q.label}</th>`).join('')}</tr>
        <tr><td>매출액</td>${lt.map(q=>`<td class="n">${억(q.ltm_rev)}</td>`).join('')}</tr>
        <tr><td>영업이익</td>${lt.map(q=>`<td class="n ${q.ltm_op<0?'neg':''}">${억(q.ltm_op)}</td>`).join('')}</tr>
