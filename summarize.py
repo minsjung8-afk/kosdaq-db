@@ -304,6 +304,52 @@ UNLISTED_PROMPT = COMBINED_PROMPT.replace(
 
 _OV_RE = __import__("re").compile(r"(일반\s*사항|회사의\s*개요|회사\s*개요|일반적\s*사항)")
 
+# 감사보고서만 있는 회사(2026-10-26): '회사의 개요' 외에 사업 실체를 보여 주는 주석을 함께 넣는다
+_EXTRA_NOTES = (("매출 구성", r"고객과의\s*계약|수익의\s*구분|수익\s*\(?매출|매출액|영업수익|수익인식"),
+                ("특수관계자 거래", r"특수관계자"),
+                ("영업부문", r"영업\s*부문|부문\s*정보"),
+                ("우발부채·약정", r"우발|약정|담보|지급보증"),
+                ("건설·공사계약", r"건설계약|공사계약|수주"))
+
+
+def _audit_extra(xml, per=4000, total=16000):
+    """감사보고서 원문 → 주석 중 매출 구성·특수관계자·영업부문·우발/약정·건설계약 절 평문(절당 4천자, 합계 1만6천자)"""
+    import re
+    from business import _strip
+    t = _strip(xml)
+    i = t.find("주석")
+    t = t[i:] if i >= 0 else t
+    heads = [(m.start(), m.group(0)) for m in re.finditer(r"(?m)^\s*\d{1,2}\s*[.．]\s*[^\n]{1,60}$", t)]
+    out, used = [], 0
+    for label, pat in _EXTRA_NOTES:
+        for k, (pos, h) in enumerate(heads):
+            if re.search(pat, h) and not re.search(r"정책|추정|기준", h):
+                end = heads[k + 1][0] if k + 1 < len(heads) else len(t)
+                body = t[pos:end].strip()[:per]
+                if len(body) > 80 and used < total:
+                    out.append(f"<{label}> {body}")
+                    used += len(body)
+                break
+    return "\n\n".join(out)[:total]
+
+
+def _company_basics(con, cc):
+    """DART 기업개황(company 테이블) — 업종 오인 방지용"""
+    try:
+        r = con.execute("SELECT corp_name, corp_name_full, ceo_nm, est_dt, adres, hm_url, induty_code, sector_krx FROM company WHERE corp_code=?", (cc,)).fetchone()
+    except Exception:  # noqa
+        return ""
+    if not r:
+        return ""
+    lab = ("회사명", "정식명칭", "대표자", "설립일", "주소", "홈페이지", "업종코드(KSIC)", "업종")
+    return " · ".join(f"{a} {b}" for a, b in zip(lab, tuple(r)) if b)
+
+
+UNLISTED_RULE = ("\n\n[작성 원칙 — 감사보고서만 있는 회사] ① 사업모델·주요 제품·매출 비중은 [E] '매출 구성' 주석에 있는 것만 쓴다. "
+                 "② 주요 거래처·계열 의존도는 [E] '특수관계자 거래'의 매출·매입 금액으로 판단하고 금액을 적는다. "
+                 "③ 원재료·경쟁·가동률·신규사업처럼 근거 자료에 없는 항목은 지어내지 말고 '감사보고서상 확인 불가'라고 쓴다. "
+                 "④ 업종은 [D] 기업개황과 [B] 회사의 개요로 판단한다. ⑤ 업종 일반론(예: '건설업은 경쟁이 치열하다')을 회사 사실처럼 쓰지 않는다.")
+
 
 def _audit_overview(xml):
     """감사보고서 원문 → 주석 첫 항목(회사의 개요·일반사항) 평문(최대 6천자)"""
@@ -368,10 +414,11 @@ def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6):
 
     def work(item):
         cc, nm, arc, ay, rr = item
-        ov = ""
+        ov, axml = "", ""
         if arc:
             try:
-                ov = _audit_overview(fetch_document_xml(arc))
+                axml = fetch_document_xml(arc)
+                ov = _audit_overview(axml)
             except Exception as e:  # noqa
                 ov = ""
         pdf_txt = ""
@@ -383,12 +430,21 @@ def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6):
             except Exception:  # noqa
                 pdf_txt = ""
         fin = _fin_digest(con_local(), cc)
-        if len(pdf_txt) < 500 and len(ov) < 200:
-            raise RuntimeError("근거 부족(신용평가서·회사의 개요 모두 없음)")
-        content = (UNLISTED_PROMPT
+        basics = _company_basics(con_local(), cc)
+        extra = ""
+        if axml and len(pdf_txt) < 500:                # 신용평가서가 없을 때만(있으면 평가서가 더 정확·풍부)
+            try:
+                extra = _audit_extra(axml)
+            except Exception:  # noqa
+                extra = ""
+        if len(pdf_txt) < 500 and len(ov) < 200 and len(extra) < 300:
+            raise RuntimeError("근거 부족(신용평가서·회사의 개요·주요 주석 모두 없음)")
+        content = (UNLISTED_PROMPT + (UNLISTED_RULE if len(pdf_txt) < 500 else "")
                    + ("\n[A] 신용평가서(" + rr["agency"] + " " + rr["disc_dt"] + " " + str(rr["grade"]) + "):\n" + pdf_txt[:45000] if len(pdf_txt) >= 500 else "\n[A] 신용평가서: 없음")
                    + "\n\n[B] 감사보고서 주석 '회사의 개요'(" + str(ay or "") + "):\n" + (ov or "없음")
-                   + "\n\n[C] 감사보고서 재무 요약(억원):\n" + (fin or "없음"))
+                   + "\n\n[C] 감사보고서 재무 요약(억원):\n" + (fin or "없음")
+                   + "\n\n[D] DART 기업개황: " + (basics or "없음")
+                   + ("\n\n[E] 감사보고서 주요 주석(매출 구성·특수관계자·영업부문·우발/약정·건설계약):\n" + extra if extra else ""))
         js = _call(client, mid, content)
         js["_kind"] = "unlisted_audit"
         if rr:
