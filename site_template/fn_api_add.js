@@ -4,7 +4,7 @@
  * collect.yml을 job=unlisted_add, args="--type 수동 --codes <고유번호>"로 실행한다.
  * 이 함수에는 비밀값을 저장하지 않는다(비밀번호가 틀리면 Worker가 403).
  */
-const WORKER_URL = "WORKER_URL_PLACEHOLDER";   // 예: https://kosdaq-db-scheduler.<계정>.workers.dev
+const WORKER_URL = "https://kosdaq-db-scheduler.minsjung8.workers.dev";
 
 export async function onRequestPost({ request }) {
   let j = {};
