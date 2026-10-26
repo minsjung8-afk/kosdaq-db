@@ -175,7 +175,8 @@ a{color:var(--navy2)}
   <div style="background:#fff;border-radius:12px;width:min(640px,94vw);max-height:80vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.25)">
     <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">회사 추가 <span class="src">· DART 감사보고서 제출 법인</span></b><button class="mbtn" id="addClose">닫기</button></div>
     <div style="display:flex;gap:6px;margin-top:12px"><input id="addQ" placeholder="회사명 (2자 이상)" style="flex:1;padding:7px 10px;border:1px solid var(--line2);border-radius:8px" autocomplete="off"><button class="mbtn on" id="addGo">검색</button></div>
-    <div class="src" style="margin-top:6px">동명 법인이 있으면 대표자·주소·업종으로 확인한 뒤 고르세요. 등록에는 약 10분이 걸립니다(재무는 감사보고서 기준 2~3개년).</div>
+    <div class="src" style="margin-top:6px">동명 법인이 있으면 대표자·주소·업종으로 확인한 뒤 고르세요. 신청은 대기열에 쌓였다가 수집 작업이 비어 있을 때 한꺼번에 등록됩니다(재무는 감사보고서 기준 2~3개년).</div>
+    <div id="addStat" style="margin-top:10px;padding:8px 10px;border:1px solid var(--line2);border-radius:8px;font-size:12px;display:none"></div>
     <div id="addRes" style="margin-top:10px"></div>
   </div>
 </div>
@@ -701,7 +702,17 @@ window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(/^\d
 (function(){
   const M=$('#addModal'), R=$('#addRes');
   const have=cc=>items.find(i=>i.code==='U'+cc||(i.corp_code&&i.corp_code===cc));
-  $('#addBtn').onclick=()=>{M.style.display='flex';$('#addQ').focus();};
+  const S=$('#addStat'); let lastEta=null;
+  // 대기열·반영 예상 시각 표시(Worker /queue): 지금 실행 중인 작업 → 대기 작업 → 정기 작업 → 등록 순으로 추정
+  const showStat=s=>{if(!s||s.error){S.style.display='none';return}
+    lastEta=s.eta; const L=[];
+    if(s.inflight) L.push(`<b>등록 실행 중</b> ${esc((s.inflight.names||[]).join(', '))} · ${esc(s.inflight.started_kst.slice(11))} 시작 · <b>${esc(s.inflight.done_kst.slice(11))}경 반영 예상</b>`);
+    if(s.queue&&s.queue.length) L.push(`<b>대기 ${s.queue.length}건</b> ${esc(s.queue.map(x=>x.name||x.corp_code).join(', '))}${s.eta?` · <b>${esc(s.eta.done_kst.slice(5))}경 반영 예상</b> (등록 시작 ${esc(s.eta.start_kst.slice(11))}경)`:''}`);
+    if(!L.length) L.push('대기 중인 신청 없음');
+    (s.notes||[]).forEach(n=>L.push(`<span class="src">· ${esc(n)}</span>`));
+    S.innerHTML=L.join('<br>')+`<br><span class="src">예상 시각은 최근 실행 소요시간 기준 추정이며 앞 작업이 길어지면 늦어집니다 · 조회 ${esc(s.now_kst.slice(11))}</span>`; S.style.display='block';};
+  const loadStat=()=>fetch('api/queue').then(r=>r.json()).then(showStat).catch(()=>{S.style.display='none'});
+  $('#addBtn').onclick=()=>{M.style.display='flex';$('#addQ').focus();loadStat();};
   $('#addClose').onclick=()=>{M.style.display='none';};
   M.onclick=e=>{if(e.target===M)M.style.display='none';};
   const go=async()=>{const q=$('#addQ').value.trim(); if(q.length<2){R.innerHTML='<div class="src">2자 이상 입력하세요.</div>';return}
@@ -709,10 +720,10 @@ window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(/^\d
     try{const j=await fetch('api/corp?q='+encodeURIComponent(q)).then(r=>r.json());
       if(!j.results||!j.results.length){R.innerHTML='<div class="src">최근 2년 공시가 있는 회사가 없습니다.</div>';return}
       R.innerHTML=`<div class="twrap"><table><tr><th>회사</th><th>대표자</th><th>업종</th><th>주소</th><th></th></tr>${j.results.map(x=>{const h=have(x.corp_code);return `<tr><td><b>${esc(x.name)}</b><br><span class="src">${esc(x.corp_code)}${x.stock?' · 상장 '+esc(x.stock):''}${x.est?' · 설립 '+esc(x.est):''}</span></td><td style="white-space:nowrap">${esc(x.ceo||'')}</td><td>${esc(x.induty||'')}</td><td>${esc((x.addr||'').slice(0,28))}</td><td>${h?'<span class="src">이미 수록</span>':x.stock?'<span class="src">상장사(자동 수집)</span>':`<button class="mbtn on" style="white-space:nowrap" data-cc="${esc(x.corp_code)}" data-nm="${esc(x.name)}">추가</button>`}</td></tr>`}).join('')}</table></div>`;
-      R.querySelectorAll('button[data-cc]').forEach(b=>b.onclick=async()=>{const key=prompt(`'${b.dataset.nm}' (${b.dataset.cc})를 추가합니다.\n관리자 비밀번호:`); if(!key)return;
+      R.querySelectorAll('button[data-cc]').forEach(b=>b.onclick=async()=>{const key=prompt(`'${b.dataset.nm}' (${b.dataset.cc})를 추가 신청합니다.${lastEta?`\n(현재 기준 ${lastEta.done_kst.slice(5)}경 반영 예상)`:''}\n관리자 비밀번호:`); if(!key)return;
         b.disabled=true; b.textContent='요청 중…';
-        try{const r=await fetch('api/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({corp_code:b.dataset.cc,key})}).then(r=>r.json());
-          b.outerHTML=`<span class="${r.ok?'':'neg'}" style="font-size:11px">${esc(r.msg||'')}</span>`;}catch(e){b.disabled=false;b.textContent='추가';alert('요청 실패: '+e)}});
+        try{const r=await fetch('api/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({corp_code:b.dataset.cc,name:b.dataset.nm,key})}).then(r=>r.json());
+          b.outerHTML=`<span class="${r.ok?'':'neg'}" style="font-size:11px">${esc(r.msg||'')}</span>`; if(r.ok) showStat(r);}catch(e){b.disabled=false;b.textContent='추가';alert('요청 실패: '+e)}});
     }catch(e){R.innerHTML='<div class="neg">검색 실패: '+esc(String(e))+'</div>'}};
   $('#addGo').onclick=go; $('#addQ').onkeydown=e=>{if(e.key==='Enter')go();};
 })();
