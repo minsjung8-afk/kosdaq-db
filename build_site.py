@@ -699,8 +699,13 @@ def rating_view(ratings, today=None):
     if st and cur and _is_long(cur):
         shorts = [r for r in ratings if not _is_long(r)]
         s0 = current_rating(shorts)
-        if s0 and not _is_cancel(s0) and not rating_status(shorts, today):
-            return s0, None, {"grade": cur.get("grade"), "label": st["label"], "date": st.get("date"), "kind": st["kind"], "tip": st.get("tip")}
+        aux = {"grade": cur.get("grade"), "label": st["label"], "date": st.get("date"), "kind": st["kind"], "tip": st.get("tip")}
+        if s0 and not _is_cancel(s0):
+            s_st = rating_status(shorts, today)
+            if not s_st:
+                return s0, None, aux
+            if (s0.get("disc_dt") or "") > (cur.get("disc_dt") or ""):   # 둘 다 만료면 더 최근 평가(단기)를 대표로 — 씨제이포디플렉스 A3-(~2026.06.30) 만료가 보이도록(2026-10-26)
+                return s0, s_st, aux
     return cur, st, None
 
 
