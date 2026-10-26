@@ -316,7 +316,9 @@ def company_detail(con, c):
         "rating_text": b.get("rating_text"),
         "rating_summary": (lambda rs: {**rs[0], "summary": json.loads(rs[0]["summary_json"])} if rs else None)(
             q(con, "SELECT agency, disc_dt, grade, file_url, summary_json, summary_md FROM rating_summary WHERE corp_code=? AND COALESCE(grade,'') NOT IN ('취소','철회','WD','NR','-')", cc)),   # 등급취소 요약은 사용 안 함(사업보고서 요약/원문으로 대체)
-        "ratings": q(con, "SELECT agency, target_type, eval_kind, disc_dt, grade, watch, outlook, file_url FROM credit_rating WHERE corp_code=? ORDER BY disc_dt DESC", cc),
+        "ratings": _safe_q(con, """SELECT r.agency, r.target_type, r.eval_kind, r.disc_dt, r.grade, r.watch, r.outlook, r.file_url, v.valid_to
+                                   FROM credit_rating r LEFT JOIN rating_valid v ON v.file_url = r.file_url WHERE r.corp_code=? ORDER BY r.disc_dt DESC""", cc)
+                   or q(con, "SELECT agency, target_type, eval_kind, disc_dt, grade, watch, outlook, file_url FROM credit_rating WHERE corp_code=? ORDER BY disc_dt DESC", cc),   # valid_to: 평가서 기재 유효기간(2026-10-26)
         "events": q(con, "SELECT rcept_dt, flag, report_nm, rcept_no FROM disclosure_event WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 20", cc),
         "reports": q(con, """SELECT m.pub_dt, m.source, m.publisher, m.analyst, m.title, m.url, m.opinion, m.target_price, m.old_target_price,
                              a.forecast_json, a.valuation_json, a.points_json, a.risks_json, a.memo_md
@@ -670,6 +672,14 @@ def rating_status(ratings, today=None):
         same = [r for r in cancels if _is_long(r) == _is_long(cur) and (r.get("disc_dt") or "") >= (cur.get("disc_dt") or "")]
         if same:
             return {"kind": "cancel", "label": "등급 취소", "date": same[0]["disc_dt"], "tip": f"{same[0]['agency']} {same[0]['disc_dt']} {same[0].get('target_type') or ''} 등급 취소 공시"}
+        if cur.get("valid_to"):                     # 평가서에 기재된 유효기간이 있으면 그 날짜로 판단(2026-10-26 씨제이포디플렉스 CP 6개월)
+            try:
+                vt = datetime.strptime(cur["valid_to"][:10], "%Y-%m-%d").date()
+                if today > vt:
+                    return {"kind": "expired", "label": "유효기간 만료", "date": cur["valid_to"], "tip": f"평가서 기재 유효기간 {cur['valid_to']} 경과 · 새 평가 공시 없음"}
+                return None
+            except Exception:  # noqa
+                pass
         try:
             dd = datetime.strptime(cur["disc_dt"][:10], "%Y-%m-%d").date()
             if (today - dd).days > 365:

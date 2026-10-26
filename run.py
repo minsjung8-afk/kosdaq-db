@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -375,6 +375,7 @@ def main():
                                         __import__("summarize").run_unlisted(None, model="haiku", force=False))),   # 새로 받은 사업보고서만 Haiku 요약 + 사업보고서 없는 비상장사(감사보고서·신평서 기반)
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("review", lambda: business.run_review(con)),   # 최근 분기·반기 검토의견(미조회분만, 2026-10-26)
+                 ("rating_valid", lambda: __import__("rating_valid").run(con=con)),   # 새 신용평가서의 등급 유효기간(미조회분만, 2026-10-26)
                  ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
                  ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),
                  ("fin_yoy", lambda: financials.run_yoy(ccs, con=con)),       # 전년동기 BS 보강   # 별도 재무 보강(연결만 있는 회사)
@@ -447,6 +448,8 @@ def main():
     if a.job == "fin_ofs":                    # 연결만 있는 회사의 별도 재무 보강(회사당 2콜)
         import financials
         financials.run_ofs(ccs, a.year - 1, con=con)
+    if a.job == "rating_valid":               # 신용평가서 PDF의 등급 유효기간(2026-10-26) — 회사·평가사·장단기별 최신 평가서, 1회 다운로드/건
+        __import__("rating_valid").run(set(ccs) if a.codes else None, limit=a.limit, con=con)
     if a.job == "da":                         # 상각비 보강(XBRL 주석) — da 빈 회사의 최신 연간·분기, 1콜/보고서
         import da_xbrl
         da_xbrl.run(ccs if a.codes else None, limit=a.limit, con=con, debug=a.debug is not None)
@@ -487,6 +490,10 @@ def main():
     if a.job in ("rating", "all"):
         import fss_rating
         fss_rating.run(set(ccs) if (a.limit or a.new_only) else None)
+        try:
+            __import__("rating_valid").run(con=con)      # 새로 받은 평가서의 유효기간(2026-10-26)
+        except Exception as e:  # noqa
+            print(f"[rating] 유효기간 보강 오류: {e}", flush=True)
     if a.job in ("news", "all"):
         import news
         news.run(set(ccs) if (a.limit or a.new_only) else None)
