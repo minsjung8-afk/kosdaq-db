@@ -708,7 +708,7 @@ window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(/^\d
     lastEta=s.eta; const L=[];
     if(s.inflight) L.push(`<b>등록 실행 중</b> ${esc((s.inflight.names||[]).join(', '))} · ${esc(s.inflight.started_kst.slice(11))} 시작 · <b>${esc(s.inflight.done_kst.slice(11))}경 반영 예상</b>`);
     if(s.queue&&s.queue.length) L.push(`<b>대기 ${s.queue.length}건</b> ${esc(s.queue.map(x=>x.name||x.corp_code).join(', '))}${s.eta?` · <b>${esc(s.eta.done_kst.slice(5))}경 반영 예상</b> (등록 시작 ${esc(s.eta.start_kst.slice(11))}경)`:''}`);
-    if(!L.length) L.push('대기 중인 신청 없음');
+    if(!L.length) L.push(`대기 중인 신청 없음${s.eta?` · 지금 신청하면 <b>${esc(s.eta.done_kst.slice(5))}경 반영 예상</b> (등록 시작 ${esc(s.eta.start_kst.slice(11))}경)`:''}`);
     (s.notes||[]).forEach(n=>L.push(`<span class="src">· ${esc(n)}</span>`));
     S.innerHTML=L.join('<br>')+`<br><span class="src">예상 시각은 최근 실행 소요시간 기준 추정이며 앞 작업이 길어지면 늦어집니다 · 조회 ${esc(s.now_kst.slice(11))}</span>`; S.style.display='block';};
   const loadStat=()=>fetch('api/queue').then(r=>r.json()).then(showStat).catch(()=>{S.style.display='none'});
