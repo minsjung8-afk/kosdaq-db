@@ -220,6 +220,20 @@ def main():
         if excl:
             seed = [r for r in seed if r["corp_code"] not in excl]
             print(f"[unlisted_add] 제외 명단 {len(excl)}사 적용(보증부 등급만 보유 등)", flush=True)
+        if a.type == "수동" and a.codes:      # 2026-10-26 사이트 '회사 추가'(관리자 비밀번호) — 시드에 없는 회사도 고유번호만으로 등록
+            from common import dart_get
+            known = {r["corp_code"] for r in seed}
+            for cc in a.codes:
+                if cc in known or cc in excl:
+                    continue
+                try:
+                    nm = (dart_get("company", corp_code=cc).get("corp_name") or "").strip()
+                except Exception as e:  # noqa
+                    nm = ""; print(f"[unlisted_add] {cc} 개황 조회 실패: {e}", flush=True)
+                seed.append({"corp_code": cc, "corp_name": nm or cc, "grade": ""})
+            con.execute("CREATE TABLE IF NOT EXISTS manual_company (corp_code TEXT PRIMARY KEY, added_at TEXT)")
+            con.executemany("INSERT OR IGNORE INTO manual_company VALUES (?, datetime('now','localtime'))", [(c,) for c in a.codes])
+            con.commit()
         if a.codes:
             seed = [r for r in seed if r["corp_code"] in set(a.codes)]
         if a.debug:                          # --debug <고유번호…>: 잘못 등록된 비상장사 제거(시드 고유번호 오류 정정용, UNLISTED만) 후 시드대로 재등록
@@ -269,6 +283,11 @@ def main():
                     __import__("audit_fs").run(miss, year=a.year - 1, con=con)
                 except Exception as e:  # noqa
                     print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
+            if a.type == "수동":             # 감사보고서만 있는 회사의 사업내용 요약(회사의 개요 + 재무 요약, Haiku)
+                try:
+                    __import__("summarize").run_unlisted(set(new), model="haiku")
+                except Exception as e:  # noqa
+                    print(f"[unlisted_add] 요약 오류: {e}", flush=True)
     if a.job == "review":                    # 최근 분기·반기 검토의견(상장사, 1콜/사) — --codes 지정 시 그 회사만, 기본은 미조회 상장사 전부
         import business
         business.run_review(con, [p[0] for p in pairs] if a.codes else None, verbose=bool(a.codes))

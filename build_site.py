@@ -658,6 +658,19 @@ def rating_status(ratings, today=None):
     return None
 
 
+def rating_view(ratings, today=None):
+    """화면용 대표 등급(2026-10-26 효성화학: 장기 BBB는 만료인데 단기 A3가 유효 → 'BBB 만료'만 보여 착오).
+    장기 등급이 만료·취소이고 유효한 단기 등급(CP·전단채)이 있으면 단기 등급을 대표로, 만료된 장기 등급은 보조 표시(aux)로."""
+    cur = current_rating(ratings)
+    st = rating_status(ratings, today)
+    if st and cur and _is_long(cur):
+        shorts = [r for r in ratings if not _is_long(r)]
+        s0 = current_rating(shorts)
+        if s0 and not _is_cancel(s0) and not rating_status(shorts, today):
+            return s0, None, {"grade": cur.get("grade"), "label": st["label"], "date": st.get("date"), "kind": st["kind"], "tip": st.get("tip")}
+    return cur, st, None
+
+
 def current_rating(ratings):
     """대표 등급(공시일 내림차순 목록에서): ① 장기(기업신용평가·회사채, 단기사채 제외) 중 '정정' 아닌 최신 ② 단기(CP·전단채) 중 정정 아닌 최신 ③ 정정 포함.
     2026-10-25: '전자단기사채'가 '사채'에 걸려 장기로 잡히고, 옛 평가의 '본평가(정정)' 재공시(공시일만 최신)가 대표가 되어 부도(D)난 중앙일보가 A3로 표시되던 문제 수정"""
@@ -677,26 +690,33 @@ def build():
     (SITE / "data" / "c").mkdir(parents=True)
     shutil.copy(TEMPLATE, SITE / "index.html")
     shutil.copytree(TEMPLATE.parent / "lib", SITE / "lib")          # 차트 라이브러리(Lightweight Charts, Apache-2.0)
+    fdir = ROOT / "functions" / "api"                                   # Pages Functions(회사 추가: /api/corp 검색, /api/add 등록) — pages deploy가 저장소 루트 functions/를 함께 올림(2026-10-26)
+    fdir.mkdir(parents=True, exist_ok=True)
+    for src in TEMPLATE.parent.glob("fn_api_*.js"):
+        shutil.copy(src, fdir / src.name.replace("fn_api_", ""))
     (SITE / "_headers").write_text("/*\n  Cache-Control: no-cache\n", encoding="utf-8")   # 매 요청 ETag 재검증 → 배포 즉시 반영
 
     global IND_STATS
     IND_STATS = _industry_stats(con)
     index = []
+    try:
+        MANUAL = {r[0] for r in con.execute("SELECT corp_code FROM manual_company")}   # 사이트 '회사 추가'로 넣은 회사(2026-10-26)
+    except Exception:  # noqa
+        MANUAL = set()
     for c in q(con, "SELECT * FROM company ORDER BY corp_name"):
         d = company_detail(con, c)
         _rows = d["kpi"].get("CFS") or d["kpi"].get("OFS") or [{}]
         k = next((r for r in reversed(_rows) if r.get("kind") == "annual"), _rows[-1])   # 검색 인덱스는 최근 연간 기준
         ps = d["price_summary"] or {}
         ao = d["audit"][0] if d["audit"] else {}
-        cur_rt = current_rating(d["ratings"])
+        cur_rt, d["rating_status"], d["rating_aux"] = rating_view(d["ratings"])
         d["rating_cur"] = cur_rt
-        d["rating_status"] = rating_status(d["ratings"])
         (SITE / "data" / "c" / f"{c['stock_code']}.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
         index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"], "delisted": c.get("delisted_dt"),
                       "rev": k.get("revenue"), "op": k.get("op_income"), "debt": k.get("debt_ratio"),
                       "mcap": ps.get("mcap"), "opinion": ao.get("adt_opinion"), "year": k.get("bsns_year"),
                       "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None,
-                      "rating": cur_rt["grade"] if cur_rt else None, "rt_st": (d.get("rating_status") or {}).get("label"),
+                      "rating": cur_rt["grade"] if cur_rt else None, "rt_st": (d.get("rating_status") or {}).get("label"), "rt_aux": (f"{d['rating_aux']['grade']} {d['rating_aux']['label'].replace('유효기간 ', '').replace('등급 ', '')}" if d.get("rating_aux") else None), "manual": 1 if c["corp_code"] in MANUAL else None,
                       "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"),
                       "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber")})
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
