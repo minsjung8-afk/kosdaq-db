@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -284,11 +284,22 @@ def main():
                     __import__("audit_fs").run(miss, year=a.year - 1, con=con, years_back=a.years_back or (4 if a.type == "수동" else 2))   # 수동 추가는 5개년(연도별 손익 추이용, 2026-10-26)
                 except Exception as e:  # noqa
                     print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
+            try:                              # XBRL 재무가 없는 사업보고서 제출사(당근마켓 등): 분기·반기보고서 본문 → 최근 분기 + 전년 동기(상장사와 같은 양식, 2026-10-26)
+                __import__("interim_doc").run(new, con=con)
+            except Exception as e:  # noqa
+                print(f"[unlisted_add] interim_doc 오류: {e}", flush=True)
+            try:                              # 정기보고서 제출사는 최근 분기·반기 검토의견도(감사보고서만 내는 회사는 해당 없음)
+                import business
+                business.run_review(con, new)
+            except Exception as e:  # noqa
+                print(f"[unlisted_add] 검토의견 오류: {e}", flush=True)
             if a.type == "수동":             # 감사보고서만 있는 회사의 사업내용 요약(회사의 개요 + 재무 요약, Haiku)
                 try:
                     __import__("summarize").run_unlisted(set(new), model="haiku")
                 except Exception as e:  # noqa
                     print(f"[unlisted_add] 요약 오류: {e}", flush=True)
+    if a.job == "interim_doc":               # 분기·반기보고서 본문 재무제표 → fin_raw (XBRL 없는 사업보고서 제출 비상장사, 2026-10-26)
+        __import__("interim_doc").run([p[0] for p in pairs] if a.codes else None, con=con, dry=a.dry_run)
     if a.job == "review":                    # 최근 분기·반기 검토의견(상장사, 1콜/사) — --codes 지정 시 그 회사만, 기본은 미조회 상장사 전부
         import business
         business.run_review(con, [p[0] for p in pairs] if a.codes else None, verbose=bool(a.codes))
