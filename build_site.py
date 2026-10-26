@@ -62,6 +62,21 @@ def _shareholders(con, cc):
     return {"year": year, "top": merged[:5], "n": len(body), "total": total}
 
 
+def _fs_break(con, cc):
+    """감사보고서 연도 연쇄 검증 경고(올해 보고서의 전기 ≠ 전년 보고서의 당기, 합병·분할 등 법인 연속성 단절) → {fs: 단절 직전 연도}.
+    예: 삼표산업 2023년 (주)삼표와 합병 — 2023년 보고서의 전기(2022)는 (주)삼표 수치, 2022년 보고서는 舊 삼표산업 → {'OFS': '2022'} (2026-10-26)"""
+    out = {}
+    try:
+        for (msg,) in con.execute("SELECT msg FROM fetch_log WHERE corp_code=? AND job='audit_fs_warn' AND msg LIKE '%연도연쇄 불일치%'", (cc,)):
+            m = re.match(r"(\d{4}) (CFS|OFS)", msg or "")
+            y = re.search(r"연도연쇄 불일치\((\d{4}) 당기", msg or "")
+            if m and y:
+                out[m.group(2)] = max(out.get(m.group(2), "0000"), y.group(1))
+    except Exception:  # noqa
+        pass
+    return out
+
+
 def _ltm(rows):
     """연간 2개년 + 분기(전년동기, 최근) 행에서 LTM(최근 4분기 합산) 손익 근사.
     최근 분기 누적이 있으면: 직전 연간 + 최근 누적 - 전년 동기 누적. 없으면 최근 연간."""
@@ -286,6 +301,7 @@ def company_detail(con, c):
                      "overview": (b.get("overview_text") or "")[:12000], "summary": json.loads(b["summary_json"]) if b.get("summary_json") else None},
         "kpi": kpi,
         "annual5": ann5,
+        "fs_break": _fs_break(con, cc),
         "quarters": _quarters(con, cc),
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
