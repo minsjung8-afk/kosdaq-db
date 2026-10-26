@@ -1,0 +1,25 @@
+name: deploy-scheduler-worker
+# 스케줄러 Worker(worker/) 배포 — worker/ 변경이 main에 올라오면 자동, 또는 수동 실행(2026-10-26)
+# wrangler.toml의 크론·vars·KV 바인딩을 함께 적용하고, 비밀값(GH_TOKEN·RUN_KEY)은 Cloudflare에 이미 있는 것을 그대로 둔다.
+on:
+  push:
+    branches: [main]
+    paths: ["worker/**"]
+  workflow_dispatch:
+concurrency:
+  group: scheduler-worker
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - name: deploy worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy

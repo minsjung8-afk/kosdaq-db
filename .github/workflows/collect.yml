@@ -1,4 +1,6 @@
 name: collect-and-deploy
+# 실행 목록 제목에 작업 종류를 남김(스케줄러 Worker가 '회사 추가' 반영 예상 시각을 계산할 때 사용, 2026-10-26)
+run-name: "${{ github.event_name == 'schedule' && format('schedule {0}', github.event.schedule) || format('{0} {1}', github.event.inputs.job, github.event.inputs.args) }}"
 on:
   schedule:
     - cron: "0 21 * * 0-4"     # 평일 06:00 KST: 시세 + 수시공시 델타(daily, 대용가 포함)
