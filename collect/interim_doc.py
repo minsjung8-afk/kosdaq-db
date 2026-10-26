@@ -82,6 +82,9 @@ def _parse_table_interim(tbl_xml, unit, cont=None):
 
 def parse(xml):
     """분기·반기보고서 XML → {'CFS': stmts, 'OFS': stmts} (audit_fs.parse_statements 형식)"""
+    # 표 제목 앞 기간 글자 제거: '반 기 연 결 손 익 계 산 서'·'3분기 재무상태표' → audit_fs 제목 규칙('연결손익계산서')에 맞춤(2026-10-26 당근마켓 반기·3분기 누락)
+    xml = re.sub(r"(반\s*기|\d?\s*분\s*기)(\s*)(?=(연\s*결\s*)?(재\s*무\s*상\s*태|손\s*익|포\s*괄|현\s*금\s*흐\s*름|자\s*본\s*변\s*동))", "", xml)
+    xml = re.sub(r"\((당|전)\)\s*(반\s*기|\d?\s*분\s*기)", r"(\1)기", xml)   # 머리행 '제 12(당)반기말' → '제 12(당)기말'(당기·전기 열 인식)
     secs = audit_fs.annual_sections(xml)
     out = {}
     audit_fs.parse_table = _parse_table_interim
