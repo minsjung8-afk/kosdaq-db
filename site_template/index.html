@@ -167,10 +167,18 @@ a{color:var(--navy2)}
  </div><div class="meta" id="meta">불러오는 중</div></div></header>
 <div id="band"></div>
 <aside>
-  <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button><button class="mbtn" data-m="UNLISTED">비상장</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div></div>
+  <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button><button class="mbtn" data-m="UNLISTED">비상장</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div><button class="mbtn" id="addBtn" style="margin-top:6px" title="DB에 없는 회사(감사보고서 제출 법인)를 관리자 비밀번호로 추가">＋ 회사 추가</button></div>
   <div id="list"></div>
 </aside>
 <main id="main"><div class="empty">왼쪽에서 종목을 고르세요. 재무는 DART 사업보고서(연결 우선), 주가는 KRX 일별시세 기준이며 심사 참고용 요약입니다. 원문은 각 항목의 DART 링크로 확인하세요.</div></main>
+<div id="addModal" style="display:none;position:fixed;inset:0;background:rgba(15,25,45,.45);z-index:50;align-items:flex-start;justify-content:center;padding-top:8vh">
+  <div style="background:#fff;border-radius:12px;width:min(640px,94vw);max-height:80vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">회사 추가 <span class="src">· DART 감사보고서 제출 법인</span></b><button class="mbtn" id="addClose">닫기</button></div>
+    <div style="display:flex;gap:6px;margin-top:12px"><input id="addQ" placeholder="회사명 (2자 이상)" style="flex:1;padding:7px 10px;border:1px solid var(--line2);border-radius:8px" autocomplete="off"><button class="mbtn on" id="addGo">검색</button></div>
+    <div class="src" style="margin-top:6px">동명 법인이 있으면 대표자·주소·업종으로 확인한 뒤 고르세요. 등록에는 약 10분이 걸립니다(재무는 감사보고서 기준 2~3개년).</div>
+    <div id="addRes" style="margin-top:10px"></div>
+  </div>
+</div>
 <script>
 const $=s=>document.querySelector(s);
 const 억=v=>v==null?'-':(v/1e8).toLocaleString('ko-KR',{maximumFractionDigits:0});
@@ -250,7 +258,7 @@ document.querySelectorAll('.mbtn').forEach(b=>b.onclick=()=>{mkt=b.dataset.m;doc
 function render(list){
   $('#cnt').textContent=`${list.length}개`;
   $('#list').innerHTML=list.slice(0,300).map(i=>`<div class="row${cur===i.code?' on':''}${i.delisted?' dlr':''}" data-c="${i.code}">
-    <span class="nm"><span class="mk ${esc(i.market||'')}">${i.market==='KOSPI'?'코스피':i.market==='KONEX'?'코넥스':i.market==='UNLISTED'?'비상장':'코스닥'}</span>${esc(i.name)}${i.delisted?`<span class="dl" title="KRX 상장 목록에서 제외 확인일 ${esc(i.delisted)} · 재무·공시 데이터는 보존">상장폐지</span>`:''}${i.rating?`<span class="rt"${i.rt_st?` style="opacity:.55;text-decoration:line-through" title="${esc(i.rt_st)}"`:''}>${esc(i.rating)}</span>${i.rt_st?`<span class="src" style="font-size:10px;margin-left:3px">${i.rt_st==='등급 취소'?'취소':'만료'}</span>`:''}`:''}</span><span class="cd">${i.code}</span>
+    <span class="nm"><span class="mk ${esc(i.market||'')}">${i.market==='KOSPI'?'코스피':i.market==='KONEX'?'코넥스':i.market==='UNLISTED'?'비상장':'코스닥'}</span>${esc(i.name)}${i.manual?'<span class="src" style="font-size:10px;margin-left:3px" title="사이트 회사 추가로 등록(감사보고서 기준)">수동</span>':''}${i.delisted?`<span class="dl" title="KRX 상장 목록에서 제외 확인일 ${esc(i.delisted)} · 재무·공시 데이터는 보존">상장폐지</span>`:''}${i.rating?`<span class="rt"${i.rt_st?` style="opacity:.55;text-decoration:line-through" title="${esc(i.rt_st)}"`:''}>${esc(i.rating)}</span>${i.rt_st?`<span class="src" style="font-size:10px;margin-left:3px">${i.rt_st==='등급 취소'?'취소':'만료'}</span>`:''}${i.rt_aux?`<span class="src" style="font-size:10px;margin-left:3px" title="장기 등급 ${esc(i.rt_aux)} · 표시 등급은 유효한 단기(CP·전단채) 등급">(장기 <s>${esc(i.rt_aux.split(' ')[0])}</s> ${esc(i.rt_aux.split(' ')[1]||'')})</span>`:''}`:''}</span><span class="cd">${i.code}</span>
     <span class="sub"><span>${esc(i.sector||'')}</span>${i.market==='UNLISTED'?'':`<span>시총 ${억(i.mcap)}억</span>`}<span>매출 ${억(i.rev)}억</span><span>부채비율 ${pct(i.debt)}</span>${i.per!=null?`<span>PER ${Number(i.per).toFixed(1)}</span>`:''}${i.ev_ebitda!=null?`<span>EV/EBITDA ${Number(i.ev_ebitda).toFixed(1)}</span>`:''}${i.red?`<span class="neg">⚑${i.red}</span>`:''}${i.amber?`<span style="color:var(--warn)">⚑${i.amber}</span>`:''}${i.opinion?`<span${/^적정/.test(i.opinion)?' style="color:var(--fg)"':' class="neg"'}>${esc(i.opinion)}</span>`:''}</span></div>`).join('')
     +(list.length>300?'<div class="row"><span class="cd">상위 300개만 표시 · 검색어를 좁히세요</span></div>':'');
 }
@@ -267,7 +275,7 @@ async function open(code){
   const curRt=('rating_cur' in d)?d.rating_cur:(RP.find(isLong)||RP[0]||RT.find(isLong)||RT[0]), rtSt=d.rating_status;
   // 유효 등급 아님(취소·유효기간 만료): 등급을 흐리게, 오른쪽에 상태 표시(사용자 요청 2026-10-25)
   const rsTag=rtSt?`<span class="pill" title="${esc(rtSt.tip||'')}" style="margin-left:6px;vertical-align:middle;font-size:12px;color:${rtSt.kind==='cancel'?'var(--bad)':'var(--warn)'};border-color:${rtSt.kind==='cancel'?'var(--bad)':'var(--warn)'}">${esc(rtSt.label)}${rtSt.kind==='cancel'?' '+esc(rtSt.date||''):''}</span>`:'';
-  const rtBadge=curRt?`<span class="pill" style="margin-left:10px;vertical-align:middle;font-size:14px;color:${rtSt?'var(--mute)':'var(--accent)'};border-color:${rtSt?'var(--mute)':'var(--accent)'}${rtSt?';text-decoration:line-through':''}">${esc(curRt.grade)}${curRt.outlook?' '+esc(curRt.outlook):''}</span>${rsTag}<span class="src" style="margin-left:6px">${esc(curRt.agency)} · ${curRt.disc_dt}</span>`:(rtSt?rsTag:`<span class="src" style="margin-left:10px">유효 공시등급 없음</span>`);
+  const rtBadge=curRt?`<span class="pill" style="margin-left:10px;vertical-align:middle;font-size:14px;color:${rtSt?'var(--mute)':'var(--accent)'};border-color:${rtSt?'var(--mute)':'var(--accent)'}${rtSt?';text-decoration:line-through':''}">${esc(curRt.grade)}${curRt.outlook?' '+esc(curRt.outlook):''}</span>${rsTag}<span class="src" style="margin-left:6px">${esc(curRt.agency)} · ${curRt.disc_dt}${isLong(curRt)?'':' · '+esc((curRt.target_type||'').replace(/\s+/g,''))}</span>${d.rating_aux?`<span class="pill" title="${esc(d.rating_aux.tip||'')}" style="margin-left:6px;vertical-align:middle;font-size:11px;color:var(--mute);border-color:var(--line2)">장기 <s>${esc(d.rating_aux.grade)}</s> ${esc(d.rating_aux.label)}</span>`:''}`:(rtSt?rsTag:`<span class="src" style="margin-left:10px">유효 공시등급 없음</span>`);
   const fl=d.flags||[];
   const flagStrip=fl.length?`<div class="flags">${fl.map(([n,l,t])=>`<span class="flag ${l}" title="${esc(t)}">${esc(n)}${t?` <small>${esc(t)}</small>`:''}</span>`).join('')}</div>`:`<div class="flags"><span class="flag ok">경고 플래그 없음</span></div>`;
   let h=`<h2>${esc(c.corp_name)}${c.delisted_dt?'<span class="dl" style="font-size:12px;vertical-align:middle">상장폐지</span>':''}${rtBadge}</h2><div class="sub-title">${c.market==='UNLISTED'?'비상장 · DART '+esc(c.corp_code):c.stock_code+' · '+esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
@@ -688,6 +696,26 @@ function initChart(prices,sub){
   load('D'); lg.innerHTML=fmtLegend(CH.rows[CH.rows.length-1]);
 }
 window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(/^\d{6}$/.test(h)&&h!==cur)open(h)});
+
+// 회사 추가(2026-10-26): 검색 → 후보(기업개황) → 관리자 비밀번호 → /api/add
+(function(){
+  const M=$('#addModal'), R=$('#addRes');
+  const have=cc=>items.find(i=>i.code==='U'+cc||(i.corp_code&&i.corp_code===cc));
+  $('#addBtn').onclick=()=>{M.style.display='flex';$('#addQ').focus();};
+  $('#addClose').onclick=()=>{M.style.display='none';};
+  M.onclick=e=>{if(e.target===M)M.style.display='none';};
+  const go=async()=>{const q=$('#addQ').value.trim(); if(q.length<2){R.innerHTML='<div class="src">2자 이상 입력하세요.</div>';return}
+    R.innerHTML='<div class="src">DART 검색 중…</div>';
+    try{const j=await fetch('api/corp?q='+encodeURIComponent(q)).then(r=>r.json());
+      if(!j.results||!j.results.length){R.innerHTML='<div class="src">최근 2년 공시가 있는 회사가 없습니다.</div>';return}
+      R.innerHTML=`<div class="twrap"><table><tr><th>회사</th><th>대표자</th><th>업종</th><th>주소</th><th></th></tr>${j.results.map(x=>{const h=have(x.corp_code);return `<tr><td><b>${esc(x.name)}</b><br><span class="src">${esc(x.corp_code)}${x.stock?' · 상장 '+esc(x.stock):''}${x.est?' · 설립 '+esc(x.est):''}</span></td><td style="white-space:nowrap">${esc(x.ceo||'')}</td><td>${esc(x.induty||'')}</td><td>${esc((x.addr||'').slice(0,28))}</td><td>${h?'<span class="src">이미 수록</span>':x.stock?'<span class="src">상장사(자동 수집)</span>':`<button class="mbtn on" style="white-space:nowrap" data-cc="${esc(x.corp_code)}" data-nm="${esc(x.name)}">추가</button>`}</td></tr>`}).join('')}</table></div>`;
+      R.querySelectorAll('button[data-cc]').forEach(b=>b.onclick=async()=>{const key=prompt(`'${b.dataset.nm}' (${b.dataset.cc})를 추가합니다.\n관리자 비밀번호:`); if(!key)return;
+        b.disabled=true; b.textContent='요청 중…';
+        try{const r=await fetch('api/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({corp_code:b.dataset.cc,key})}).then(r=>r.json());
+          b.outerHTML=`<span class="${r.ok?'':'neg'}" style="font-size:11px">${esc(r.msg||'')}</span>`;}catch(e){b.disabled=false;b.textContent='추가';alert('요청 실패: '+e)}});
+    }catch(e){R.innerHTML='<div class="neg">검색 실패: '+esc(String(e))+'</div>'}};
+  $('#addGo').onclick=go; $('#addQ').onkeydown=e=>{if(e.key==='Enter')go();};
+})();
 </script>
 </body>
 </html>
