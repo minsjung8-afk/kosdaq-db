@@ -6,6 +6,11 @@ compatibility_date = "2026-01-01"
 GH_REPO = "minsjung8-afk/kosdaq-db"
 GH_REF = "main"
 
-# 크론 트리거 1개만(무료 플랜 계정당 5개 제한). 매시 0·10·30분(UTC) 깨어나 scheduler.js의 TABLE(KST)에서 job을 고른다.
+# 크론 트리거 1개만(무료 플랜 계정당 5개 제한). 10분마다(UTC) 깨어나 scheduler.js의 TABLE(KST)에서 job을 고른다.
 [triggers]
-crons = ["0,10,30 * * * *"]
+crons = ["*/10 * * * *"]
+
+# 사이트 '회사 추가' 신청 대기열(2026-10-26). id는 대시보드 Storage & databases → Workers KV 의 kosdaq-db-addq namespace ID
+[[kv_namespaces]]
+binding = "ADDQ"
+id = "05c2d9ad90eb4d1d8680c2f294f2a369"
