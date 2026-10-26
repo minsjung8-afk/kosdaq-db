@@ -58,7 +58,8 @@ def fetch(trd_dd: str):
     s.get(HDR["Referer"], headers={"User-Agent": HDR["User-Agent"]}, timeout=30)          # 세션 쿠키
     r = s.post(URL, data={"bld": BLD, "locale": "ko_KR", "searchType": "1", "mktId": "ALL", "trdDd": trd_dd, "csvxls_isNo": "false"},
                headers=HDR, timeout=60)
-    r.raise_for_status()
+    if r.status_code >= 400:                # 본문을 남겨 원인(LOGOUT·미산출 등) 판별 — 2026-10-26: 06:30 당일 조회가 400으로 끝나 금요일 파일(10/22)로 대체된 문제
+        raise RuntimeError(f"{r.status_code} {r.text[:120]!r}")
     js = r.json()
     out = []
     for x in js.get("block1", []):
@@ -96,8 +97,12 @@ def run(start=None, con=None):
                 print(f"[subst] 직접 조회 {d} 실패: {str(e)[:120]}", flush=True)
                 rows = []
                 if "400" in str(e):
-                    break                         # 로그인/권한 문제 — 날짜를 바꿔도 같음
-                continue
+                    n400 = locals().get("n400", 0) + 1
+                    if n400 >= 2 and "LOGOUT" in str(e):
+                        break                     # 로그인/권한 문제 — 날짜를 바꿔도 같음
+                    if n400 >= 3:
+                        break                     # 3일 연속 400 — 직전 영업일까지 시도했으므로 중단
+                continue                          # 당일 미산출(아침 이른 시각)일 수 있어 직전 영업일로 계속
             if rows:
                 used = d; print(f"[subst] 직접 조회 성공: 기준 {d} · {len(rows):,}종목", flush=True); break
     # 2) 자택 Mac(국내)이 R2에 올린 파일(subst/latest.json → 워크플로가 subst_latest.json으로 내려줌)
