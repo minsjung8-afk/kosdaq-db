@@ -304,7 +304,7 @@ async function open(code){
   // 최근 12분기 추이 · LTM (분기 데이터가 있는 만큼 표시)
   const qBlock=(fs)=>{ let h=''; const Q=d.quarters||{}; const lastLbl=a=>{const v=(a||[]).filter(x=>x.rev!=null); return v.length?v[v.length-1].label:''};
    // 분기 재무가 없는 회사(감사보고서만 있는 비상장사 등)는 연간 재무로 대신 그림 — 최근 5개년(2026-10-26)
-   const annOf=f=>((d.kpi||{})[f]||[]).filter(x=>x.kind==='annual'&&x.revenue!=null).sort((a,b)=>a.bsns_year<b.bsns_year?-1:1).slice(-5);
+   const annOf=f=>(((d.annual5||{})[f])||((d.kpi||{})[f]||[]).filter(x=>x.kind==='annual'&&x.revenue!=null)).slice().sort((a,b)=>a.bsns_year<b.bsns_year?-1:1).slice(-5);
    const hasQ=f=>(Q[f]||[]).length>=2, hasA=f=>annOf(f).length>=2;
    let qs=Q[fs]||[], ann=false; const other=fs==='CFS'?'OFS':'CFS';
    if(qs.length<2&&hasA(fs)){ qs=annOf(fs).map(x=>({label:x.bsns_year, rev:x.revenue, op:x.op_income, nd:x.net_borrowings})); ann=true; }
