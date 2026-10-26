@@ -94,6 +94,7 @@ def main():
     ap.add_argument("--hop", type=int, default=0, help="chain: 자동 이어하기 횟수(무한 반복 방지, 8회까지)")
     ap.add_argument("--steps", nargs="*", help="chain: 순서대로 실행할 작업 (예: --steps da quarters \"price:--start 2016-01-01\")")
     ap.add_argument("--dry-run", action="store_true", help="audit_fs: 적재 없이 파싱 결과(표별 행수·앞 4행)만 출력")
+    ap.add_argument("--years-back", type=int, default=None, help="audit_fs: 감사보고서를 몇 개 연도 거슬러 받을지(보고서 1개 = 당기+전기 2개년, 기본 2 → 3개년 / 4 → 5개년)")
     ap.add_argument("--web", action="store_true", help="audit_fs: OpenDART 대신 dart.fss.or.kr 웹에서 바로 수집(API 장애 시)")
     ap.add_argument("--new-only", action="store_true", help="init: 기존 종목 생략 / fin·biz·rating·news: 해당 데이터가 없는 회사만")
     a = ap.parse_args()
@@ -280,7 +281,7 @@ def main():
             print(f"[unlisted_add] 사업보고서 재무 미확보 {len(miss)}사 → 감사보고서 파서(audit_fs): " + ", ".join(names.get(c, c) for c in miss), flush=True)
             if miss:
                 try:
-                    __import__("audit_fs").run(miss, year=a.year - 1, con=con)
+                    __import__("audit_fs").run(miss, year=a.year - 1, con=con, years_back=a.years_back or (4 if a.type == "수동" else 2))   # 수동 추가는 5개년(연도별 손익 추이용, 2026-10-26)
                 except Exception as e:  # noqa
                     print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
             if a.type == "수동":             # 감사보고서만 있는 회사의 사업내용 요약(회사의 개요 + 재무 요약, Haiku)
@@ -328,7 +329,7 @@ def main():
     if a.job == "audit_fs":                  # 감사보고서(pblntf_ty F) 본문 표 → fin_raw/KPI. 기본: 비상장 중 연간 KPI 없는 회사. --codes로 지정, --dry-run으로 점검만
         import audit_fs
         mk = a.market[0] if (isinstance(a.market, list) and len(a.market) == 1) else "UNLISTED"   # --market KONEX 처럼 하나만 지정했을 때만(기본값은 3개 시장 목록)
-        audit_fs.run([p[0] for p in pairs] if a.codes else None, year=a.year - 1, con=con, dry=a.dry_run, new_only=("all" if a.type == "전체재파싱" else "recheck" if a.force else not a.codes), source="web" if a.web else "api", market=mk)   # --force: 빈 KPI(CF·순이익) 회사 재파싱
+        audit_fs.run([p[0] for p in pairs] if a.codes else None, year=a.year - 1, con=con, dry=a.dry_run, new_only=("all" if a.type == "전체재파싱" else "recheck" if a.force else not a.codes), source="web" if a.web else "api", market=mk, years_back=a.years_back or 2)   # --force: 빈 KPI(CF·순이익) 회사 재파싱
     if a.job == "daily":                     # 평일 아침: 시세 + 수시공시 델타(전환청구·리픽싱·5%보고·주요이벤트)
         import prices, delta, subst
         prices.run(pairs, a.year, markets=a.market)
