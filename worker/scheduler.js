@@ -28,7 +28,8 @@ const TABLE = [
 // GitHub 자체 schedule(collect.yml on.schedule) cron → job (실행 목록에서 작업 종류 추정용)
 const GH_CRON = { "0 21 * * 0-4": "daily", "30 21 * * 0-4": "subst", "30 23 * * 0-4": "daily", "10 15 * * *": "catchup",
   "30 20 2 * *": "fin", "30 20 17 5,8,11 *": "fin", "30 20 1,15 * *": "rating", "0 19 * * 1,4": "news", "0 20 5 4 *": "biz" };
-const DEFAULT_MIN = { daily: 40, subst: 10, catchup: 170, fin: 120, rating: 30, news: 30, chain: 170, site: 12, unlisted_add: 20, kpi: 30 };
+const DEFAULT_MIN = { daily: 40, subst: 10, catchup: 170, fin: 120, rating: 30, news: 30, chain: 170, site: 12, unlisted_add: 20, kpi: 30,
+  da: 15, da_notes: 60, coverage: 8, review: 60, quarters: 60, biz: 90, mezz: 30, summarize: 60, audit_fs: 120, notes: 90, price: 20 };
 const GUARD_MIN = 15;          // 정기 작업 15분 전부터는 회사 등록을 시작하지 않음(아침 시세·공시 반영 지연 방지)
 const KST = 9 * 3600e3;
 
@@ -80,6 +81,15 @@ async function runState(env) {
   return { ok: r.ok, running, waiting, med };
 }
 
+// chain 소요시간: 제목의 --steps 단계별 소요시간 합(+ 준비·배포 8분), 상한 170분(넘으면 다음 실행으로 이어짐)
+function chainMin(run, med) {
+  const m = (run.display_title || "").match(/--steps\s+(.*)$/);
+  if (!m) return med("chain");
+  const steps = m[1].match(/"[^"]*"|\S+/g) || [];
+  const sum = steps.reduce((a, x) => a + med(x.replace(/"/g, "").split(":")[0]), 0);
+  return Math.min(170, sum + 8);
+}
+
 // 다음 정기 작업(start 이후) — {t, job}
 function nextScheduled(fromMs) {
   for (let i = 0; i <= 7 * 24 * 6; i++) {
@@ -96,13 +106,13 @@ function estimate(st, now, nCodes) {
   let t = now;
   if (st.running) {
     const j = jobOf(st.running), s = Date.parse(st.running.run_started_at || st.running.created_at);
-    let end = s + st.med(j) * 60000;
+    let end = s + (j === "chain" ? chainMin(st.running, st.med) : st.med(j)) * 60000;
     if (end < now + 5 * 60000) { end = now + 5 * 60000; }
     notes.push(`실행 중: ${j} (${hm(s)} 시작, ${hm(end)}경 종료 예상)`);
     if (j === "chain" || j === "catchup") notes.push("연속 작업이라 단계가 이어지면 더 늦어질 수 있음");
     t = end;
   }
-  for (const w of st.waiting) { const j = jobOf(w); t += st.med(j) * 60000; notes.push(`대기 중: ${j} (약 ${Math.round(st.med(j))}분)`); }
+  for (const w of st.waiting) { const j = jobOf(w); t += (j === "chain" ? chainMin(w, st.med) : st.med(j)) * 60000; notes.push(`대기 중: ${j} (약 ${Math.round(st.med(j))}분)`); }
   for (let guard = 0; guard < 6; guard++) {                       // 그 사이(또는 직후 15분 안)에 시작될 정기 작업
     const ns = nextScheduled(now + 1);
     if (!ns || ns.t > t + GUARD_MIN * 60000) break;
