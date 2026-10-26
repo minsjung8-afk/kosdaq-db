@@ -299,20 +299,35 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             if k.get("borrowings") is not None and eq else None
         k["net_borrowings"] = (k["borrowings"] - (k.get("cash") or 0)) if k.get("borrowings") is not None else None
         da = [abs(x) for x in (k.get("dep"), k.get("amort"), k.get("rou_dep")) if x is not None]
-        k["da"] = sum(da) if da else None
-        if k["da"] is None:          # 본문에 상각비가 없으면 XBRL 주석에서 뽑은 값(da_xbrl) 사용
+        cands = [("본문", sum(da) if da else None)]
+        for tbl in ("da_xbrl", "da_notes"):            # XBRL 주석 → 주석 변동표(2026-10-24) 순 폴백
             try:
-                x = con.execute("SELECT da FROM da_xbrl WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND da IS NOT NULL",
+                x = con.execute(f"SELECT da FROM {tbl} WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND da IS NOT NULL",
                                 (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
-                if x:
-                    k["da"] = x[0]
-                else:            # 2026-10-24: 주석 변동표(유형·무형·사용권자산)에서 뽑은 상각비(da_notes) 폴백
-                    x = con.execute("SELECT da FROM da_notes WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND da IS NOT NULL",
-                                    (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
-                    if x:
-                        k["da"] = x[0]
+                cands.append((tbl, abs(x[0]) if x else None))
             except Exception:  # noqa
-                pass
+                cands.append((tbl, None))
+        # 상식 점검(2026-10-26 HL D&I 2026 반기: 주석 변동표 오독으로 상각비 3,195억(실제 약 90억) → EBITDA 왜곡):
+        # 직전 연간 상각비를 기간 비율로 환산한 값의 1/4~4배 밖이거나 총자산의 25% 초과면 버리고 다음 후보
+        ref = None
+        try:
+            pr = con.execute("""SELECT da FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND bsns_year<? AND da IS NOT NULL
+                                ORDER BY bsns_year DESC LIMIT 1""", (corp_code, fs_div, bsns_year if reprt_code != "11011" else bsns_year)).fetchone()
+            if pr and pr[0]:
+                ref = abs(pr[0]) * {"11013": 0.25, "11012": 0.5, "11014": 0.75}.get(reprt_code, 1.0)
+        except Exception:  # noqa
+            pass
+        ta = k.get("total_assets")
+        k["da"] = None
+        for src, v in cands:
+            if v is None:
+                continue
+            if ta and v > ta * 0.25:
+                continue
+            if ref and not (ref / 4 <= v <= ref * 4):
+                continue
+            k["da"] = v
+            break
         k["ebitda"] = (k["op_income"] + k["da"]) if k.get("op_income") is not None and k["da"] is not None else None
         ie = abs(k["int_exp"]) if k.get("int_exp") else None
         k["interest_cover"] = round(k["ebitda"] / ie, 1) if k.get("ebitda") is not None and ie else None   # EBITDA/이자비용
