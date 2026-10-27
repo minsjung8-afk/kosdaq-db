@@ -24,7 +24,9 @@ const TABLE = [
   { hh: 5,  mm: 30, dom: [2],              job: "fin" },      // 매월 2일 05:30  연간 재무 갱신
   { hh: 5,  mm: 30, dom: [1, 15],          job: "rating" },   // 매월 1·15일 05:30  신용등급
   { hh: 4,  mm: 0,  dow: [2, 5],           job: "news" },     // 화·금 04:00  뉴스
-];
+  { hh: 5,  mm: 30, dom: [17], mon: [5, 8, 11], job: "fin" }, // 5·8·11월 17일 05:30  분기·반기보고서 제출기한 직후 재무 재수집
+  { hh: 5,  mm: 0,  dom: [5],  mon: [4],   job: "biz" },      // 4/5 05:00  사업내용·감사의견·주주(사업보고서)
+];   // 2026-10-27: GitHub 자체 schedule(collect.yml)을 없애고 이 표가 유일한 정기 실행 출처
 // GitHub 자체 schedule(collect.yml on.schedule) cron → job (실행 목록에서 작업 종류 추정용)
 const GH_CRON = { "0 21 * * 0-4": "daily", "30 21 * * 0-4": "subst", "30 23 * * 0-4": "daily", "10 15 * * *": "catchup",
   "30 20 2 * *": "fin", "30 20 17 5,8,11 *": "fin", "30 20 1,15 * *": "rating", "0 19 * * 1,4": "news", "0 20 5 4 *": "biz" };
@@ -35,8 +37,8 @@ const KST = 9 * 3600e3;
 
 function pick(nowUtc) {
   const k = new Date(nowUtc.getTime() + KST);
-  const hh = k.getUTCHours(), mm = k.getUTCMinutes(), dow = k.getUTCDay(), dom = k.getUTCDate();
-  return TABLE.filter(t => t.hh === hh && t.mm === mm && (!t.dow || t.dow.includes(dow)) && (!t.dom || t.dom.includes(dom))).map(t => t.job);
+  const hh = k.getUTCHours(), mm = k.getUTCMinutes(), dow = k.getUTCDay(), dom = k.getUTCDate(), mon = k.getUTCMonth() + 1;
+  return TABLE.filter(t => t.hh === hh && t.mm === mm && (!t.dow || t.dow.includes(dow)) && (!t.dom || t.dom.includes(dom)) && (!t.mon || t.mon.includes(mon))).map(t => t.job);
 }
 const kst = ms => new Date(ms + KST).toISOString().replace("T", " ").slice(0, 16);
 const hm = ms => new Date(ms + KST).toISOString().slice(11, 16);
