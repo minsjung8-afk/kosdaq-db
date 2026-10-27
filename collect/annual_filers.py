@@ -6,7 +6,7 @@
   · 고유번호 없이 검색하면 기간이 3개월로 제한 → 3개월 구간으로 나눠 조회(구간당 100건씩 페이지)
 - 이미 DB에 있는 회사 제외 → 개황(company) 1콜로 업종(KSIC)·대표자·설립일 보강
 - 분류(unlisted2와 같은 규칙): 금융 / 공공 / SPC·리츠·펀드 / 일반기업(= 추가 후보)
-- 일반기업은 최근 사업보고서의 자본총계를 붙인다(2026-10-28 사용자 결정: 자본총계 200억 이상만 추가)
+- 일반기업·금융은 최근 사업보고서의 자본총계를 붙인다(2026-10-28 사용자 결정: 자본총계 500억 이상만 추가, 금융 포함)
   · XBRL 재무(fnlttSinglAcnt 1콜, 연결 우선) → 없으면 사업보고서 본문 재무상태표(audit_fs 파서)
 출력: 콘솔 요약 + unlisted_candidates.csv(아티팩트) + filer_candidate 표(추가 작업 unlisted_add --type 사업보고서 가 읽음)
   python run.py filer_scan [--limit 개황조회상한]
@@ -108,15 +108,15 @@ def run(limit=None, months=22):
     for i, (cc, v) in enumerate(sorted(new.items(), key=lambda x: x[1]["name"]), 1):
         g = classify(v["name"])
         info = {}
-        if g == "일반기업" and (not limit or i <= limit):
+        if g in ("일반기업", "금융") and (not limit or i <= limit):
             try:
                 info = dart_get("company", corp_code=cc)
             except Exception as e:  # noqa
                 info = {"_err": str(e)[:60]}
             nm_full = info.get("corp_name") or ""
-            if nm_full and classify(nm_full) != "일반기업":
+            if nm_full and g == "일반기업" and classify(nm_full) != "일반기업":
                 g = classify(nm_full)
-        eq, fy, src = equity_of(cc, v["rcept_no"], v["report_nm"]) if g == "일반기업" else (None, None, "")
+        eq, fy, src = equity_of(cc, v["rcept_no"], v["report_nm"]) if g in ("일반기업", "금융") else (None, None, "")
         rows.append({"corp_code": cc, "name": v["name"], "group": g, "equity_eok": (round(eq / 1e8) if eq is not None else ""), "fy": fy or "", "eq_src": src,
                      "induty_code": info.get("induty_code", ""),
                      "ceo": info.get("ceo_nm", ""), "est_dt": info.get("est_dt", ""), "adres": (info.get("adres") or "")[:40],
@@ -133,17 +133,17 @@ def run(limit=None, months=22):
                     [(r["corp_code"], r["name"], r["group"], (r["equity_eok"] * 1e8 if r["equity_eok"] != "" else None), r["fy"], r["eq_src"],
                       r["induty_code"], r["report"], r["rcept_no"]) for r in rows])
     con.commit()
-    gen = [r for r in rows if r["group"] == "일반기업"]
-    big = [r for r in gen if r["equity_eok"] != "" and r["equity_eok"] >= 200]
+    gen = [r for r in rows if r["group"] in ("일반기업", "금융")]
+    big = [r for r in gen if r["equity_eok"] != "" and r["equity_eok"] >= 500]
     unk = [r for r in gen if r["equity_eok"] == ""]
-    print(f"[filer_scan] 일반기업 {len(gen)}사 중 자본총계 200억 이상 {len(big)}사 · 미만 {len(gen) - len(big) - len(unk)}사 · 확인 불가 {len(unk)}사", flush=True)
+    print(f"[filer_scan] 일반기업·금융 {len(gen)}사 중 자본총계 500억 이상 {len(big)}사(금융 {sum(1 for r in big if r['group'] == '금융')}) · 미만 {len(gen) - len(big) - len(unk)}사 · 확인 불가 {len(unk)}사", flush=True)
     by = Counter(r["group"] for r in rows)
     print("[filer_scan] 분류: " + " · ".join(f"{k} {n}" for k, n in by.most_common()), flush=True)
     ks = Counter((r["induty_code"] or "")[:2] for r in rows if r["group"] == "일반기업")
     print("[filer_scan] 일반기업 업종(KSIC 앞 2자리) 상위: " + " · ".join(f"{k or '?'} {n}" for k, n in ks.most_common(15)), flush=True)
-    print("[filer_scan] 자본총계 200억 이상(TSV, 큰 순): corp_code\tname\t자본총계(억)\tKSIC\t출처", flush=True)
+    print("[filer_scan] 자본총계 500억 이상(TSV, 큰 순): corp_code\tname\t구분\t자본총계(억)\tKSIC\t출처", flush=True)
     for r in sorted(big, key=lambda r: -r["equity_eok"]):
-        print(f"  {r['corp_code']}\t{r['name']}\t{r['equity_eok']:,}\t{r['induty_code']}\t{r['eq_src']}", flush=True)
+        print(f"  {r['corp_code']}\t{r['name']}\t{r['group']}\t{r['equity_eok']:,}\t{r['induty_code']}\t{r['eq_src']}", flush=True)
     for r in unk[:30]:
         print(f"  [확인 불가] {r['corp_code']}\t{r['name']}\t{r['eq_src']}", flush=True)
     print(f"[filer_scan] 저장: {OUT.name} ({len(rows)}행) — DB 변경 없음", flush=True)
