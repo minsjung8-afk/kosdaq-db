@@ -30,7 +30,7 @@ def _d(y, m, d):
         return None
 
 
-VER = 2      # 2026-10-26 v2: 나이스 '등급유효기한'·숫자 사이 공백('202 6 .6.30'), 한신평 '값 먼저·제목 나중' 표 배치 대응
+VER = 3      # 2026-10-27 v3: pypdf로 못 찾으면 PyMuPDF·pdfminer 글자 추출로 다시 시도(추출기마다 글자 순서가 달라 한신평·한기평 CP 일부 누락) / 2026-10-26 v2: 나이스 '등급유효기한'·숫자 사이 공백('202 6 .6.30'), 한신평 '값 먼저·제목 나중' 표 배치 대응
 
 
 def extract_valid_to(text, disc_dt=None):
@@ -77,6 +77,36 @@ def _pdf_text(data, pages=5):
     return "\n".join((rd.pages[i].extract_text() or "") for i in range(min(len(rd.pages), pages)))
 
 
+def _pdf_texts(data, pages=5):
+    """글자 추출기 3종을 차례로(앞의 것에서 유효기간을 못 찾을 때만 다음 것) — pypdf → PyMuPDF → pdfminer"""
+    yield "pypdf", lambda: _pdf_text(data, pages)
+    def mu():
+        import pymupdf  # noqa
+        doc = pymupdf.open(stream=data, filetype="pdf")
+        return "\n".join(doc[i].get_text() for i in range(min(len(doc), pages)))
+    yield "pymupdf", mu
+    def pm():
+        from pdfminer.high_level import extract_text  # noqa
+        return extract_text(io.BytesIO(data), maxpages=pages)
+    yield "pdfminer", pm
+
+
+def extract_from_pdf(data, disc_dt=None):
+    """→ (valid_to, snip, 첫 추출기 텍스트 앞부분). 추출기 하나라도 날짜를 찾으면 그 결과."""
+    head = None
+    for name, fn in _pdf_texts(data):
+        try:
+            t = fn()
+        except Exception:  # noqa
+            continue
+        if head is None:
+            head = re.sub(r"\s+", " ", t or "")[:200]
+        vt, snip = extract_valid_to(t, disc_dt)
+        if vt:
+            return vt, (snip if name == "pypdf" else f"[{name}] {snip}")[:160], head
+    return None, None, head
+
+
 def targets(con, corp_codes=None):
     ensure(con)
     rows = con.execute("""SELECT r.corp_code, r.agency, r.target_type, r.eval_kind, r.disc_dt, r.grade, r.file_url FROM credit_rating r
@@ -112,21 +142,21 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
         data = requests.get(r[6], headers=UA, timeout=(15, 60)).content
         if data[:4] != b"%PDF":
             raise RuntimeError("PDF 아님")
-        return extract_valid_to(_pdf_text(data), r[4])
+        return extract_from_pdf(data, r[4])
 
     got = miss = fail = 0
     with ThreadPoolExecutor(workers) as ex:
         futs = [(r, ex.submit(work, r)) for r in todo]
         for i, (r, f) in enumerate(futs, 1):
             try:
-                vt, snip = f.result()
+                vt, snip, head = f.result()
                 con.execute("INSERT OR REPLACE INTO rating_valid (file_url, valid_to, snip, fetched_at, ver) VALUES (?,?,?,?,?)", (r[6], vt, snip, now(), VER))
                 if vt:
                     got += 1
                 else:
                     miss += 1
                 if i <= 15 or (vt is None and miss <= 10):       # 처음 몇 건과 못 찾은 건은 로그로(패턴 보완용)
-                    print(f"  {r[1]} {r[2]} {r[5]} {r[4]} → {vt or '못 찾음'} | {snip or ''}", flush=True)
+                    print(f"  {r[1]} {r[2]} {r[5]} {r[4]} → {vt or '못 찾음'} | {snip or ('앞부분: ' + (head or '(글자 없음 — 그림 PDF)'))}", flush=True)
             except Exception as e:  # noqa
                 fail += 1
                 log(con, r[0], "rating_valid", "fail", e)
