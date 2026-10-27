@@ -6,7 +6,9 @@
   · 고유번호 없이 검색하면 기간이 3개월로 제한 → 3개월 구간으로 나눠 조회(구간당 100건씩 페이지)
 - 이미 DB에 있는 회사 제외 → 개황(company) 1콜로 업종(KSIC)·대표자·설립일 보강
 - 분류(unlisted2와 같은 규칙): 금융 / 공공 / SPC·리츠·펀드 / 일반기업(= 추가 후보)
-출력: 콘솔 요약 + unlisted_candidates.csv(아티팩트, 워크플로가 자동 보관)
+- 일반기업은 최근 사업보고서의 자본총계를 붙인다(2026-10-28 사용자 결정: 자본총계 200억 이상만 추가)
+  · XBRL 재무(fnlttSinglAcnt 1콜, 연결 우선) → 없으면 사업보고서 본문 재무상태표(audit_fs 파서)
+출력: 콘솔 요약 + unlisted_candidates.csv(아티팩트) + filer_candidate 표(추가 작업 unlisted_add --type 사업보고서 가 읽음)
   python run.py filer_scan [--limit 개황조회상한]
 """
 import csv
@@ -68,6 +70,34 @@ def classify(name):
     return "일반기업"
 
 
+def equity_of(cc, rcept_no, report_nm):
+    """→ (자본총계 원, 사업연도, 출처) 또는 (None, fy, 사유)"""
+    m = re.search(r"\((\d{4})\.(\d{2})\)", report_nm or "")
+    fy = m.group(1) if m else None
+    if fy:
+        try:
+            js = dart_get("fnlttSinglAcnt", corp_code=cc, bsns_year=fy, reprt_code="11011")
+            rows = [r for r in js.get("list", []) if r.get("sj_div") == "BS" and re.sub(r"\s", "", r.get("account_nm", "")) in ("자본총계", "자본합계")]
+            for fs in ("CFS", "OFS"):
+                for r in rows:
+                    if r.get("fs_div") == fs and r.get("thstrm_amount") not in (None, "", "-"):
+                        return float(str(r["thstrm_amount"]).replace(",", "")), fy, "XBRL " + fs
+        except Exception:  # noqa
+            pass
+    try:                                                  # XBRL 없음 → 사업보고서 본문 재무상태표
+        import audit_fs
+        from business import fetch_document_xml
+        secs = audit_fs.annual_sections(fetch_document_xml(rcept_no))
+        for fs in ("CFS", "OFS"):
+            if fs in secs:
+                c, _p = audit_fs._row(audit_fs.parse_statements(secs[fs]), "BS", "자본총계", "자본합계", "자본총액", "총자본")
+                if c is not None:
+                    return c, fy, "본문 " + fs
+    except Exception as e:  # noqa
+        return None, fy, f"본문 실패: {str(e)[:40]}"
+    return None, fy, "자본총계 못 찾음"
+
+
 def run(limit=None, months=22):
     con = connect()
     have = {r[0] for r in con.execute("SELECT corp_code FROM company")}
@@ -86,7 +116,9 @@ def run(limit=None, months=22):
             nm_full = info.get("corp_name") or ""
             if nm_full and classify(nm_full) != "일반기업":
                 g = classify(nm_full)
-        rows.append({"corp_code": cc, "name": v["name"], "group": g, "induty_code": info.get("induty_code", ""),
+        eq, fy, src = equity_of(cc, v["rcept_no"], v["report_nm"]) if g == "일반기업" else (None, None, "")
+        rows.append({"corp_code": cc, "name": v["name"], "group": g, "equity_eok": (round(eq / 1e8) if eq is not None else ""), "fy": fy or "", "eq_src": src,
+                     "induty_code": info.get("induty_code", ""),
                      "ceo": info.get("ceo_nm", ""), "est_dt": info.get("est_dt", ""), "adres": (info.get("adres") or "")[:40],
                      "report": v["report_nm"], "rcept_dt": v["rcept_dt"], "rcept_no": v["rcept_no"]})
         if i % 100 == 0:
@@ -95,13 +127,24 @@ def run(limit=None, months=22):
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else ["corp_code"])
         w.writeheader()
         w.writerows(rows)
+    con.execute("""CREATE TABLE IF NOT EXISTS filer_candidate (corp_code TEXT PRIMARY KEY, name TEXT, grp TEXT, equity REAL, fy TEXT, eq_src TEXT,
+                   ksic TEXT, report TEXT, rcept_no TEXT, scanned_at TEXT)""")
+    con.executemany("INSERT OR REPLACE INTO filer_candidate VALUES (?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",
+                    [(r["corp_code"], r["name"], r["group"], (r["equity_eok"] * 1e8 if r["equity_eok"] != "" else None), r["fy"], r["eq_src"],
+                      r["induty_code"], r["report"], r["rcept_no"]) for r in rows])
+    con.commit()
+    gen = [r for r in rows if r["group"] == "일반기업"]
+    big = [r for r in gen if r["equity_eok"] != "" and r["equity_eok"] >= 200]
+    unk = [r for r in gen if r["equity_eok"] == ""]
+    print(f"[filer_scan] 일반기업 {len(gen)}사 중 자본총계 200억 이상 {len(big)}사 · 미만 {len(gen) - len(big) - len(unk)}사 · 확인 불가 {len(unk)}사", flush=True)
     by = Counter(r["group"] for r in rows)
     print("[filer_scan] 분류: " + " · ".join(f"{k} {n}" for k, n in by.most_common()), flush=True)
     ks = Counter((r["induty_code"] or "")[:2] for r in rows if r["group"] == "일반기업")
     print("[filer_scan] 일반기업 업종(KSIC 앞 2자리) 상위: " + " · ".join(f"{k or '?'} {n}" for k, n in ks.most_common(15)), flush=True)
-    print("[filer_scan] 일반기업 명단(TSV): corp_code\tname\tKSIC\t최근 보고서", flush=True)
-    for r in rows:
-        if r["group"] == "일반기업":
-            print(f"  {r['corp_code']}\t{r['name']}\t{r['induty_code']}\t{r['report']} ({r['rcept_dt']})", flush=True)
+    print("[filer_scan] 자본총계 200억 이상(TSV, 큰 순): corp_code\tname\t자본총계(억)\tKSIC\t출처", flush=True)
+    for r in sorted(big, key=lambda r: -r["equity_eok"]):
+        print(f"  {r['corp_code']}\t{r['name']}\t{r['equity_eok']:,}\t{r['induty_code']}\t{r['eq_src']}", flush=True)
+    for r in unk[:30]:
+        print(f"  [확인 불가] {r['corp_code']}\t{r['name']}\t{r['eq_src']}", flush=True)
     print(f"[filer_scan] 저장: {OUT.name} ({len(rows)}행) — DB 변경 없음", flush=True)
     return rows
