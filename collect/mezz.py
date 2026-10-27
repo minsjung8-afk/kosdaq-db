@@ -145,7 +145,7 @@ def _classify(header_text):
 
 
 UNIT = {"원": 1, "천원": 1e3, "백만원": 1e6, "억원": 1e8}
-PARSER_VER = 4       # 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱
+PARSER_VER = 5       # 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱 / v5(2026-10-28): 종속회사 발행분 제외(별도 기준 — KT&G 표의 [영진약품(주)] 전환사채)
 
 
 def _unit(text):
@@ -203,12 +203,39 @@ def _num(c):
     return to_num(c) if NUM_RE.match(c) else None
 
 
-def _parse_tables(seg, out, lead_extra=""):
+_LABEL_RE = re.compile(r"\[([^\[\]]{2,40})\]")
+_HEAD_RE = re.compile(r"사항|관련|발행|현황|증권|기준|단위|참고|주석|내역|요약|조건")   # '[지분증권의 발행 등과 관련된 사항]' 같은 소제목 괄호는 회사 꼬리표가 아님
+
+
+def _labels(text):
+    return [x for x in _LABEL_RE.findall(text or "") if not _HEAD_RE.search(x)]
+
+
+def _norm_co(s):
+    return re.sub(r"\(주\)|㈜|주식회사|\(株\)|\s|\.", "", s or "").lower()
+
+
+def _is_own(label, own):
+    """[회사명] 꼬리표가 보고 회사 자신인지. own = {'names': 정규화 이름들, 'first': 섹션의 첫 꼬리표}"""
+    if not own or not label:
+        return True
+    ln = _norm_co(label)
+    if not ln:
+        return True
+    if own.get("first") and ln == own["first"]:
+        return True
+    return any(ln == n or ln in n or n in ln for n in own.get("names", ()) if n and len(n) >= 2)
+
+
+def _parse_tables(seg, out, lead_extra="", own=None, pre=""):
     """세그먼트 안의 표들을 훑어 미상환 CB/BW/EB 행을 out에 추가. 반환: 추가 행 수
     v4: 머리글(COLSPAN 2단 포함)로 열을 식별해 값을 읽고(회차·비고 열의 숫자·날짜 오인 방지), 열 식별 실패 시 위치 기반 폴백."""
     n0 = len(out)
     for tm in re.finditer(r"<TABLE[^>]*>(.*?)</TABLE>", seg, flags=re.S | re.I):
         lead = (lead_extra + " " + _strip(seg[max(0, tm.start() - 2500):tm.start()]))[-400:]     # 표 앞 제목·기준일·단위(작은 표 포함)
+        labels = _labels(pre + " " + _strip(seg[:tm.start()]))
+        if labels and not _is_own(labels[-1], own):
+            continue                                       # v5: '[영진약품(주)] 미상환 전환사채' — 연결 종속회사 발행분은 제외(메자닌은 별도 기준)
         tbl = tm.group(1)
         trs = re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I)
         rows = [[_strip(c[2]).replace("\n", " ").strip() for c in CELL_RE.findall(tr)] for tr in trs]
@@ -274,22 +301,36 @@ def _parse_tables(seg, out, lead_extra=""):
                     name = f"{tm_cell} {name}"
                 row = {"kind": kind, "name": name[:80], "isu_dd": _d(dates[0]), "exprd_dd": _d(dates[1]) if len(dates) > 1 else None,
                        "face_amt": face * unit, "cv_rt": rt, "cv_prc": prc, "remndr_amt": rem * unit, "remndr_stock": stock, "period": period}
+            if row and mapped and own and len(raw) == len(fields):    # v5: 전환대상주식 '영진약품(주)기명식 보통주'처럼 다른 회사 주식이면 제외
+                sk = dict(zip(fields, raw)).get("stk_knd") or ""
+                m = re.search(r"^(.{2,30}?)(?:\(주\)|㈜|주식회사)", sk.strip())
+                if m and not _is_own(m.group(0), own):
+                    row = None
             if row and not any(r["kind"] == row["kind"] and r["name"] == row["name"] and r["isu_dd"] == row["isu_dd"] for r in out):
                 out.append(row)
     return len(out) - n0
 
 
-def extract_outstanding(xml_text):
+def extract_outstanding(xml_text, names=None):
     """정기보고서의 '미상환 전환사채 / 신주인수권부사채 등 / 교환사채 발행현황' 표 → [dict]. 금액은 표 단위(백만원 등)를 원으로 환산.
     v3: 섹션 계층(SECTION-2/3)에 의존하지 않고 소제목 '미상환 … 발행현황' 위치 기준으로 다음 소제목까지의 표를 읽는다.
         (서진시스템 등: '7. 증권의 발행…'이 SECTION-3으로 들어가 있어 SECTION-2 첫 제목 검사에서 통째로 빠지던 문제)"""
     out = []
+    own = None
+    if names:                                             # 보고 회사 이름 + 증권발행 절의 첫 꼬리표(지배회사가 먼저 나오는 양식)
+        m0 = re.search(r"증권의\s*발행", _strip(xml_text))
+        first = None
+        if m0:
+            t0 = _strip(xml_text)[m0.start(): m0.start() + 4000]
+            f = _labels(t0)
+            first = _norm_co(f[0]) if f else None
+        own = {"names": [_norm_co(n) for n in names if n], "first": first}
     titles = [(m.start(), m.end(), _strip(m.group(1)).replace(" ", "")) for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml_text, flags=re.S | re.I)]
     for i, (st, en, title) in enumerate(titles):
         if "미상환" not in title or not re.search(r"전환사채|신주인수권|교환사채", title):
             continue
         nxt = titles[i + 1][0] if i + 1 < len(titles) else min(len(xml_text), en + 60000)
-        _parse_tables(xml_text[en:nxt], out, lead_extra=title)
+        _parse_tables(xml_text[en:nxt], out, lead_extra=title, own=own, pre=_strip(xml_text[max(0, st - 600):st]))
     if out:
         return out
     for sec in re.findall(r"<SECTION-[23][^>]*>(.*?)</SECTION-[23]>", xml_text, flags=re.S | re.I):   # 구양식·제목 변형 대비 폴백
@@ -297,7 +338,7 @@ def extract_outstanding(xml_text):
         title = _strip(m.group(1)).replace(" ", "") if m else ""
         if not ("자금조달" in title or "자본금" in title or "증권의발행" in title):
             continue
-        _parse_tables(sec, out)
+        _parse_tables(sec, out, own=own)
     return out
 
 
@@ -309,7 +350,8 @@ def fetch_outstanding(con, corp_code):
     if checked and (checked[0] or "").endswith(f"#v{PARSER_VER}"):
         return -1                                          # 이미 이 보고서를 현재 파서로 처리함
     xml = fetch_document_xml(rcept)
-    rows = extract_outstanding(xml)
+    nmr = con.execute("SELECT corp_name, corp_name_full FROM company WHERE corp_code=?", (corp_code,)).fetchone()
+    rows = extract_outstanding(xml, names=[x for x in (nmr or []) if x])
     con.execute("DELETE FROM mezz_outstanding WHERE corp_code=?", (corp_code,))
     for r in rows:
         con.execute("""INSERT INTO mezz_outstanding (corp_code, rcept_no, report_nm, kind, name, isu_dd, exprd_dd, face_amt, cv_rt, cv_prc,
