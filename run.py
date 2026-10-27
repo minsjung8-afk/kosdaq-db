@@ -469,6 +469,12 @@ def main():
         me = str(Path(__file__).resolve())
         EVERY = int(os.environ.get("CHAIN_PUBLISH_MIN", "40")) * 60     # 긴 단계는 40분마다 중간 반영
         steps = list(a.steps or [])
+        from datetime import datetime, timezone, timedelta
+        _h = datetime.now(timezone(timedelta(hours=9))).hour
+        if a.hop and steps and all(x.split(":")[0] == "catchup" for x in steps) and 7 <= _h < 20:
+            # 2026-10-27: 미수집분 보충(catchup)의 자동 이어하기가 낮 시간에 대기열을 차지해 시세·사용자 작업을 밀어냄 → 낮(07~20시)에는 이어하지 않고 밤 00:10 정기 실행에 맡김
+            print(f"[chain] 낮 시간({_h}시) catchup 이어하기 생략 — 오늘 밤 00:10 정기 실행에서 계속", flush=True)
+            steps = []
         def save_continue(remaining):
             """170분 제한으로 끊기면 남은 단계를 continue.txt에 남김 → 워크플로 마지막 단계가 같은 chain을 자동으로 다시 실행"""
             if not remaining or a.hop >= 8:
