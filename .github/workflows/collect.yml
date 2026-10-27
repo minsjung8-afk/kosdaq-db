@@ -2,16 +2,9 @@ name: collect-and-deploy
 # 실행 목록 제목에 작업 종류를 남김(스케줄러 Worker가 '회사 추가' 반영 예상 시각을 계산할 때 사용, 2026-10-26)
 run-name: "${{ github.event_name == 'schedule' && format('schedule {0}', github.event.schedule) || format('{0} {1}', github.event.inputs.job, github.event.inputs.args) }}"
 on:
-  schedule:
-    - cron: "0 21 * * 0-4"     # 평일 06:00 KST: 시세 + 수시공시 델타(daily, 대용가 포함)
-    - cron: "30 21 * * 0-4"    # 평일 06:30 KST: 대용가(subst) 재조회 — 당일 대용가 확정분
-    - cron: "30 23 * * 0-4"    # 평일 08:30 KST: daily 보완 실행(06:00에 KRX 전일 시세가 미집계였을 때; 받은 날짜는 건너뜀)
-    - cron: "10 15 * * *"      # 매일 00:10 KST: catchup(미수집분 mezz→biz→fin→kpi→quarters, 한도까지)
-    - cron: "30 20 2 * *"      # 매월 2일 05:30 KST: 재무(연간+최근분기)
-    - cron: "30 20 17 5,8,11 *" # 5·8·11월 17일 05:30 KST: 분기·반기보고서 제출기한(5/15·8/14·11/14) 직후 재무 재수집
-    - cron: "30 20 1,15 * *"   # 매월 1일·15일 05:30 KST: 신용등급
-    - cron: "0 19 * * 1,4"     # 매주 화·금 04:00 KST: 뉴스
-    - cron: "0 20 5 4 *"       # 4/5 05:00 KST: 사업내용·감사의견·주주 (사업보고서)
+  # 정기 실행은 스케줄러 Worker(worker/scheduler.js, 10분 cron)가 디스패치한다(2026-10-27).
+  # GitHub 자체 schedule은 수십 분씩 늦게 도착하고, 동시실행 규칙(실행 1 + 대기 1)상 대기 중인 작업을 취소시켜
+  # 10-27 아침 시세·사용자 작업(#177)이 사라졌다 → 중복이던 on.schedule을 없애고 Worker 한 곳에서 대기열을 보고 판단한다.
   workflow_dispatch:
     inputs:
       job:
@@ -206,4 +199,7 @@ jobs:
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           ARGS=$(cat continue.txt); echo "이어하기: $ARGS"
+          # 대기 중인 실행이 있으면 이어하기를 넣지 않음 — 새 대기가 기존 대기(시세·사용자 작업)를 취소하므로(2026-10-27)
+          W=$(gh run list -w collect.yml -R "${{ github.repository }}" -L 20 --json status -q '[.[] | select(.status=="queued" or .status=="pending" or .status=="waiting" or .status=="requested")] | length')
+          if [ "${W:-0}" != "0" ]; then echo "::warning::대기 중인 실행 ${W}건 — 이어하기 생략(남은 단계: $ARGS). 필요하면 수동 실행"; exit 0; fi
           gh workflow run collect.yml --ref "${{ github.ref_name }}" -f job=chain -f args="$ARGS"
