@@ -30,7 +30,7 @@ def now() -> str:
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
-    con = sqlite3.connect(path or DB_PATH)
+    con = sqlite3.connect(path or DB_PATH, timeout=60)   # 같은 실행 안의 다른 연결이 쓰는 중이면 60초까지 기다림(기본 5초, 2026-10-27 시세 적재 locked)
     con.row_factory = sqlite3.Row
     try:
         con.execute("PRAGMA journal_mode=WAL")      # 로컬 디스크: 빠름

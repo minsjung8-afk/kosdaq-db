@@ -182,7 +182,7 @@ def main():
         before = {r[0] for r in con.execute("SELECT corp_code FROM company")}
         for m in a.market:
             try:
-                listing.run(market=m, skip_existing=True)
+                listing.run(market=m, skip_existing=True).close()      # 연결을 바로 닫아 잠금이 남지 않게
             except Exception as e:  # noqa
                 print(f"[newlist] {m} 상장목록 갱신 실패: {e}", flush=True)
         pairs = corp_pairs(con, a.limit); ccs = [p[0] for p in pairs]          # 신규분 포함해 다시 계산(아래 시세 요약에도 반영)
