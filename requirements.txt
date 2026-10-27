@@ -4,3 +4,5 @@ pypdf
 anthropic
 playwright
 openpyxl
+pymupdf
+pdfminer.six
