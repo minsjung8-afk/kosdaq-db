@@ -70,8 +70,9 @@ def run(limit=None, market="KOSDAQ", skip_existing=False):
                 cur = con.execute("UPDATE company SET market=?, corp_name=COALESCE(NULLIF(?,''), corp_name), updated_at=? WHERE stock_code=? AND (market IS NULL OR market<>? OR corp_name<>COALESCE(NULLIF(?,''), corp_name))",
                                   (market, r.get("corp_name"), now(), r["stock_code"], market, r.get("corp_name")))
                 moved += cur.rowcount
+        con.commit()       # 0건이어도 UPDATE가 연 쓰기 트랜잭션을 닫음(2026-10-27: 열린 채 남아 다음 시장 갱신·시세 적재가 'database is locked'로 실패)
         if moved:
-            con.commit(); print(f"[init] {market} 기존 종목 시장/명칭 갱신 {moved}건", flush=True)
+            print(f"[init] {market} 기존 종목 시장/명칭 갱신 {moved}건", flush=True)
         # 상장폐지 탐지: 이 시장으로 기록된 종목이 KRX 목록(보통주)에 없으면 delisted_dt 기록 — 데이터는 삭제하지 않고 '비상장'처럼 표시만. 다시 나타나면 해제.
         # 안전장치: KRX 응답이 비정상적으로 작으면(평소의 80% 미만) 대량 오탐 방지를 위해 건너뜀
         if len(rows) >= 50:
@@ -109,6 +110,7 @@ def run(limit=None, market="KOSDAQ", skip_existing=False):
                 break
         except Exception as e:  # noqa
             log(con, cc, "listing", "fail", e)
+    con.commit()
     return con
 
 
