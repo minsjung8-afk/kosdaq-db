@@ -442,12 +442,13 @@ async function open(code){
     const groups=[
       ['g1', [['매출액','revenue',억],['영업이익','op_income',억],['EBITDA','ebitda',억,'da','유무형상각비'],['당기순이익','net_income',억]]],
       ['g2', [['자산총계','total_assets',억],['부채총계','total_liab',억],['자본총계','equity',억]]],
-      ['g7', [['영업활동CF','cfo',억],['투자활동CF','cfi',억],['└ Capex 순액 <small>유·무형자산 취득−처분 (투자활동CF 포함)</small>','capex',억,null,null,1],['재무활동CF','cff',억],['FCF <small>영업활동CF − Capex 순액</small>','fcf',억]]],
+      ['g7', [['영업활동CF','cfo',억],['투자활동CF','cfi',억],['└ Capex 순액 <small>현금흐름 부호 · (−) 순투자 유출 · (+) 처분 우위 · 투자활동CF에 포함</small>','capex_cf',억,null,null,1],['재무활동CF','cff',억],['FCF <small>영업활동CF + Capex 순액</small>','fcf',억]]],
       ['g4', [['총차입금(근사)','borrowings',억],['현금성자산','cash',억],['순차입금','net_borrowings',억]]],
       ['g3', [['부채비율','debt_ratio',pct],['차입금의존도','borrow_dep',pct],['유동비율','cur_ratio',pct],['순차입금/EBITDA','nd_ebitda',x],['EBITDA/이자비용','interest_cover',x]]],
       ['g5', [['영업이익률','op_margin',pct],['당기순이익률','net_margin',pct]]],
       ['g6', [['매출채권회전율','recv_turn',x],['재고자산회전율','inv_turn',x],...(isProj?[['순운전자본 <small>(수주형: 매출채권+미청구공사+재고−매입채무−초과청구−선수금)</small>','nwc_proj',억],['미청구공사(계약자산)','contract_assets',억],['초과청구공사(계약부채)','contract_liab',억],['선수금','advances',억]]:isFin?[]:[['순운전자본 <small>매출채권+재고−매입채무</small>','nwc',억]])]],
     ];
+    for(const fs of ['OFS','CFS']) for(const r of (d.kpi[fs]||[])) r.capex_cf=r.capex==null?null:-r.capex;   // 2026-10-27: Capex 순액을 현금흐름표 부호로(DB는 취득−처분 양수 그대로)
     const bases=[['OFS','별도'],['CFS','연결']].filter(([fs])=>d.kpi[fs]&&d.kpi[fs].length);
     if(!bases.length) h+=`<div class="src">재무 미수집</div>`;
     else{
