@@ -154,6 +154,10 @@ def main():
         import mezz
         if a.debug:
             mezz.debug(con, a.debug)
+        elif a.type == "보유재파싱":         # 2026-10-28: 미상환 메자닌이 있는 회사만 v5 파서(종속회사 발행분 제외)로 다시 읽기
+            held = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM mezz_outstanding")}
+            print(f"[mezz] 미상환 보유 {len(held)}사 재파싱", flush=True)
+            mezz.run(held, new_only=True)
         else:
             mezz.run(set(ccs) if a.limit else None, new_only=a.new_only)
     if a.job == "fin_fast":                  # 연간 재무 빠른 수집(연간 재무 없는 회사만, 회사당 1~2콜)
