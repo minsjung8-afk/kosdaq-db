@@ -235,6 +235,11 @@ def main():
             con.execute("CREATE TABLE IF NOT EXISTS manual_company (corp_code TEXT PRIMARY KEY, added_at TEXT)")
             con.executemany("INSERT OR IGNORE INTO manual_company VALUES (?, datetime('now','localtime'))", [(c,) for c in a.codes])
             con.commit()
+        if a.type == "사업보고서":            # 2026-10-28 사용자 결정: 사업보고서 제출 비상장 일반기업 중 자본총계 200억 이상(filer_scan 결과) — 큰 회사부터 --limit개씩
+            rows = con.execute("""SELECT corp_code, name FROM filer_candidate WHERE grp='일반기업' AND equity >= 2e10
+                                  AND corp_code NOT IN (SELECT corp_code FROM company) ORDER BY equity DESC LIMIT ?""", (a.limit or 60,)).fetchall()
+            seed = [{"corp_code": r[0], "corp_name": r[1], "grade": ""} for r in rows]
+            print(f"[unlisted_add] 사업보고서 제출 비상장(자본총계 200억↑) 이번 {len(seed)}사", flush=True)
         if a.codes:
             seed = [r for r in seed if r["corp_code"] in set(a.codes)]
         if a.debug:                          # --debug <고유번호…>: 잘못 등록된 비상장사 제거(시드 고유번호 오류 정정용, UNLISTED만) 후 시드대로 재등록
