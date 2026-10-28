@@ -4,10 +4,10 @@
 
 판단 절차(금액 하나마다)
   ① 금액을 억원으로 환산(조 = 1만 억). 'USD·달러·엔·위안'이 붙은 금액은 원화가 아니므로 제외
-  ② 앞 14자 안의 계정 키워드(차입·매출·영업이익·현금·자산·부채·자본·EBITDA·순이익)로 대조할 재무 수치 후보를 고름
+  ② 앞 14자 안에서 금액에 가장 가까운 계정 키워드 하나(차입·매출·영업이익·현금·자산·부채·자본·EBITDA·순이익)로 대조할 재무 수치 후보를 고름
      후보 = 해당 계정의 연결·별도 전 기간 값 + (차입 키워드면) 재무 특이사항 문구에 계산돼 있는 억원 금액
   ③ 금액이 회사 규모 상한(자산·부채·매출 최댓값의 1.5배)을 넘거나, 후보와 25% 안으로 맞는 값이 없을 때만 의심
-  ④ 의심 금액을 10·100·1000배로 나누거나 10배로 곱한 값이 후보와 3% 안에서 맞으면 → 그 값으로 고치고 원문을 괄호로 남김
+  ④ 의심 금액(후보 최댓값의 2배 이상)을 10·100·1000배로 나눈 값이 후보와 3% 안에서 맞으면(올려 고치지는 않음) → 그 값으로 고치고 원문을 괄호로 남김
   ⑤ 계정 키워드가 있고 상한을 넘는데 맞는 후보가 없으면 → 숫자는 그대로 두고 '⚠ 단위 확인 필요' 표시(추정값으로 바꾸지 않음)
 """
 import re
@@ -45,17 +45,21 @@ def _fix_text(s, by, cap, nn, log):
             return m.group(0)
         ctx = s[max(0, m.start() - 14):m.start()]
         cands = []
-        for kw, fields in KW:
-            if kw in ctx:
-                for f in fields:
-                    cands += by.get(f, [])
-                if kw == "차입":
-                    cands += nn
+        # 금액 바로 앞에 가장 가까이 나온 계정 키워드 하나만 씀('현금성자산'은 현금 — '자산'으로 읽으면 자산총계와 맞춰져 오보정, 2026-10-29 대한항공 5.4조→54조 사례)
+        hits = [(ctx.rfind(kw), -len(kw), kw, fields) for kw, fields in KW if kw in ctx]
+        if hits:
+            _, _, kw, fields = max(hits)
+            for f in fields:
+                cands += by.get(f, [])
+            if kw == "차입":
+                cands += nn
         near = lambda x, tol: any(abs(x - c) <= tol * c for c in cands if c)
         over = bool(cap and v > cap and cands)   # 계정 키워드가 없는 금액(시장규모·그룹 전체 등)은 상한을 넘어도 건드리지 않음
         if not cands or (not over and near(v, 0.25)):
             return m.group(0)
-        for f in (10, 100, 1000, 0.1):
+        if v < 2 * max(cands) and not over:      # 아래로만 보정(AI 오류는 자릿수를 키우는 쪽) — 후보보다 2배 이상 클 때만, 올려 고치지는 않음
+            return m.group(0)
+        for f in (10, 100, 1000):
             x = v / f
             if cands and near(x, 0.03) and (not cap or x <= cap):
                 new = f"{_fmt(x, unit, raw)}{unit}{won}"
@@ -105,6 +109,6 @@ if __name__ == "__main__":   # 대한항공 사례 자가 점검
     d = {"kpi": {"CFS": [{"total_assets": 52824400000000, "total_liab": 42059100000000, "revenue": 25225500000000, "borrowings": 24646600000000, "cash": 2601200000000}]},
          "fin_notes": [{"text": "유동비율 58.7%. 1년 내 상환 차입(리스 포함) 72,356억 vs 현금 26,012억"}],
          "business": {"summary": {"key_risks": ["단기성차입금 72.4조원(2026.6월)으로 단기 상환 부담", "항공유 매입액 292억 USD"],
-                                  "key_financials_view": "2025년 매출 25.2조원, 총차입금 24.6조원, 엔진정비공장 5,780억원 투자"}}}
+                                  "key_financials_view": "2025년 매출 25.2조원, 총차입금 24.6조원, 현금성자산 5.4조원, 엔진정비공장 5,780억원 투자"}}}
     print(apply(d))
     print(d["business"]["summary"])
