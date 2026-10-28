@@ -655,9 +655,38 @@ def _is_cancel(r):
     return bool(re.search(r"취소|철회|WD|^NR$", (r.get("grade") or "") + " " + (r.get("eval_kind") or "")))
 
 
-def _is_long(r):
+_SUB_RE = re.compile(r"신종자본|후순위|조건부자본|영구채|하이브리드")
+_SHORT_RE = re.compile(r"기업어음|단기사채|CP|전단채")
+
+
+def _cls(r):
+    """평가대상 분류(2026-10-28 한화투자증권: 신종자본증권 A가 대표, 만기 ELB '취소'가 장기 AA- 취소로 표시되던 문제)
+    ① 기업신용평가 → issuer ② 신종자본·후순위·조건부자본 → sub(선순위보다 낮게 매겨지는 노칭 등급) ③ CP·전단채 → short
+    ④ 그 밖의 사채(회사채·금융채·파생결합사채) → senior ⑤ 나머지 → other"""
     t = r.get("target_type") or ""
-    return bool(re.search(r"기업신용평가|사채", t)) and "단기사채" not in t
+    if "기업신용평가" in t:
+        return "issuer"
+    if _SHORT_RE.search(t):
+        return "short"
+    if _SUB_RE.search(t):
+        return "sub"
+    if re.search(r"사채|금융채|채권", t):
+        return "senior"
+    return "other"
+
+
+def _is_long(r):
+    return _cls(r) in ("issuer", "senior", "sub")
+
+
+def _tkey(r):
+    return (r.get("agency") or "", re.sub(r"\s+", "", r.get("target_type") or ""))
+
+
+def _issue_cancelled(r, cancels):
+    """같은 평가사·같은 평가대상(같은 회차)에 그 뒤 취소 공시가 있으면 True — 만기상환된 개별 사채(ELB·DLB 등)의 등급 취소"""
+    k = _tkey(r)
+    return any(_tkey(c) == k and (c.get("disc_dt") or "") >= (r.get("disc_dt") or "") for c in cancels)
 
 
 def rating_status(ratings, today=None):
@@ -669,7 +698,8 @@ def rating_status(ratings, today=None):
     today = today or date.today()
     cancels = [r for r in ratings if _is_cancel(r)]
     if cur:
-        same = [r for r in cancels if _is_long(r) == _is_long(cur) and (r.get("disc_dt") or "") >= (cur.get("disc_dt") or "")]
+        # 회사 단위 취소로 보는 경우: 대표 등급과 같은 평가대상(같은 회차)이 취소됐거나, 기업신용평가가 취소됐을 때만 — 다른 회차 사채의 만기 취소는 무시(2026-10-28)
+        same = [r for r in cancels if (_tkey(r) == _tkey(cur) or (_cls(r) == "issuer" and _cls(cur) == "issuer")) and (r.get("disc_dt") or "") >= (cur.get("disc_dt") or "")]
         if same:
             return {"kind": "cancel", "label": "등급 취소", "date": same[0]["disc_dt"], "tip": f"{same[0]['agency']} {same[0]['disc_dt']} {same[0].get('target_type') or ''} 등급 취소 공시"}
         if cur.get("valid_to"):                     # 평가서에 기재된 유효기간이 있으면 그 날짜로 판단(2026-10-26 씨제이포디플렉스 CP 6개월)
@@ -697,7 +727,7 @@ def rating_view(ratings, today=None):
     cur = current_rating(ratings)
     st = rating_status(ratings, today)
     if st and cur and _is_long(cur):
-        shorts = [r for r in ratings if not _is_long(r)]
+        shorts = [r for r in ratings if _cls(r) == "short"]
         s0 = current_rating(shorts)
         aux = {"grade": cur.get("grade"), "label": st["label"], "date": st.get("date"), "kind": st["kind"], "tip": st.get("tip")}
         if s0 and not _is_cancel(s0):
@@ -712,10 +742,14 @@ def rating_view(ratings, today=None):
 def current_rating(ratings):
     """대표 등급(공시일 내림차순 목록에서): ① 장기(기업신용평가·회사채, 단기사채 제외) 중 '정정' 아닌 최신 ② 단기(CP·전단채) 중 정정 아닌 최신 ③ 정정 포함.
     2026-10-25: '전자단기사채'가 '사채'에 걸려 장기로 잡히고, 옛 평가의 '본평가(정정)' 재공시(공시일만 최신)가 대표가 되어 부도(D)난 중앙일보가 A3로 표시되던 문제 수정"""
-    is_long = _is_long
-    ratings = [r for r in ratings if not _is_cancel(r)]
-    plain = [r for r in ratings if "정정" not in (r.get("eval_kind") or "")]
-    for pool in ([r for r in plain if is_long(r)], plain, [r for r in ratings if is_long(r)], ratings):
+    # 2026-10-28: 순서 ① 기업신용평가·선순위 사채 ② 단기(CP·전단채) ③ 신종자본·후순위(노칭) ④ 그 밖 — 각 단계에서 정정 아닌 최신, 이미 취소된 회차는 건너뜀
+    cancels = [r for r in ratings if _is_cancel(r)]
+    alive = [r for r in ratings if not _is_cancel(r)]
+    live = [r for r in alive if not _issue_cancelled(r, cancels)] or alive
+    plain = [r for r in live if "정정" not in (r.get("eval_kind") or "")]
+    main = lambda r: _cls(r) in ("issuer", "senior")
+    for pool in ([r for r in plain if main(r)], [r for r in plain if _cls(r) == "short"], [r for r in plain if _cls(r) == "sub"], plain,
+                 [r for r in live if main(r)], live):
         if pool:
             return pool[0]
     return None
