@@ -53,18 +53,31 @@ def collect_list(period="y1", per_page="200", max_pages=None, headless=True):
                         seen.add(k)
                         rows.append(r)
                 on_response.last = js
+                on_response.url = resp.url
         on_response.last = None
+        on_response.url = None
         pg.on("response", on_response)
 
         pg.goto(f"{BASE}/consensus", wait_until="networkidle")
-        pg.click("a:text-is('기업')")
-        sels = pg.locator("select.form-control")
-        sels.nth(0).select_option(period)          # 기간: d7/m1/m6/y1
-        sels.nth(0).dispatch_event("change")
-        sels.last.select_option(per_page)          # 50/100/200개 단위
-        sels.last.dispatch_event("change")
-        pg.click("button:text-is('검색')")
-        pg.wait_for_timeout(2000)
+        pg.locator("a[href='javascript:;']:text-is('기업')").first.click()
+        pg.wait_for_timeout(1500)
+        # 2026-10-28: 기간·개수 선택은 select2(jQuery) 드롭다운 — 숨은 <select> 값만 바꾸면 페이지가 모름 → 실제 드롭다운을 열고 항목을 클릭
+        PL = {"d7": "최근 7일", "m1": "1개월", "m6": "6개월", "y1": "1년"}
+
+        def pick(sel_idx, text):
+            sel = pg.locator("select.form-control").nth(sel_idx)
+            box = sel.locator("xpath=following-sibling::span[contains(@class,'select2')][1]")
+            box.click()
+            pg.locator(".select2-results__option", has_text=text).first.click()
+            pg.wait_for_timeout(800)
+        try:
+            pick(0, PL.get(period, "1개월"))
+            pick(pg.locator("select.form-control").count() - 1, f"{per_page}개")
+        except Exception as e:  # noqa
+            print(f"[hk] 드롭다운 선택 실패: {str(e)[:120]}", flush=True)
+        pg.locator(".report-search-field button.btn-primary").first.click()    # 상단 통합검색 버튼이 아닌 컨센서스 검색 버튼
+        pg.wait_for_timeout(2500)
+        print(f"[hk] 마지막 요청: {(on_response.url or '').split('?')[-1][:160]}", flush=True)
 
         lp = on_response.last if isinstance(on_response.last, dict) else {}
         last_page = int(lp.get("last_page") or 1)
