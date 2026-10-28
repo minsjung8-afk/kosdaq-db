@@ -156,6 +156,12 @@ a{color:var(--navy2)}
 @media print{body{display:block}aside,header{display:none}section{break-inside:avoid}}
 
 /* 3. 재무현황 개편(2026-10-28): 단순 표 + 특이사항 패널 */
+.fin2col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start;margin-bottom:12px}.fin2col.one{grid-template-columns:minmax(0,1fr)}
+@media (max-width:1150px){.fin2col{grid-template-columns:minmax(0,1fr)}}
+.fcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;padding:12px 14px}
+.fcard{border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:grid;gap:4px;align-content:start;background:var(--panel)}
+.fcard.bad{border-top:3px solid var(--bad)}.fcard.warn{border-top:3px solid var(--warn)}.fcard.info{border-top:3px solid var(--navy2)}.fcard.good{border-top:3px solid var(--good)}.fcard.fact{border-top:3px solid var(--line2)}
+.fch{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.fcard .ft2,.fcard .ft3{grid-column:auto}.fcard .fbasis{margin-left:0}
 .fin3{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(300px,1fr);gap:14px;align-items:start}
 @media (max-width:1250px){.fin3{grid-template-columns:minmax(0,1fr)}}
 .fin3 .fl{min-width:0}.flh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 6px}
@@ -176,7 +182,7 @@ table.ft th.fcur{box-shadow:inset 0 -2px 0 var(--gold)}
 .fnh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}.fnh b{color:var(--navy);font-size:14px}.fcnt{margin-left:auto;display:flex;gap:4px}
 .fnp ul{list-style:none;margin:0;padding:0}.fnp li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;padding:10px 14px;border-bottom:1px solid #eef1f6}.fnp li:last-child{border-bottom:0}
 .ftag{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;align-self:start}
-.ftag.bad{color:var(--bad);background:var(--bad-bg)}.ftag.warn{color:var(--warn);background:var(--warn-bg)}.ftag.info{color:var(--navy2);background:var(--nbg2)}
+.ftag.bad{color:var(--bad);background:var(--bad-bg)}.ftag.warn{color:var(--warn);background:var(--warn-bg)}.ftag.info{color:var(--navy2);background:var(--nbg2)}.ftag.good{color:var(--good);background:var(--good-bg)}.ftag.fact{color:var(--mute);background:#eef1f6}.fbasis{margin-left:6px;font-size:10.5px;font-weight:600;color:var(--mute);border:1px solid var(--line);border-radius:4px;padding:0 5px;vertical-align:1px}.fbl{font-size:11px;color:var(--mute);font-weight:600}
 .twrap.stick table.ft tr>th:first-child{background:#f3f5f9}.twrap.stick table.ft tr>td:first-child,.twrap.stick table.ft tr:nth-child(even)>td:first-child{background:var(--panel)}
 .fai{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--nbg2);font-size:12.5px;line-height:1.6}.fai-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:3px}.fai-h b{color:var(--navy)}.fcause{color:var(--navy2)}
 .ft1{font-weight:700;font-size:13px}.ft2{grid-column:2;font-size:12.5px}.ft3{grid-column:2;font-size:11px;color:var(--mute)}
@@ -505,12 +511,15 @@ async function open(code){
           const vals=rows.map(r=>{try{return fn(r,fs)}catch(e){return null}}); if(vals.every(v=>v==null)) continue; const f=fmt||억;
           buf+=`<tr class="${cls==='sum'?'fsum':''}"><td class="${cls==='s2'?'fsub':''}"${tip?` title="${esc(tip)}"`:''}>${lab}${tip?' <small>ⓘ</small>':''}</td>${vals.map((v,i)=>`<td class="n${rows[i].kind==='interim'?' fcur':''}${v!=null&&v<0?' neg':''}">${f(v)}</td>`).join('')}</tr>`; }
         flush();
-        return `<div class="fsv" data-fs="${fs}"${fs===FS0?'':' hidden'}><div class="twrap"><table class="ft"><tr><th>${nm}</th>${rows.map(r=>`<th class="n${r.kind==='interim'?' fcur':''}">${plink(r)}${r.kind!=='annual'?'<span class="fcol">누적</span>':''}</th>`).join('')}</tr>${body}</table></div></div>`;};
-      const seg=bases.length>1?`<div class="fseg" role="group" aria-label="재무제표 기준">${bases.map(([fs,nm])=>`<button type="button" class="fsb" data-fs="${fs}" aria-pressed="${fs===FS0}" onclick="window.__fsSel('${fs}')">${nm}</button>`).join('')}</div>`:`<span class="src">${bases[0][1]} 기준(${bases[0][0]==='CFS'?'별도':'연결'} 재무 없음)</span>`;
-      const fn=d.fin_notes||[]; const SV={bad:'위험',warn:'주의',info:'참고'};
-      const cnt=['bad','warn','info'].map(s=>[s,fn.filter(n=>n.sev===s).length]).filter(([,n])=>n).map(([s,n])=>`<span class="ftag ${s}">${SV[s]} ${n}</span>`).join('');
-      const notes=`<div class="fnp"><div class="fnh"><b>재무 특이사항</b><span class="src">${FS0==='CFS'?'연결':'별도'} 기준 · 연결/별도 비교 포함 · 규칙 기반 자동 판정</span><span class="fcnt">${cnt}</span></div>${d.fin_ai&&d.fin_ai.summary?`<div class="fai"><div class="fai-h"><b>AI 종합 의견</b><span class="src">Haiku · 위 표의 숫자와 손익계산서 계정만 근거 · ${esc((d.fin_ai.at||'').slice(0,10))}</span></div>${esc(d.fin_ai.summary)}</div>`:''}${fn.length?`<ul>${fn.map(n=>`<li><span class="ftag ${n.sev}">${SV[n.sev]}</span><div class="ft1">${esc(n.title)}</div><div class="ft2">${esc(n.text)}</div>${(()=>{const cz=((d.fin_ai||{}).causes||[]).find(x=>x.title===n.title); return cz&&cz.cause?`<div class="ft2 fcause">원인(AI): ${esc(cz.cause)}</div>`:'';})()}<div class="ft3">규칙: ${esc(n.rule)}</div></li>`).join('')}</ul>`:'<div class="src" style="padding:12px 14px">걸린 규칙 없음 — 수익성·레버리지·유동성·현금흐름 기준에서 특이사항이 나오지 않았습니다.</div>'}</div>`;
-      h+=`<div class="fin3"><div class="fl"><div class="flh">${seg}<span class="src">단위 억원 · 최근 분기 열은 누적 · 연도 클릭 → DART 보고서</span></div>${bases.map(([fs,nm])=>tbl(fs,nm)).join('')}</div>${notes}</div>`;
+        return `<div class="fsv" data-fs="${fs}"><div class="twrap"><table class="ft"><tr><th>${nm}</th>${rows.map(r=>`<th class="n${r.kind==='interim'?' fcur':''}">${plink(r)}${r.kind!=='annual'?'<span class="fcol">누적</span>':''}</th>`).join('')}</tr>${body}</table></div></div>`;};
+      const fn=d.fin_notes||[]; const SV={bad:'위험',warn:'주의',info:'참고',good:'양호',fact:'현황'};
+      const cnt=['bad','warn','info','good'].map(s=>[s,fn.filter(n=>n.sev===s).length]).filter(([,n])=>n).map(([s,n])=>`<span class="ftag ${s}">${SV[s]} ${n}</span>`).join('');
+      const card=n=>{const cz=((d.fin_ai||{}).causes||[]).find(x=>x.title===n.title);
+        return `<div class="fcard ${n.sev}"><div class="fch"><span class="ftag ${n.sev}">${SV[n.sev]}</span>${n.basis?`<span class="fbasis">${esc(n.basis)}</span>`:''}</div><div class="ft1">${esc(n.title)}</div><div class="ft2">${n.text_ofs?'<b class="fbl">연결</b> ':''}${esc(n.text)}</div>${n.text_ofs?`<div class="ft2"><b class="fbl">별도</b> ${esc(n.text_ofs)}</div>`:''}${cz&&cz.cause?`<div class="ft2 fcause">원인(AI): ${esc(cz.cause)}</div>`:''}<div class="ft3">규칙: ${esc(n.rule)}</div></div>`;};
+      const notes=`<div class="fnp"><div class="fnh"><b>재무 특이사항</b><span class="src">규칙 기반 자동 판정 · 카드마다 연결/별도 기준 표시</span><span class="fcnt">${cnt}</span></div>${d.fin_ai&&d.fin_ai.summary?`<div class="fai"><div class="fai-h"><b>AI 종합 의견</b><span class="src">Haiku · 표의 숫자와 손익계산서 계정만 근거 · ${esc((d.fin_ai.at||'').slice(0,10))}</span></div>${esc(d.fin_ai.summary)}</div>`:''}${fn.length?`<div class="fcards">${fn.map(card).join('')}</div>`:'<div class="src" style="padding:12px 14px">재무 수치가 부족해 특이사항을 판정하지 못했습니다.</div>'}</div>`;
+      // 2026-10-28 사용자 결정: 왼쪽 별도 · 오른쪽 연결 표 나란히(버튼 없음), 재무 특이사항은 표 아래 카드
+      const order=[...bases].sort((a,b)=>a[0]==='OFS'?-1:1);
+      h+=`<div class="flh"><span class="src">단위 억원 · 최근 분기 열은 누적 · 연도 클릭 → DART 보고서 · 반기·분기 순차입금/EBITDA는 LTM EBITDA 기준${bases.length<2?` · ${bases[0][0]==='CFS'?'별도':'연결'} 재무 없음`:''}</span></div><div class="fin2col${bases.length<2?' one':''}">${order.map(([fs,nm])=>tbl(fs,nm)).join('')}</div>${notes}`;
       {const RN={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const rows=d.kpi[FS0]||[];
        const srcs=rows.map(r=>`${r.label||r.bsns_year} ${RN[r.reprt_code]||''}${r.kind!=='annual'?'(누적)':''}${r.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">${r.rcept_no}</a>`:''}`);
        if(srcs.length) h+=`<div class="src" style="margin:4px 0 2px"><b>기준 보고서</b> · ${srcs.join(' · ')}</div>`;}
@@ -526,7 +535,8 @@ async function open(code){
    const bb=d.borrow_bd;
    if(bb&&(bb.CFS||bb.OFS)){   // 차입금 현황: 차입금·사채·리스 × 유동/비유동, 연간 3개년 + 최근 분기 (사용자 요청 2026-10-24 — 주석 원문보다 요약표)
      const FS1=d.kpi&&d.kpi.CFS&&d.kpi.CFS.length?'CFS':'OFS';
-     for(const B of [['CFS','연결'],['OFS','별도']].filter(([fs])=>bb[fs]&&bb[fs].length)){ const bases=[B];   // 2026-10-28: 연결/별도 선택(3. 재무현황 버튼과 연동)
+     h+=`<div class="fin2col${['OFS','CFS'].filter(f=>bb[f]&&bb[f].length).length<2?' one':''}">`;
+     for(const B of [['OFS','별도'],['CFS','연결']].filter(([fs])=>bb[fs]&&bb[fs].length)){ const bases=[B];   // 2026-10-28: 왼쪽 별도 · 오른쪽 연결
      const g=(col,k,c)=>{const v=col.k[k]&&col.k[k][c]; return v||0;};
      const anyv=(k,c)=>bases.some(([fs])=>bb[fs].some(col=>g(col,k,c)));
      // '차입금·사채' = 재무상태표에 한 줄로 공시된 합산 계정('단기차입금및사채'·'유동차입금(사채포함)' 등) — 해당 기간에만 행이 생김
@@ -545,7 +555,8 @@ async function open(code){
        body+=`<tr class="g3"><td>${cn} 소계</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(sumCur(col,c),i===0?' sep':'')).join('')).join('')}</tr>`;});
      body+=`<tr class="g3 gs"><td><b>총차입금</b> (괄호: 유동 비중)</td>${bases.map(([fs])=>bb[fs].map((col,i)=>`<td class="n${i===0?' sep':''}"><span class="val"><b>${억(col.total)}</b></span>${col.total?`<span class="dsub np">(${(sumCur(col,'유동')/col.total*100).toFixed(0)}%)</span>`:''}</td>`).join('')).join('')}</tr>`;
      body+=`<tr class="g3"><td>순차입금 (− 현금성자산)</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(col.cash==null?null:col.total-col.cash,i===0?' sep':'')).join('')).join('')}</tr>`;
-     h+=`<div class="fsv" data-fs="${B[0]}"${B[0]===FS1||!bb[FS1]?'':' hidden'}><div class="src" style="margin:4px 0 6px">단위 억원 · 재무상태표의 차입성 계정(단기·장기차입금, 유동성장기부채, 사채·CB·BW·EB·CP, 리스부채)을 유동/비유동 × 종류로 재분류 · 합계 = 3. 재무현황의 총차입금(근사) · 연도 클릭 → DART 보고서${merged?' · 합산 계정 = 그 기간 재무상태표에 차입금과 사채를 한 줄로 공시(분리 불가)':''}${unk?' · 구분불명 = 계정명·위치로 유동성 판정 불가':''}</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div></div>`; }
+     h+=`<div class="fsv" data-fs="${B[0]}"><div class="src" style="margin:4px 0 6px">단위 억원 · 재무상태표의 차입성 계정(단기·장기차입금, 유동성장기부채, 사채·CB·BW·EB·CP, 리스부채)을 유동/비유동 × 종류로 재분류 · 합계 = 3. 재무현황의 총차입금(근사) · 연도 클릭 → DART 보고서${merged?' · 합산 계정 = 그 기간 재무상태표에 차입금과 사채를 한 줄로 공시(분리 불가)':''}${unk?' · 구분불명 = 계정명·위치로 유동성 판정 불가':''}</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div></div>`; }
+     h+=`</div>`;
    } else if(d.kpi&&(d.kpi.CFS||d.kpi.OFS)) h+=`<div class="src" style="padding:4px 0 2px">차입금 현황 표: 재무상태표 세부 계정 미수집(사이트 재생성 후 표시)</div>`;
    if(!ns&&!nr&&!bb) h+=`<div class="src" style="padding:4px 0 2px">차입금 만기구조 · 금융기관별 차입 · 우발채무(보증·담보·소송·약정) — 최신 정기보고서 주석 수집 후 표시. 현재는 3. 재무현황의 총차입금·순차입금과 5. 공시 타임라인의 담보제공·소송 키워드를 참고하세요.</div>`;
    if(ns){
