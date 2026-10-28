@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -239,6 +239,11 @@ def main():
             con.execute("CREATE TABLE IF NOT EXISTS manual_company (corp_code TEXT PRIMARY KEY, added_at TEXT)")
             con.executemany("INSERT OR IGNORE INTO manual_company VALUES (?, datetime('now','localtime'))", [(c,) for c in a.codes])
             con.commit()
+        if a.type == "감사보고서":            # 2026-10-29 사용자 요청: 감사보고서만 내는 비상장 자본총계 500억↑(일반기업+여전사) — audit_scan으로 선별된 명단에서 큰 순 --limit개
+            import audit_filers
+            rows = audit_filers.eligible(con)[:a.limit or 60]
+            seed = [{"corp_code": r[0], "corp_name": r[1], "grade": ""} for r in rows]
+            print(f"[unlisted_add] 감사보고서 제출 비상장(자본총계 500억↑) 이번 {len(seed)}사 / 대상 누적 {len(audit_filers.eligible(con))}사", flush=True)
         if a.type in ("사업보고서", "사업보고서시범"):   # 2026-10-28 사용자 결정: 사업보고서 제출 비상장 자본총계 500억↑ — 일반기업 + 금융 중 여전사만, 시범 10곳 확인 후 큰 회사부터 --limit개씩
             import annual_filers
             annual_filers.preview(con)
@@ -275,7 +280,8 @@ def main():
                 print(f"[unlisted_add] {nm}({cc}) 개황 실패: {e}", flush=True)
         print(f"[unlisted_add] 신규 {len(new)}사 / 시드 {len(seed)}사 (이미 있음 {len(seed)-len(new)})", flush=True)
         if new:
-            for nm, fn in (("fin", lambda: financials.run_annual_fast(new, a.year - 1, con=con)),      # 사업보고서 제출사는 API로 바로(감사보고서만 내는 회사는 skip 기록 → 2차 파서 대상)
+            AUD = a.type == "감사보고서"         # 감사보고서만 내는 회사: 정기보고서 API(재무·분기·사업보고서·주석)는 헛조회라 건너뜀 → 신용등급 + 감사보고서 파서 + 요약만
+            for nm, fn in ((("rating", lambda: fss_rating.run(set(new))),) if AUD else (("fin", lambda: financials.run_annual_fast(new, a.year - 1, con=con)),      # 사업보고서 제출사는 API로 바로(감사보고서만 내는 회사는 skip 기록 → 2차 파서 대상)
                            ("fin_prev", lambda: financials.run_annual_fast(new, a.year - 2, con=con)),
                            ("fin_ofs", lambda: financials.run_ofs(new, a.year - 1, con=con)),
                            ("quarters", lambda: quarters.run(new, con=con)),
@@ -284,7 +290,7 @@ def main():
                            ("rating", lambda: fss_rating.run(set(new))),
                            ("notes", lambda: business.run_notes(con, new)),
                            ("da_notes", lambda: __import__("notes_v2").run(set(new), con=con)),
-                           ("summarize", lambda: __import__("summarize").run_all(set(new), model="haiku", force=False))):
+                           ("summarize", lambda: __import__("summarize").run_all(set(new), model="haiku", force=False)))):
                 try:
                     print(f"[unlisted_add] {nm} 시작 ({len(new)}사)", flush=True); fn(); con.commit()
                 except Exception as e:  # noqa
@@ -298,15 +304,17 @@ def main():
                 except Exception as e:  # noqa
                     print(f"[unlisted_add] audit_fs 오류: {e}", flush=True)
             try:                              # XBRL 재무가 없는 사업보고서 제출사(당근마켓 등): 분기·반기보고서 본문 → 최근 분기 + 전년 동기(상장사와 같은 양식, 2026-10-26)
-                __import__("interim_doc").run(new, con=con)
+                if not AUD:
+                    __import__("interim_doc").run(new, con=con)
             except Exception as e:  # noqa
                 print(f"[unlisted_add] interim_doc 오류: {e}", flush=True)
             try:                              # 정기보고서 제출사는 최근 분기·반기 검토의견도(감사보고서만 내는 회사는 해당 없음)
                 import business
-                business.run_review(con, new)
+                if not AUD:
+                    business.run_review(con, new)
             except Exception as e:  # noqa
                 print(f"[unlisted_add] 검토의견 오류: {e}", flush=True)
-            if a.type == "수동":             # 감사보고서만 있는 회사의 사업내용 요약(회사의 개요 + 재무 요약, Haiku)
+            if a.type in ("수동", "감사보고서"):   # 감사보고서만 있는 회사의 사업내용 요약(회사의 개요 + 재무 요약, Haiku)
                 try:
                     __import__("summarize").run_unlisted(set(new), model="haiku")
                 except Exception as e:  # noqa
@@ -314,6 +322,8 @@ def main():
     if a.job == "fin_ai":                    # 재무 특이사항 AI 보강(Haiku, 예산 FIN_AI_BUDGET 기본 60달러) — 2026-10-28
         import fin_ai
         fin_ai.run(set(a.codes) if a.codes else None, limit=a.limit, force=a.force)
+    if a.job == "audit_scan":                # 감사보고서만 내는 비상장사 명단 → 자본총계 선별(남는 DART 한도로 매일 이어감, DB의 audit_candidate 표만 변경, 2026-10-29)
+        __import__("audit_filers").run(limit=a.limit)
     if a.job == "filer_scan":                # 사업보고서 제출 비상장사 전수 명단(드라이런, DB 변경 없음 → unlisted_candidates.csv 아티팩트, 2026-10-28)
         __import__("annual_filers").run(limit=a.limit)
     if a.job == "interim_doc":               # 분기·반기보고서 본문 재무제표 → fin_raw (XBRL 없는 사업보고서 제출 비상장사, 2026-10-26)
@@ -415,6 +425,7 @@ def main():
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("da", lambda: __import__("da_xbrl").run(con=con)),
                  ("da_notes", lambda: __import__("notes_v2").run(con=con)),   # XBRL에 없는 상각비는 주석 변동표에서(2026-10-24)   # 상각비(XBRL) — 건당 수초로 느려 분기·주석·요약 뒤로(2026-10-23)
+                 ("audit_scan", lambda: __import__("audit_filers").run()),   # 감사보고서만 내는 비상장 500억↑ 선별 — 남는 한도로 매일 이어감(2026-10-29 사용자 요청)
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2011-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 2011년까지(2026-10-23 사용자 요청) — KRX는 연속 호출 수백 건 후 차단되므로 야간 분할
         import os as _os
         _cont = Path(__file__).resolve().with_name("continue.txt")
