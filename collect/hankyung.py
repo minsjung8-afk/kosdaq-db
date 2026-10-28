@@ -42,7 +42,12 @@ def collect_list(period="y1", per_page="200", max_pages=None, headless=True):
                     js = resp.json()
                 except Exception:  # noqa
                     return
-                for r in js.get("data", []):
+                data = js.get("data") if isinstance(js, dict) else None
+                if isinstance(data, dict):           # 2026-10-28: 응답 data가 {"0": {...}} 객체로 바뀐 경우(페이지네이션 응답) → 값 목록
+                    data = list(data.values())
+                for r in data or []:
+                    if not isinstance(r, dict):
+                        continue
                     k = r.get("REPORT_IDX")
                     if k not in seen:
                         seen.add(k)
@@ -61,7 +66,9 @@ def collect_list(period="y1", per_page="200", max_pages=None, headless=True):
         pg.click("button:text-is('검색')")
         pg.wait_for_timeout(2000)
 
-        last_page = (on_response.last or {}).get("last_page", 1)
+        lp = on_response.last if isinstance(on_response.last, dict) else {}
+        last_page = int(lp.get("last_page") or 1)
+        print(f"[hk] 목록 {len(rows)}건 수집(1쪽) · 전체 {last_page}쪽", flush=True)
         if max_pages:
             last_page = min(last_page, max_pages)
         page = 1
@@ -77,6 +84,7 @@ def collect_list(period="y1", per_page="200", max_pages=None, headless=True):
                 link.first.click()
             pg.wait_for_timeout(int(PAUSE * 1000))
         br.close()
+    print(f"[hk] 목록 총 {len(rows)}건", flush=True)
     return rows
 
 
