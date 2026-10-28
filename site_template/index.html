@@ -224,6 +224,7 @@ a{color:var(--navy2)}
   .mrep .tp{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px;white-space:nowrap}
   .tl li{font-size:12.5px}
   #visit{display:none}
+  .mhide{display:none!important}
 }
 @media print{body{display:block}aside,header{display:none}section{break-inside:avoid}}
 
@@ -243,7 +244,7 @@ a{color:var(--navy2)}
 table.ft{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums}
 table.ft th,table.ft td{padding:2px 8px;line-height:1.35;border-bottom:1px solid #eef1f6;white-space:nowrap;background:transparent;color:var(--fg)}
 table.ft th{font-weight:600;color:var(--mute);text-align:right;font-size:11.5px;background:#f3f5f9;border-bottom:1px solid var(--line)}
-table.ft th:first-child,table.ft td:first-child{text-align:left}
+table.ft th:first-child,table.ft td:first-child,table.ft th.l{text-align:left}
 table.ft th a{color:var(--navy2)}table.ft .fcol{display:block;font-weight:400;font-size:10px;color:var(--mute)}
 table.ft td.n{text-align:right}table.ft td.neg{color:var(--bad)}
 table.ft tr.fg td{font-weight:700;color:var(--navy);padding-top:5px;font-size:11px;letter-spacing:.04em;border-bottom:1px solid var(--line)}
@@ -607,8 +608,12 @@ async function open(code){
    const bb=d.borrow_bd;
    if(bb&&(bb.CFS||bb.OFS)){   // 차입금 현황: 차입금·사채·리스 × 유동/비유동, 연간 3개년 + 최근 분기 (사용자 요청 2026-10-24 — 주석 원문보다 요약표)
      const FS1=d.kpi&&d.kpi.CFS&&d.kpi.CFS.length?'CFS':'OFS';
-     h+=`<div class="fin2col${['OFS','CFS'].filter(f=>bb[f]&&bb[f].length).length<2?' one':''}">`;
-     for(const B of [['OFS','별도'],['CFS','연결']].filter(([fs])=>bb[fs]&&bb[fs].length)){ const bases=[B];   // 2026-10-28: 왼쪽 별도 · 오른쪽 연결
+     const BB=[['OFS','별도'],['CFS','연결']].filter(([fs])=>bb[fs]&&bb[fs].length);   // 2026-10-29: 재무현황과 같은 표 양식(table.ft) · 모바일은 별도/연결 버튼
+     h+=`<div class="src" style="margin:4px 0 6px">단위 억원 · 재무상태표의 차입성 계정(단기·장기차입금, 유동성장기부채, 사채·CB·BW·EB·CP, 리스부채)을 유동/비유동 × 종류로 재분류 · 합계 = 3. 재무현황의 총차입금 · 연도 클릭 → DART 보고서</div>`;
+     if(BB.length>1) h+=`<div class="mseg fseg" role="group" aria-label="차입금 기준">${BB.map(([fs,nm],i)=>`<button type="button" data-mfs="${fs}" aria-pressed="${i?'false':'true'}">${nm}</button>`).join('')}</div>`;
+     h+=`<div class="fin2col${BB.length<2?' one':' m2'}" data-m="${BB[0][0]}">`;
+     let MERGED=false, UNK=false;
+     for(const B of BB){ const bases=[B];   // 2026-10-28: 왼쪽 별도 · 오른쪽 연결
      const g=(col,k,c)=>{const v=col.k[k]&&col.k[k][c]; return v||0;};
      const anyv=(k,c)=>bases.some(([fs])=>bb[fs].some(col=>g(col,k,c)));
      // '차입금·사채' = 재무상태표에 한 줄로 공시된 합산 계정('단기차입금및사채'·'유동차입금(사채포함)' 등) — 해당 기간에만 행이 생김
@@ -616,34 +621,37 @@ async function open(code){
      const merged=anyv('차입금·사채','유동')||anyv('차입금·사채','비유동')||anyv('차입금·사채','미구분');
      const unk=kinds.some(([k])=>anyv(k,'미구분'));
      const curs=[['유동','유동(1년 내)'],['비유동','비유동']].concat(unk?[['미구분','구분불명']]:[]);
-     const td=(v,cls)=>`<td class="n${cls||''}"><span class="val">${v==null?'-':억(v)}</span></td>`;
-     const head1=`<tr><th></th>${bases.map(([fs,nm])=>`<th class="sep top" colspan="${bb[fs].length}">${nm}</th>`).join('')}</tr>`;
-     const head2=`<tr><th>구분</th>${bases.map(([fs])=>bb[fs].map((c,i)=>`<th class="n col${i===0?' sep':''}" ${c.interim?'style="box-shadow:inset 0 -3px 0 var(--gold)"':''}>${c.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${c.rcept_no}" target="_blank" rel="noopener">${c.label}</a>`:c.label}</th>`).join('')).join('')}</tr>`;
+     const [FS,NM]=B, cols=bb[FS]; MERGED=MERGED||merged; UNK=UNK||unk;
+     const td=v=>`<td class="n${v!=null&&v<0?' neg':''}">${v==null?'-':억(v)}</td>`;
+     const head=`<tr><th>${NM}</th>${cols.map(c=>`<th class="n${c.interim?' fcur':''}">${c.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${c.rcept_no}" target="_blank" rel="noopener">${c.label}</a>`:c.label}</th>`).join('')}</tr>`;
      let body='';
      const sumCur=(col,c)=>Object.keys(col.k).reduce((a,k)=>a+g(col,k,c),0);
-     curs.forEach(([c,cn],ci)=>{   // D안(사용자 선택 2026-10-24): 유동 3행+소계, 비유동 3행+소계 — 전 기간 0인 행은 숨김
+     curs.forEach(([c,cn])=>{   // D안(사용자 선택 2026-10-24): 유동·비유동별 종류 행 + 소계 — 전 기간 0인 행은 숨김
        const ks=kinds.filter(([k])=>anyv(k,c)); if(!ks.length) return;
-       ks.forEach(([k,kn],ki)=>{body+=`<tr class="g4${ki===0&&ci>0?' gs':''}"><td${ki===0?'':' style="padding-left:26px;font-weight:500"'}>${ki===0?`<b>${cn}</b> · `:''}${kn}</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(g(col,k,c)||null,i===0?' sep':'')).join('')).join('')}</tr>`;});
-       body+=`<tr class="g3"><td>${cn} 소계</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(sumCur(col,c),i===0?' sep':'')).join('')).join('')}</tr>`;});
-     body+=`<tr class="g3 gs"><td><b>총차입금</b> (괄호: 유동 비중)</td>${bases.map(([fs])=>bb[fs].map((col,i)=>`<td class="n${i===0?' sep':''}"><span class="val"><b>${억(col.total)}</b></span>${col.total?`<span class="dsub np">(${(sumCur(col,'유동')/col.total*100).toFixed(0)}%)</span>`:''}</td>`).join('')).join('')}</tr>`;
-     body+=`<tr class="g3"><td>순차입금 (− 현금성자산)</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(col.cash==null?null:col.total-col.cash,i===0?' sep':'')).join('')).join('')}</tr>`;
-     h+=`<div class="fsv" data-fs="${B[0]}"><div class="src" style="margin:4px 0 6px">단위 억원 · 재무상태표의 차입성 계정(단기·장기차입금, 유동성장기부채, 사채·CB·BW·EB·CP, 리스부채)을 유동/비유동 × 종류로 재분류 · 합계 = 3. 재무현황의 총차입금(근사) · 연도 클릭 → DART 보고서${merged?' · 합산 계정 = 그 기간 재무상태표에 차입금과 사채를 한 줄로 공시(분리 불가)':''}${unk?' · 구분불명 = 계정명·위치로 유동성 판정 불가':''}</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div></div>`; }
+       body+=`<tr class="fg"><td colspan="${cols.length+1}">${cn}</td></tr>`;
+       ks.forEach(([k,kn])=>{body+=`<tr><td class="fsub">${kn}</td>${cols.map(col=>td(g(col,k,c)||null)).join('')}</tr>`;});
+       body+=`<tr class="fsum"><td>${cn} 소계</td>${cols.map(col=>td(sumCur(col,c))).join('')}</tr>`;});
+     body+=`<tr class="fg"><td colspan="${cols.length+1}">합계</td></tr>`;
+     body+=`<tr class="fsum"><td>총차입금 <small>(유동 비중)</small></td>${cols.map(col=>`<td class="n">${억(col.total)}${col.total?` <small style="color:var(--mute);font-weight:400">${(sumCur(col,'유동')/col.total*100).toFixed(0)}%</small>`:''}</td>`).join('')}</tr>`;
+     body+=`<tr class="fsum"><td>순차입금 <small>(− 현금성자산)</small></td>${cols.map(col=>td(col.cash==null?null:col.total-col.cash)).join('')}</tr>`;
+     h+=`<div class="fsv" data-fs="${FS}"><div class="twrap"><table class="ft">${head}${body}</table></div></div>`; }
      h+=`</div>`;
+     if(MERGED||UNK) h+=`<div class="src" style="margin:4px 0 0">${MERGED?'합산 계정 = 그 기간 재무상태표에 차입금과 사채를 한 줄로 공시(분리 불가)':''}${MERGED&&UNK?' · ':''}${UNK?'구분불명 = 계정명·위치로 유동성 판정 불가':''}</div>`;
    } else if(d.kpi&&(d.kpi.CFS||d.kpi.OFS)) h+=`<div class="src" style="padding:4px 0 2px">차입금 현황 표: 재무상태표 세부 계정 미수집(사이트 재생성 후 표시)</div>`;
    if(!ns&&!nr&&!bb) h+=`<div class="src" style="padding:4px 0 2px">차입금 만기구조 · 금융기관별 차입 · 우발채무(보증·담보·소송·약정) — 최신 정기보고서 주석 수집 후 표시. 현재는 3. 재무현황의 총차입금·순차입금과 5. 공시 타임라인의 담보제공·소송 키워드를 참고하세요.</div>`;
    if(ns){
      const A=v=>v==null||v===''?'-':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:1});   // 억원(구조화 단계에서 환산)
-     const T=(title,cols,rows,cell)=>rows&&rows.length?`<div class="src" style="margin:8px 0 2px"><b>${title}</b> · ${rows.length}건</div><div class="twrap"><table class="fin" style="width:100%"><tr>${cols.map(c=>`<th${/금액|한도|사용|잔액|억/.test(c)?' class="n"':''}>${c}</th>`).join('')}</tr>${rows.map(cell).join('')}</table></div>`:'';
+     const T=(title,cols,rows,cell)=>rows&&rows.length?`<div class="src" style="margin:8px 0 2px"><b>${title}</b> · ${rows.length}건</div><div class="twrap"><table class="ft"><tr>${cols.map(c=>`<th class="${/금액|한도|사용|잔액|억|금리|소진/.test(c)?'n':'l'}">${c}</th>`).join('')}</tr>${rows.map(cell).join('')}</table></div>`:'';
      const mp=ns.maturity_profile||{}; const mpv=[mp.within_1y,mp.y1_2,mp.y2_5,mp.over_5y]; const mpt=mpv.reduce((a,b)=>a+(Number(b)||0),0);
      h+=`<div class="src" style="margin:2px 0 6px">기준 <b>${esc(ns.report_nm||'')}</b> ${ns.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${ns.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · ${esc(ns.basis||'')} 기준 · 보고기간 말 ${esc(ns.as_of||'-')} · 금액 억원 · <b>AI(Haiku) 추출 — 금액·기관명은 원문 대조 필요</b></div>`;
      if(ns.key_risks&&ns.key_risks.length) h+=`<div style="margin:0 0 8px;padding:8px 12px;border:1px solid #f0c9ae;background:var(--warn-bg);border-radius:6px"><b style="color:var(--warn)">심사 유의</b><ul style="margin:4px 0 0 18px;padding:0">${ns.key_risks.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>`;
-     if(mpt) h+=`<div class="src" style="margin:4px 0 2px"><b>차입금 만기구조</b> (억원)</div><div class="twrap"><table class="fin" style="width:100%"><tr><th>1년 이내</th><th>1~2년</th><th>2~5년</th><th>5년 초과</th><th>합계</th></tr><tr>${mpv.map(v=>`<td class="n" style="font-weight:400;background:#fff!important;color:inherit">${A(v)}${mpt?` <small style="color:var(--mute)">(${(Number(v||0)/mpt*100).toFixed(0)}%)</small>`:''}</td>`).join('')}<td class="n"><b>${A(mpt)}</b></td></tr></table></div>`;
-     h+=T('차입금·사채 명세',['구분','차입처','금리(%)','만기','금액(억)','담보·보증'],ns.borrowings,b=>`<tr><td>${esc(b.type)}</td><td style="font-weight:400;background:#fff!important;color:inherit">${esc(b.lender)}</td><td class="n">${b.rate_pct==null?'-':esc(b.rate_pct)}</td><td>${esc(b.maturity)}</td><td class="n">${A(b.amount)}</td><td>${esc(b.secured)}</td></tr>`);
-     h+=T('약정 한도',['은행','종류','한도(억)','사용(억)','소진율'],ns.credit_lines,c=>`<tr><td>${esc(c.bank)}</td><td style="font-weight:400;background:#fff!important;color:inherit">${esc(c.type)}</td><td class="n">${A(c.limit)}</td><td class="n">${A(c.used)}</td><td class="n">${c.limit&&c.used!=null?(Number(c.used)/Number(c.limit)*100).toFixed(0)+'%':'-'}</td></tr>`);
-     h+=T('담보 제공',['제공자산','담보권자','금액(억)','목적'],ns.collateral_provided,c=>`<tr><td>${esc(c.asset)}</td><td style="font-weight:400;background:#fff!important;color:inherit">${esc(c.secured_party)}</td><td class="n">${A(c.amount)}</td><td>${esc(c.purpose)}</td></tr>`);
-     h+=T('지급보증 제공',['피보증인','채권자','금액(억)','비고'],ns.guarantees_provided,g=>`<tr><td>${esc(g.beneficiary)}</td><td style="font-weight:400;background:#fff!important;color:inherit">${esc(g.creditor)}</td><td class="n">${A(g.amount)}</td><td>${esc(g.note)}</td></tr>`);
+     if(mpt) h+=`<div class="src" style="margin:4px 0 2px"><b>차입금 만기구조</b> (억원)</div><div class="twrap"><table class="ft"><tr><th class="n">1년 이내</th><th class="n">1~2년</th><th class="n">2~5년</th><th class="n">5년 초과</th><th class="n">합계</th></tr><tr>${mpv.map(v=>`<td class="n">${A(v)}${mpt?` <small style="color:var(--mute)">(${(Number(v||0)/mpt*100).toFixed(0)}%)</small>`:''}</td>`).join('')}<td class="n"><b>${A(mpt)}</b></td></tr></table></div>`;
+     h+=T('차입금·사채 명세',['구분','차입처','금리(%)','만기','금액(억)','담보·보증'],ns.borrowings,b=>`<tr><td>${esc(b.type)}</td><td>${esc(b.lender)}</td><td class="n">${b.rate_pct==null?'-':esc(b.rate_pct)}</td><td>${esc(b.maturity)}</td><td class="n">${A(b.amount)}</td><td>${esc(b.secured)}</td></tr>`);
+     h+=T('약정 한도',['은행','종류','한도(억)','사용(억)','소진율'],ns.credit_lines,c=>`<tr><td>${esc(c.bank)}</td><td>${esc(c.type)}</td><td class="n">${A(c.limit)}</td><td class="n">${A(c.used)}</td><td class="n">${c.limit&&c.used!=null?(Number(c.used)/Number(c.limit)*100).toFixed(0)+'%':'-'}</td></tr>`);
+     h+=T('담보 제공',['제공자산','담보권자','금액(억)','목적'],ns.collateral_provided,c=>`<tr><td>${esc(c.asset)}</td><td>${esc(c.secured_party)}</td><td class="n">${A(c.amount)}</td><td>${esc(c.purpose)}</td></tr>`);
+     h+=T('지급보증 제공',['피보증인','채권자','금액(억)','비고'],ns.guarantees_provided,g=>`<tr><td>${esc(g.beneficiary)}</td><td>${esc(g.creditor)}</td><td class="n">${A(g.amount)}</td><td>${esc(g.note)}</td></tr>`);
      h+=T('보증 수혜',['보증인','금액(억)','비고'],ns.guarantees_received,g=>`<tr><td>${esc(g.guarantor)}</td><td class="n">${A(g.amount)}</td><td>${esc(g.note)}</td></tr>`);
-     h+=T('소송',['지위','내용','금액(억)','진행'],ns.litigation,l=>`<tr><td>${esc(l.role)}</td><td style="font-weight:400;background:#fff!important;color:inherit;white-space:normal">${esc(l.desc)}</td><td class="n">${A(l.amount)}</td><td>${esc(l.status)}</td></tr>`);
+     h+=T('소송',['지위','내용','금액(억)','진행'],ns.litigation,l=>`<tr><td>${esc(l.role)}</td><td style="white-space:normal">${esc(l.desc)}</td><td class="n">${A(l.amount)}</td><td>${esc(l.status)}</td></tr>`);
      if(ns.other_commitments&&ns.other_commitments.length) h+=`<div class="src" style="margin:8px 0 2px"><b>기타 약정·우발</b></div><ul style="margin:0 0 0 18px;padding:0;font-size:12.5px">${ns.other_commitments.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
      if(ns.summary_md) h+=`<div style="margin:10px 0 0;padding:8px 12px;border:1px solid var(--line);background:var(--panel);border-radius:6px;font-size:12.5px;white-space:pre-wrap">${esc(ns.summary_md)}</div>`;
    }
@@ -725,7 +733,7 @@ async function open(code){
         </svg><div class="src" style="margin:0 0 6px">${foot}</div></div>`})()}`;
     // 대주주 담보제공 · 대량보유 변동 (5% 보고)
     {const mr=d.major_reports||[];
-     h+=`<div class="g2c" style="margin:10px 16px 0;grid-template-columns:1fr">
+     h+=`<div class="g2c mhide" style="margin:10px 16px 0;grid-template-columns:1fr">
      <div><div class="cap2">대주주 담보제공 · 대량보유 변동 <span class="src" style="font-weight:400">5% 이상 보고자 기준</span></div>
       ${mr.length?`<div class="twrap"><table><tr><th>공시일</th><th>보고자</th><th>사유</th><th class="n">보유비율</th><th class="n">증감</th><th class="n">약정(담보 등)</th><th></th></tr>${mr.slice(0,8).map(r=>`<tr><td>${r.rcept_dt}</td><td>${esc(r.repror||'')}</td><td>${esc(r.report_resn||'')}</td><td class="n">${pct(r.stkrt)}</td><td class="n ${r.stkrt_irds<0?'neg':''}">${r.stkrt_irds!=null?(r.stkrt_irds>0?'+':'')+r.stkrt_irds+'%p':'-'}</td><td class="n">${r.ctr_stkrt?`<span class="warn">${pct(r.ctr_stkrt)}</span>`:'-'}</td><td><a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">보고서</a></td></tr>`).join('')}</table></div><div class="src" style="margin-top:4px">약정 = 보고서의 '주요체결약정' 주식 비율(담보제공·대차 등). 상대방·종류는 보고서 본문 확인 · 5% 미만 주주의 담보제공은 공시 의무 없음</div>`:'<div class="src">대량보유 보고 미수집(biz 작업 후 표시)</div>'}</div></div>`;}}
   else h+=`<div class="src">주가 미수집</div>`;
@@ -781,7 +789,7 @@ async function open(code){
    nav.onclick=e=>{const b=e.target.closest('button'); if(!b) return; nav.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
      if(b.dataset.go==='top'){window.scrollTo({top:0,behavior:'smooth'});return;} const sec=document.getElementById(b.dataset.go); sec.classList.remove('fold'); fitTables(); sec.scrollIntoView({behavior:'smooth',block:'start'});};
    $('#mback').onclick=()=>{document.body.classList.remove('mdet'); cur=null; history.replaceState(null,'',location.pathname+location.search); const r=document.querySelector(`.row[data-c="${code}"]`); if(r) r.scrollIntoView({block:'center'});};
-   document.querySelectorAll('[data-mfs]').forEach(b=>b.onclick=()=>{const w=document.querySelector('.fin2col.m2'); if(!w) return; w.dataset.m=b.dataset.mfs; document.querySelectorAll('[data-mfs]').forEach(x=>x.setAttribute('aria-pressed',x===b?'true':'false')); fitTables();});
+   document.querySelectorAll('[data-mfs]').forEach(b=>b.onclick=()=>{const seg=b.closest('.mseg'); let w=seg.nextElementSibling; while(w&&!w.classList.contains('fin2col')) w=w.nextElementSibling; if(!w) return; w.dataset.m=b.dataset.mfs; seg.querySelectorAll('[data-mfs]').forEach(x=>x.setAttribute('aria-pressed',x===b?'true':'false')); fitTables();});
    window.__qend=()=>document.querySelectorAll('.qsv,.sim').forEach(e=>{e.scrollLeft=e.scrollWidth;}); setTimeout(window.__qend,50);
    const fm=document.querySelector('.fmore'); if(fm) fm.onclick=()=>{document.querySelector('.fcards.mclip')?.classList.remove('mclip'); fm.remove();};}
   fitTables();
