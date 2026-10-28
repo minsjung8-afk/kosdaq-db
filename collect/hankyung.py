@@ -84,17 +84,28 @@ def collect_list(period="y1", per_page="200", max_pages=None, headless=True):
         print(f"[hk] 목록 {len(rows)}건 수집(1쪽) · 전체 {last_page}쪽", flush=True)
         if max_pages:
             last_page = min(last_page, max_pages)
+        import re as _re
+        cur_page = lambda: int((_re.search(r"[?&]page=(\d+)", on_response.url or "") or [0, 1])[1])
         page = 1
         while page < last_page:
             page += 1
-            link = pg.locator(f"a:text-is('{page}')")
-            if link.count() == 0:
-                nxt = pg.locator("a:has-text('다음'), a[class*=next]")
+            pg_box = pg.locator(".report-paging, .paging, .pagination, [class*=paging]")
+            pager = pg_box.last if pg_box.count() else pg
+            link = pager.locator(f"a:text-is('{page}')")
+            if link.count() == 0:              # 쪽 번호가 다음 묶음에 있음 → '다음' 화살표로 묶음 이동 후 다시 찾기(2026-10-28: 11쪽 이후 누락 수정)
+                nxt = pager.locator("a:has-text('다음'), a[class*=next], button[class*=next]")
                 if nxt.count() == 0:
+                    print(f"[hk] {page}쪽 이동 버튼 없음 — 중단", flush=True)
                     break
                 nxt.first.click()
-            else:
-                link.first.click()
+                pg.wait_for_timeout(int(PAUSE * 1000))
+                if cur_page() == page:
+                    continue
+                link = pager.locator(f"a:text-is('{page}')")
+                if link.count() == 0:
+                    print(f"[hk] {page}쪽 링크 없음(현재 {cur_page()}쪽) — 중단", flush=True)
+                    break
+            link.first.click()
             pg.wait_for_timeout(int(PAUSE * 1000))
         br.close()
     print(f"[hk] 목록 총 {len(rows)}건", flush=True)
