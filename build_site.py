@@ -791,6 +791,8 @@ def build():
             import fin_notes
             fin_notes.fix_ltm(d["kpi"])
             d["fin_notes"] = fin_notes.build(d, c)
+            import fin_ai                      # AI 종합 의견·원인(Haiku) — 현재 특이사항과 같은 근거로 만든 것만
+            d["fin_ai"] = fin_ai.view(con, c["corp_code"], d["fin_notes"], d["kpi"].get("CFS") or d["kpi"].get("OFS") or [])
         except Exception as e:  # noqa
             d["fin_notes"] = []
             print(f"[site] 특이사항 실패 {c.get('corp_name')}: {e}")

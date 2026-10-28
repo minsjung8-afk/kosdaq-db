@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -311,6 +311,9 @@ def main():
                     __import__("summarize").run_unlisted(set(new), model="haiku")
                 except Exception as e:  # noqa
                     print(f"[unlisted_add] 요약 오류: {e}", flush=True)
+    if a.job == "fin_ai":                    # 재무 특이사항 AI 보강(Haiku, 예산 FIN_AI_BUDGET 기본 60달러) — 2026-10-28
+        import fin_ai
+        fin_ai.run(set(a.codes) if a.codes else None, limit=a.limit, force=a.force)
     if a.job == "filer_scan":                # 사업보고서 제출 비상장사 전수 명단(드라이런, DB 변경 없음 → unlisted_candidates.csv 아티팩트, 2026-10-28)
         __import__("annual_filers").run(limit=a.limit)
     if a.job == "interim_doc":               # 분기·반기보고서 본문 재무제표 → fin_raw (XBRL 없는 사업보고서 제출 비상장사, 2026-10-26)
