@@ -6,7 +6,7 @@
 
 절차
   ① scan: DART 공시검색 '외부감사관련'(F) 감사보고서·연결감사보고서, 법인구분 기타(E), 최근 14개월 → 회사별 최신 보고서
-     (DB에 이미 있는 회사, 사업보고서 제출사 명단(filer_candidate)은 제외). 명단은 audit_candidate 표에 쌓고 20일 안에 다시 훑지 않음
+     (DB에 이미 있는 회사, 사업보고서 제출사 명단(filer_candidate)은 제외). 명단은 3개월 구간마다 audit_candidate 표에 저장(끊겨도 남은 구간부터), 20일 안에 같은 구간은 다시 훑지 않음
   ② screen: 자본총계 미확인 회사의 감사보고서 본문(1콜) → 재무상태표 자본총계. 연결감사보고서가 있으면 연결, 없으면 별도
      순서: 연결감사보고서 제출사 먼저(대체로 규모가 큼) → 나머지. DART 한도 도달 시 중단 → 다음 실행에서 이어감
   ③ eligible: 자본총계 500억↑ · 일반기업 또는 여전사 · DB 미등록 → unlisted_add --type 감사보고서 가 큰 순으로 읽음
@@ -30,6 +30,7 @@ RPT = re.compile(r"^(\[[^\]]*\]\s*)?(연결)?감사보고서\s*\((\d{4})\.(\d{2}
 def _ensure(con):
     con.execute("""CREATE TABLE IF NOT EXISTS audit_candidate (corp_code TEXT PRIMARY KEY, name TEXT, grp TEXT, fy TEXT,
                    rcept_ofs TEXT, rcept_cfs TEXT, equity REAL, eq_src TEXT, scanned_at TEXT, screened_at TEXT)""")
+    con.execute("CREATE TABLE IF NOT EXISTS audit_scan_win (win TEXT PRIMARY KEY, at TEXT)")
 
 
 def _windows(months):
@@ -45,17 +46,17 @@ def _windows(months):
 
 def scan(con, months=14):
     _ensure(con)
-    last = con.execute("SELECT MAX(scanned_at) FROM audit_candidate").fetchone()[0]
-    if last and last >= (date.today() - timedelta(days=20)).isoformat():
-        print(f"[audit_scan] 명단은 {last} 수집분 사용(20일 내)", flush=True)
-        return
     have = {r[0] for r in con.execute("SELECT corp_code FROM company")}
     try:
         have |= {r[0] for r in con.execute("SELECT corp_code FROM filer_candidate")}
     except Exception:  # noqa
         pass
-    found = {}
+    done = {r[0] for r in con.execute("SELECT win FROM audit_scan_win WHERE at >= ?", ((date.today() - timedelta(days=20)).isoformat(),))}
     for b, e in _windows(months):
+        found = {}
+        win = f"{b}~{e}"
+        if win in done:                                    # 2026-10-29: 구간별로 저장 — 제한 시간에 끊겨도 다음 실행은 남은 구간부터
+            continue
         page = 1
         while True:
             js = dart_get("list", bgn_de=b.strftime("%Y%m%d"), end_de=e.strftime("%Y%m%d"), corp_cls="E", pblntf_ty="F",
@@ -77,17 +78,28 @@ def scan(con, months=14):
             if page >= tp:
                 break
             page += 1
+        _save(con, found, have)
+        con.execute("INSERT OR REPLACE INTO audit_scan_win VALUES (?, date('now'))", (win,))
+        con.commit()
+    from collections import Counter
+    rows = con.execute("SELECT grp, rcept_cfs FROM audit_candidate").fetchall()
+    print(f"[audit_scan] 감사보고서 제출 비상장 {len(rows)}사(DB·사업보고서 제출사 제외) · " + " · ".join(f"{k} {n}" for k, n in Counter(r[0] for r in rows).most_common())
+          + f" · 연결감사보고서 {sum(1 for r in rows if r[1])}사", flush=True)
+
+
+def _save(con, found, have):
+    old = {r[0]: r[1] for r in con.execute("SELECT corp_code, fy FROM audit_candidate")}
+    for cc, v in list(found.items()):                    # 앞 구간에 이미 더 최근 사업연도가 저장돼 있으면 덮지 않음
+        if cc in have or (old.get(cc) or "") > v["fy"]:
+            found.pop(cc)
     rows = [(cc, v["name"], classify(v["name"]), v["fy"], v["OFS"], v["CFS"]) for cc, v in found.items()]
     con.executemany("""INSERT INTO audit_candidate (corp_code, name, grp, fy, rcept_ofs, rcept_cfs, scanned_at) VALUES (?,?,?,?,?,?,date('now'))
                        ON CONFLICT(corp_code) DO UPDATE SET name=excluded.name, grp=excluded.grp, scanned_at=excluded.scanned_at,
                        equity=CASE WHEN audit_candidate.fy=excluded.fy THEN audit_candidate.equity END,
                        eq_src=CASE WHEN audit_candidate.fy=excluded.fy THEN audit_candidate.eq_src END,
                        screened_at=CASE WHEN audit_candidate.fy=excluded.fy THEN audit_candidate.screened_at END,
-                       fy=excluded.fy, rcept_ofs=excluded.rcept_ofs, rcept_cfs=excluded.rcept_cfs""", rows)
-    con.commit()
-    from collections import Counter
-    print(f"[audit_scan] 감사보고서 제출 비상장 {len(rows)}사(DB·사업보고서 제출사 제외) · " + " · ".join(f"{k} {n}" for k, n in Counter(r[2] for r in rows).most_common())
-          + f" · 연결감사보고서 {sum(1 for r in rows if r[5])}사", flush=True)
+                       fy=excluded.fy, rcept_ofs=COALESCE(excluded.rcept_ofs, CASE WHEN audit_candidate.fy=excluded.fy THEN audit_candidate.rcept_ofs END),
+                       rcept_cfs=COALESCE(excluded.rcept_cfs, CASE WHEN audit_candidate.fy=excluded.fy THEN audit_candidate.rcept_cfs END)""", rows)
 
 
 def _equity(rc, fs):
