@@ -787,6 +787,13 @@ def build():
         MANUAL = set()
     for c in q(con, "SELECT * FROM company ORDER BY corp_name"):
         d = company_detail(con, c)
+        try:                                   # 재무 특이사항(규칙 기반) + 반기·분기 순차입금/EBITDA LTM 보정(2026-10-28)
+            import fin_notes
+            fin_notes.fix_ltm(d["kpi"])
+            d["fin_notes"] = fin_notes.build(d, c)
+        except Exception as e:  # noqa
+            d["fin_notes"] = []
+            print(f"[site] 특이사항 실패 {c.get('corp_name')}: {e}")
         _rows = d["kpi"].get("CFS") or d["kpi"].get("OFS") or [{}]
         k = next((r for r in reversed(_rows) if r.get("kind") == "annual"), _rows[-1])   # 검색 인덱스는 최근 연간 기준
         ps = d["price_summary"] or {}
