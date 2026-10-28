@@ -98,6 +98,52 @@ def equity_of(cc, rcept_no, report_nm):
     return None, fy, "자본총계 못 찾음"
 
 
+# 2026-10-28 사용자 결정: 금융 중 여전사(캐피탈·카드·리스·할부)만 추가 — 은행·보험·증권·자산운용·금융지주 제외, 애매한 곳은 명단만 보여 판단
+YEO = re.compile(r"캐피탈|카드|리스|할부|커머셜|파이낸셜|파이낸스|Capital|Card", re.I)
+YEO_EX = re.compile(r"은행|뱅크|생명|화재|손해|보험|증권|자산운용|운용|금융지주|지주|저축|신탁|종금|종합금융|대부|라이프|투자증권", re.I)
+
+
+def yeo_class(name):
+    """금융 후보 → '여전사' | '제외' | '애매'"""
+    nm = name or ""
+    if YEO_EX.search(nm):
+        return "제외"
+    if YEO.search(nm):
+        return "여전사"
+    return "애매"
+
+
+def eligible(con):
+    """추가 대상(자본총계 500억↑ · DB 미등록): 일반기업 전부 + 금융 중 여전사. → [(corp_code, name, grp, equity, eq_src)] 큰 순"""
+    rows = con.execute("""SELECT corp_code, name, grp, equity, eq_src FROM filer_candidate WHERE grp IN ('일반기업','금융') AND equity >= 5e10
+                          AND corp_code NOT IN (SELECT corp_code FROM company) ORDER BY equity DESC""").fetchall()
+    return [r for r in rows if r[2] == "일반기업" or yeo_class(r[1]) == "여전사"]
+
+
+def pilot(con):
+    """시범 10곳: XBRL 일반기업 5 · 본문 파싱 일반기업 3 · 여전사 2 (각 자본총계 큰 순)"""
+    el = eligible(con)
+    x = [r for r in el if r[2] == "일반기업" and (r[4] or "").startswith("XBRL")][:5]
+    d = [r for r in el if r[2] == "일반기업" and (r[4] or "").startswith("본문")][:3]
+    y = [r for r in el if r[2] == "금융"][:2]
+    return x + d + y
+
+
+def preview(con):
+    """DB 변경 없음: 금융 분류(포함·제외·애매) + 전체 대상 수 + 시범 10곳"""
+    fin = con.execute("""SELECT corp_code, name, equity FROM filer_candidate WHERE grp='금융' AND equity >= 5e10
+                         AND corp_code NOT IN (SELECT corp_code FROM company) ORDER BY equity DESC""").fetchall()
+    for k in ("여전사", "애매", "제외"):
+        g = [r for r in fin if yeo_class(r[1]) == k]
+        print(f"[filer] 금융 {k} {len(g)}사: " + ", ".join(f"{r[1]}({r[2] / 1e8:,.0f})" for r in g), flush=True)
+    el = eligible(con)
+    src = Counter((r[4] or "?").split()[0] for r in el if r[2] == "일반기업")
+    print(f"[filer] 추가 대상 {len(el)}사 = 일반기업 {sum(1 for r in el if r[2] == '일반기업')}(재무 출처 " + " · ".join(f"{k} {n}" for k, n in src.items())
+          + f") + 여전사 {sum(1 for r in el if r[2] == '금융')}", flush=True)
+    for r in pilot(con):
+        print(f"  [시범] {r[0]}\t{r[1]}\t{r[2]}\t{r[3] / 1e8:,.0f}억\t{r[4]}", flush=True)
+
+
 def run(limit=None, months=22):
     con = connect()
     have = {r[0] for r in con.execute("SELECT corp_code FROM company")}
