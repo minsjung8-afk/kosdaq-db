@@ -320,10 +320,10 @@ def company_detail(con, c):
                                    FROM credit_rating r LEFT JOIN rating_valid v ON v.file_url = r.file_url WHERE r.corp_code=? ORDER BY r.disc_dt DESC""", cc)
                    or q(con, "SELECT agency, target_type, eval_kind, disc_dt, grade, watch, outlook, file_url FROM credit_rating WHERE corp_code=? ORDER BY disc_dt DESC", cc),   # valid_to: 평가서 기재 유효기간(2026-10-26)
         "events": q(con, "SELECT rcept_dt, flag, report_nm, rcept_no FROM disclosure_event WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 20", cc),
-        "reports": q(con, """SELECT m.pub_dt, m.source, m.publisher, m.analyst, m.title, m.url, m.opinion, m.target_price, m.old_target_price,
+        "reports": q(con, """SELECT m.pub_dt, m.source, m.publisher, m.analyst, m.title, m.url, m.pdf_url, m.opinion, m.target_price, m.old_target_price,
                              a.forecast_json, a.valuation_json, a.points_json, a.risks_json, a.memo_md
                              FROM report_meta m LEFT JOIN report_analysis a ON a.report_id=m.id
-                             WHERE m.stock_code=? ORDER BY m.pub_dt DESC LIMIT 12""", sc),
+                             WHERE m.stock_code=? ORDER BY m.pub_dt DESC LIMIT 20""", sc),
         "forecast_vs_actual": _fva(con, sc),
         "conv_bonds": [],
         "mezz_out": q(con, "SELECT * FROM mezz_outstanding WHERE corp_code=? ORDER BY kind, exprd_dd", cc),

@@ -398,7 +398,8 @@ def main():
                 except Exception:  # noqa
                     _c["v"] = set()
             return _c["v"]
-        steps = [("mezz", lambda: mezz.run(ccs, new_only=True)),
+        steps = [("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
+                 ("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
                  ("summarize", lambda: (__import__("summarize").run_all(None, model="haiku", force=False),
                                         __import__("summarize").run_unlisted(None, model="haiku", force=False))),   # 새로 받은 사업보고서만 Haiku 요약 + 사업보고서 없는 비상장사(감사보고서·신평서 기반)
