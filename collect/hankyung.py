@@ -27,7 +27,12 @@ def collect_list(period="y1", per_page="200", max_pages=None, headless=True):
 
     rows, seen = [], set()
     with sync_playwright() as p:
-        br = p.chromium.launch(headless=headless)
+        try:
+            br = p.chromium.launch(headless=headless)
+        except Exception:  # noqa  GitHub 러너: 브라우저 미설치 → 그 자리에서 설치 후 재시도(2026-10-28)
+            import subprocess, sys
+            subprocess.run([sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"], check=False)
+            br = p.chromium.launch(headless=headless)
         pg = br.new_page(locale="ko-KR")
         pg.set_default_timeout(30000)
 
