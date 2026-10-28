@@ -367,6 +367,7 @@ async function open(code){
        <tr><td>영업이익</td>${lt.map(q=>`<td class="n ${q.ltm_op<0?'neg':''}">${억(q.ltm_op)}</td>`).join('')}</tr>
        <tr><td>영업이익률</td>${lt.map(q=>`<td class="n">${pc(q.ltm_op,q.ltm_rev)}</td>`).join('')}</tr>
        <tr><td>매출원가율</td>${lt.map(q=>`<td class="n">${pc(q.ltm_cogs,q.ltm_rev)}</td>`).join('')}</tr>
+       <tr><td title="분기말 기준 · (−)는 순현금">순차입금 (분기말)</td>${lt.map(q=>`<td class="n ${q.nd<0?'neg':''}">${q.nd!=null?억(q.nd):'-'}</td>`).join('')}</tr>
        <tr><td>순차입금/LTM EBITDA</td>${lt.map(q=>`<td class="n">${q.nd!=null&&q.ltm_ebitda>0?(q.nd/q.ltm_ebitda).toFixed(1)+'x':(q.nd!=null&&q.ltm_op>0?'<span title="EBITDA 산출 불가 → 영업이익 기준">'+(q.nd/q.ltm_op).toFixed(1)+'x*</span>':'-')}</td>`).join('')}</tr></table></div>
        <div class="src" style="margin-top:4px">출처: DART 전체 재무제표 API(분기·반기·사업보고서, 손익은 누적 금액 기준) · * EBITDA 산출 불가 분기는 순차입금/LTM 영업이익</div>`;
    } else h+=`<div class="cap2" style="margin:14px 0 4px">최근 12분기 손익 추이 · LTM ${sel}<span class="src" style="font-weight:400">${fs==='CFS'?'연결':'별도'} 기준 — 분기 재무 수집 후 표시${Q[other]?' · '+(other==='CFS'?'연결':'별도')+' 기준은 있음':''}</span></div>`;
