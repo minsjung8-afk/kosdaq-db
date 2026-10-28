@@ -153,7 +153,7 @@ table.num td:first-child{width:28px;text-align:center;font-weight:700;color:var(
 .ptb{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;align-items:center}.ptb .sp{width:10px}.ptb .lbl{font-size:11px;color:var(--mute);margin-left:4px}
 a{color:var(--navy2)}
 /* 모바일 전용(2026-10-29 사용자 요청, 폭 760px 이하만 — PC 화면은 그대로): 목록 ↔ 상세 전환, 상단 고정 섹션 바, 2열 카드, 재무표 한 화면 폭 */
-#mbar,.mseg,.monly{display:none}
+#mbar,.monly{display:none}.mseg.fseg{display:none}
 @media (max-width:760px){
   html,body{height:auto}
   body{display:block;font-size:13.5px}
@@ -202,7 +202,7 @@ a{color:var(--navy2)}
   .sim svg{display:none}
   #qblk{overflow-x:auto}#qblk svg{min-width:620px}
   .fin2col{display:block}
-  .mseg{display:inline-flex;margin:0 0 8px}
+  .mseg.fseg{display:inline-flex;margin:0 0 8px}
   .fin2col.m2 .fsv{display:none}.fin2col.m2[data-m="OFS"] .fsv[data-fs="OFS"],.fin2col.m2[data-m="CFS"] .fsv[data-fs="CFS"]{display:block}
   .fin2col .twrap{border:0;border-radius:0}
   table.ft{font-size:11px;line-height:1.25}
