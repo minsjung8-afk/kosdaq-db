@@ -66,11 +66,10 @@ def _lease_share(bb_fs):
     return (lease / tot * 100 if tot else None), lease, cur, col.get("cash"), (col.get("k", {}).get("리스") or {}).get("유동") or 0
 
 
-def build(d, company):
+def _build_fs(d, company, fs, primary):
+    """한 기준(연결 또는 별도)으로 규칙 판정 → [{sev,title,text,rule,basis}] (정렬 전). primary=True인 기준에서만 감사의견 규칙"""
     kpi = d.get("kpi") or {}
-    fs = "CFS" if kpi.get("CFS") else ("OFS" if kpi.get("OFS") else None)
-    if not fs:
-        return []
+    BN = "연결" if fs == "CFS" else "별도"
     ks2 = (company.get("induty_code") or "")[:2]
     is_fin = ks2 in ("64", "65", "66")
     ann, cur, prev = _rows(kpi, fs)
@@ -83,8 +82,8 @@ def build(d, company):
     rl = (ref or {}).get("label") or (ref or {}).get("bsns_year") or ""
     N = []
 
-    def add(sev, title, text, rule):
-        N.append({"sev": sev, "title": title, "text": text, "rule": rule})
+    def add(sev, title, text, rule, basis=None):
+        N.append({"sev": sev, "title": title, "text": text, "rule": rule, "basis": basis or BN})
 
     g = lambda r, k: (r or {}).get(k)
     if now:
@@ -117,10 +116,10 @@ def build(d, company):
                     odr, dr = onow.get("debt_ratio"), now.get("debt_ratio")
                     if not is_fin and odr is not None and dr is not None and dr - odr >= 50:
                         t += f". 연결 부채비율 {_p(dr)} vs 별도 {_p(odr)}"
-                    add("warn", "종속회사가 이익을 깎음", t, "별도 영업이익 > 연결 영업이익(10% 이상 차이)")
+                    add("warn", "종속회사가 이익을 깎음", t, "별도 영업이익 > 연결 영업이익(10% 이상 차이)", "연결·별도 비교")
                 c1, c2 = _chg(rv, rv0), _chg(onow.get("revenue"), (obase or {}).get("revenue"))
                 if c1 is not None and c2 is not None and abs(c1 - c2) >= 20:
-                    add("info", "연결범위 변동 가능성", f"매출 증가율 연결 {c1:+.1f}% vs 별도 {c2:+.1f}% — 종속회사 편입·제외 여부를 사업보고서에서 확인, 전년 비교 시 유의", "연결·별도 매출 증가율 차 20%p 이상")
+                    add("info", "연결범위 변동 가능성", f"매출 증가율 연결 {c1:+.1f}% vs 별도 {c2:+.1f}% — 종속회사 편입·제외 여부를 사업보고서에서 확인, 전년 비교 시 유의", "연결·별도 매출 증가율 차 20%p 이상", "연결·별도 비교")
         # 현금흐름(연간 기준)
         if a1:
             cfo, fcf, capex = g(a1, "cfo"), g(a1, "fcf"), g(a1, "capex")
@@ -185,22 +184,81 @@ def build(d, company):
             add("warn", "차입금의존도 높음", f"{pl} 차입금의존도 {_p(bd)}", "차입금의존도 50% 이상")
         if ls and ls[0] is not None and ls[0] >= 40 and ls[1] > 1e10:
             add("info", "리스부채 비중 큼", f"리스부채 {_e(ls[1])} = 총차입금의 {ls[0]:.1f}%" + (f". 리스 제외 순차입금 {_e(nb - ls[1])}" if nb is not None else ""), "리스부채 비중 40% 이상")
+    # 양호·현황(2026-10-28 사용자 요청: 최소 3개 — 걸린 위험·주의가 적으면 양호 신호와 현황으로 채움)
+    if now:
+        rv, rv0, op, op0 = g(now, "revenue"), g(base, "revenue"), g(now, "op_income"), g(base, "op_income")
+        c = _chg(rv, rv0)
+        if c is not None and c >= 10:
+            add("good", "매출 성장", f"매출 {_e(rv0)}({bl}) → {_e(rv)}({pl}), {c:+.1f}%", "매출 +10% 이상")
+        if op is not None and op > 0 and op0 is not None and op0 < 0:
+            add("good", "영업흑자 전환", f"{pl} 영업이익 {_e(op)} (전년 동기 {_e(op0)})", "영업이익 적자→흑자")
+        elif rv and rv0 and op is not None and op0 is not None and op0 >= 0 and op / rv * 100 - op0 / rv0 * 100 >= 3:
+            add("good", "수익성 개선", f"영업이익률 {_p(op0 / rv0 * 100)}({bl}) → {_p(op / rv * 100)}({pl})", "영업이익률 3%p 이상 상승")
+        if not is_fin:
+            dr, nb = g(now, "debt_ratio"), g(now, "net_borrowings")
+            if nb is not None and nb < 0:
+                add("good", "순현금", f"{pl} 현금성자산이 총차입금보다 {_e(-nb)} 많음 (순차입금 {_e(nb)})", "순차입금 < 0")
+            if dr is not None and 0 <= dr < 100:
+                add("good", "낮은 부채비율", f"{pl} 부채비율 {_p(dr)}", "부채비율 100% 미만")
+            ic = g(a1, "interest_cover")
+            if ic is not None and ic >= 10 and (g(a1, "int_exp") or 0) > 0:
+                add("good", "이자 부담 낮음", f"{a1['bsns_year']} EBITDA/이자비용 {ic:.1f}x", "EBITDA/이자비용 10배 이상")
+        if a1 and (g(a1, "cfo") or 0) > 0 and (g(a1, "fcf") or 0) > 0 and not is_fin:
+            add("good", "현금창출 양호", f"{a1['bsns_year']} 영업활동CF {_e(a1['cfo'])} · FCF {_e(a1['fcf'])}", "영업활동CF·FCF 모두 흑자")
+        # 현황(판정 아님 — 최소 개수 채움용)
+        if rv is not None:
+            add("fact", "매출·수익성 현황", f"{pl} 매출 {_e(rv)}" + (f" (전년 동기 대비 {c:+.1f}%)" if c is not None else "") + (f" · 영업이익 {_e(op)} · 이익률 {_p(op / rv * 100)}" if op is not None and rv else ""), "현황")
+        if not is_fin and g(now, "debt_ratio") is not None:
+            nde = g(now, "nd_ebitda")
+            add("fact", "레버리지 현황", f"{pl} 부채비율 {_p(g(now, 'debt_ratio'))} · 순차입금 {_e(g(now, 'net_borrowings'))}" + (f" · 순차입금/{'LTM ' if cur else ''}EBITDA {nde:.1f}x" if nde is not None else ""), "현황")
+        if not is_fin and g(now, "cur_ratio") is not None:
+            add("fact", "유동성 현황", f"{pl} 유동비율 {_p(g(now, 'cur_ratio'))} · 현금성자산 {_e(g(now, 'cash'))}", "현황")
+        if a1 and g(a1, "cfo") is not None:
+            add("fact", "현금흐름 현황", f"{a1['bsns_year']} 영업활동CF {_e(a1['cfo'])} · Capex {_e(g(a1, 'capex'))} · FCF {_e(g(a1, 'fcf'))}", "현황")
     # 감사의견
-    au = (d.get("audit") or [None])[0]
+    au = (d.get("audit") or [None])[0] if primary else None
     if au:
         op_ = au.get("adt_opinion") or ""
         if op_ and "적정" not in op_.replace("부적정", "") or "부적정" in op_ or "한정" in op_ or "거절" in op_:
-            add("bad", "감사의견 비적정", f"{au.get('bsns_year')} {op_} ({au.get('adtor') or '-'})", "감사의견 적정 아님")
+            add("bad", "감사의견 비적정", f"{au.get('bsns_year')} {op_} ({au.get('adtor') or '-'})", "감사의견 적정 아님", "감사보고서")
         if "계속기업" in (au.get("emphs_matter") or ""):
-            add("bad", "계속기업 불확실성", f"{au.get('bsns_year')} 강조사항에 계속기업 관련 기재", "감사보고서 강조사항 '계속기업'")
-    order = {"bad": 0, "warn": 1, "info": 2}
-    seen, out = set(), []
-    for n in sorted(N, key=lambda n: order[n["sev"]]):
-        if n["title"] in seen:
-            continue
-        seen.add(n["title"])
-        out.append(n)
-    return out[:10]
+            add("bad", "계속기업 불확실성", f"{au.get('bsns_year')} 강조사항에 계속기업 관련 기재", "감사보고서 강조사항 '계속기업'", "감사보고서")
+    return N
+
+
+def build(d, company, min_n=3, max_n=10):
+    """연결·별도 각각 판정 후 합침. 같은 항목이 둘 다 걸리면 basis='연결·별도'(별도 내용은 text_ofs).
+    순서: 위험 > 주의 > 참고 > 양호 > 현황. 최소 min_n개(위험·주의·참고·양호가 모자라면 현황으로 채움), 최대 max_n개."""
+    kpi = d.get("kpi") or {}
+    fss = [f for f in ("CFS", "OFS") if kpi.get(f)]
+    if not fss:
+        return []
+    per = {f: _build_fs(d, company, f, f == fss[0]) for f in fss}
+    merged, idx = [], {}
+    for f in fss:
+        for n in per[f]:
+            k = n["title"]
+            if k in idx and n["basis"] in ("연결", "별도"):
+                m = idx[k]
+                if m["basis"] in ("연결", "별도") and m["basis"] != n["basis"]:
+                    m["basis"] = "연결·별도"
+                    m["text_ofs"] = n["text"]
+                    order = {"bad": 0, "warn": 1, "info": 2, "good": 3, "fact": 4}
+                    if order[n["sev"]] < order[m["sev"]]:
+                        m["sev"] = n["sev"]
+                continue
+            if k in idx:
+                continue
+            idx[k] = dict(n)
+            merged.append(idx[k])
+    order = {"bad": 0, "warn": 1, "info": 2, "good": 3, "fact": 4}
+    merged.sort(key=lambda n: order[n["sev"]])
+    judged = [n for n in merged if n["sev"] != "fact"]
+    facts = [n for n in merged if n["sev"] == "fact"]
+    out = judged[:max_n]
+    if len(out) < min_n:
+        out += facts[:min_n - len(out)]
+    return out
 
 
 def _x(v):
