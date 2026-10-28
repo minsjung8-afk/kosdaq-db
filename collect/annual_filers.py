@@ -99,7 +99,7 @@ def equity_of(cc, rcept_no, report_nm):
 
 
 # 2026-10-28 사용자 결정: 금융 중 여전사(캐피탈·카드·리스·할부)만 추가 — 은행·보험·증권·자산운용·금융지주 제외, 애매한 곳은 명단만 보여 판단
-YEO = re.compile(r"캐피탈|카드|리스|할부|커머셜|파이낸셜|파이낸스|Capital|Card", re.I)
+YEO = re.compile(r"캐피탈|카드|리스|할부|커머셜|파이낸셜|파이낸스|에프앤아이|F&I|Capital|Card", re.I)   # 2026-10-28 사용자 결정: 에프앤아이(NPL 투자사)도 포함
 YEO_EX = re.compile(r"은행|뱅크|생명|화재|손해|보험|증권|자산운용|운용|금융지주|지주|저축|신탁|종금|종합금융|대부|라이프|투자증권", re.I)
 
 
@@ -121,12 +121,13 @@ def eligible(con):
 
 
 def pilot(con):
-    """시범 10곳: XBRL 일반기업 5 · 본문 파싱 일반기업 3 · 여전사 2 (각 자본총계 큰 순)"""
+    """시범: XBRL 일반기업 5 · 본문 파싱 일반기업 3 · 여전사 2 (각 자본총계 큰 순) + 에프앤아이 전부"""
     el = eligible(con)
     x = [r for r in el if r[2] == "일반기업" and (r[4] or "").startswith("XBRL")][:5]
     d = [r for r in el if r[2] == "일반기업" and (r[4] or "").startswith("본문")][:3]
     y = [r for r in el if r[2] == "금융"][:2]
-    return x + d + y
+    fi = [r for r in el if r[2] == "금융" and re.search(r"에프앤아이|F&I", r[1], re.I) and r not in y]   # 에프앤아이 전부(2026-10-28 사용자 요청)
+    return x + d + y + fi
 
 
 def preview(con):
