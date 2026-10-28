@@ -452,6 +452,18 @@ def main():
         notes_v2.run(set(ccs) if a.codes else None, limit=a.limit, con=con)
         print("KPI 재계산:", __import__("financials").rebuild_kpi_all(con), "건", flush=True)
     if a.job == "rawdump":                    # 진단: 지정 종목의 fin_raw 손익 행(연결·별도, 최근 분기)을 로그에 출력 — DART 호출 없음
+        if a.type == "손익전체":            # 2026-10-28 금융업 매출(영업수익) 미매핑 진단: 최근 사업보고서 손익 계정 전부(account_id·계정명·금액)
+            for cc, sc in pairs:
+                print(f"=== {sc} {cc} 손익전체", flush=True)
+                for fs in ("CFS", "OFS"):
+                    y = con.execute("SELECT MAX(bsns_year) FROM fin_raw WHERE corp_code=? AND reprt_code='11011' AND fs_div=?", (cc, fs)).fetchone()[0]
+                    for r in con.execute("""SELECT bsns_year, fs_div, sj_div, account_id, account_nm, thstrm_amount FROM fin_raw WHERE corp_code=? AND reprt_code='11011'
+                                            AND fs_div=? AND bsns_year=? AND sj_div IN ('IS','CIS') ORDER BY sj_div, ord LIMIT 45""", (cc, fs, y)):
+                        print("  ", tuple(r), flush=True)
+                for r in con.execute("""SELECT bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm, thstrm_amount FROM fin_raw WHERE corp_code=? AND reprt_code<>'11011'
+                                        AND bsns_year>='2026' AND sj_div IN ('IS','CIS') ORDER BY fs_div, sj_div, ord LIMIT 30""", (cc,)):
+                    print("   Q", tuple(r), flush=True)
+            pairs = []
         for cc, sc in pairs:
             print(f"=== {sc} {cc}", flush=True)
             for r in con.execute("""SELECT bsns_year, reprt_code, fs_div, sj_div, account_nm, thstrm_amount, frmtrm_amount, rcept_no FROM fin_raw
