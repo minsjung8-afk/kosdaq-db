@@ -199,8 +199,8 @@ a{color:var(--navy2)}
   .mat{grid-template-columns:repeat(2,1fr)}
   #px{height:300px}
   .ptb .lbl:last-child{display:none}
-  .sim svg{display:none}
-  #qblk{overflow-x:auto}#qblk svg{min-width:620px}
+  .sim{overflow-x:auto}.sim svg{min-width:720px}
+  .qsv{overflow-x:auto;-webkit-overflow-scrolling:touch}.qsv svg{min-width:980px}
   .fin2col{display:block}
   .mseg.fseg{display:inline-flex;margin:0 0 8px}
   .fin2col.m2 .fsv{display:none}.fin2col.m2[data-m="OFS"] .fsv[data-fs="OFS"],.fin2col.m2[data-m="CFS"] .fsv[data-fs="CFS"]{display:block}
@@ -467,8 +467,8 @@ async function open(code){
         <line x1="${L+410}" y1="${T-11}" x2="${L+430}" y2="${T-11}" stroke="#b8862f" stroke-width="2" stroke-dasharray="6 3"/><text x="${L+434}" y="${T-7}">${ann?'연말':'분기말'} 순차입금(억, 별도 축)</text></g></svg>`;
      const lt=qs.filter(q=>q.ltm_rev!=null), RN={'11011':'사업','11012':'반기','11013':'1분기','11014':'3분기'};
      const pc=(a,b)=>a!=null&&b?(a/b*100).toFixed(1)+'%':'-';
-     if(ann) h+=`<div class="cap2" style="margin:14px 0 4px">최근 ${qs.length}개년 연간 손익 추이 ${sel}<span class="src" style="font-weight:400">${fs==='CFS'?'연결':'별도'} 기준 · 억원 · 분기 재무가 없어 연간(감사보고서·사업보고서) 기준으로 표시</span></div>${(d.fs_break||{})[fs]?`<div class="src" style="color:var(--bad);margin:0 0 4px">⚠ ${(d.fs_break||{})[fs]}년 이전은 합병·분할 등으로 법인이 달라 이후 연도와 직접 비교할 수 없습니다(다음 해 감사보고서의 전기 금액과 불일치) — 흐리게 표시</div>`:''}${g}`;
-     else h+=`<div class="cap2" style="margin:14px 0 4px">최근 ${qs.length}분기 손익 추이 · LTM ${sel}<span class="src" style="font-weight:400">${fs==='CFS'?'연결':'별도'} 기준${fsNote} · 억원 · 분기값 = 누적 차감(2Q=반기−1Q, 4Q=연간−3Q누적)</span></div>${g}`;
+     if(ann) h+=`<div class="cap2" style="margin:14px 0 4px">최근 ${qs.length}개년 연간 손익 추이 ${sel}<span class="src" style="font-weight:400">${fs==='CFS'?'연결':'별도'} 기준 · 억원 · 분기 재무가 없어 연간(감사보고서·사업보고서) 기준으로 표시</span></div>${(d.fs_break||{})[fs]?`<div class="src" style="color:var(--bad);margin:0 0 4px">⚠ ${(d.fs_break||{})[fs]}년 이전은 합병·분할 등으로 법인이 달라 이후 연도와 직접 비교할 수 없습니다(다음 해 감사보고서의 전기 금액과 불일치) — 흐리게 표시</div>`:''}<div class="qsv">${g}</div><div class="src monly">← 그래프를 옆으로 밀면 이전 기간</div>`;
+     else h+=`<div class="cap2" style="margin:14px 0 4px">최근 ${qs.length}분기 손익 추이 · LTM ${sel}<span class="src" style="font-weight:400">${fs==='CFS'?'연결':'별도'} 기준${fsNote} · 억원 · 분기값 = 누적 차감(2Q=반기−1Q, 4Q=연간−3Q누적)</span></div><div class="qsv">${g}</div><div class="src monly">← 그래프를 옆으로 밀면 이전 분기</div>`;
      if(lt.length) h+=`<div class="twrap" style="margin-top:6px"><table class="fin"><tr><th>LTM(최근 4분기 합산)</th>${lt.map(q=>`<th class="n">${q.label}</th>`).join('')}</tr>
        <tr><td>매출액</td>${lt.map(q=>`<td class="n">${억(q.ltm_rev)}</td>`).join('')}</tr>
        <tr><td>영업이익</td>${lt.map(q=>`<td class="n ${q.ltm_op<0?'neg':''}">${억(q.ltm_op)}</td>`).join('')}</tr>
@@ -482,7 +482,7 @@ async function open(code){
   {const Q=d.quarters||{}; const lastLbl=a=>{const v=(a||[]).filter(x=>x.rev!=null); return v.length?v[v.length-1].label:''};
    // 기본 연결. 연결이 없거나 연결 작성이 끊겨(연결대상 소멸) 별도가 더 최근이면 별도
    const fs0=Q.CFS&&!(Q.OFS&&lastLbl(Q.OFS)>lastLbl(Q.CFS))?'CFS':(Q.OFS?'OFS':(d.kpi.CFS?'CFS':'OFS'));
-   window.__qsel=(v)=>{const el=document.getElementById('qblk'); if(el){el.innerHTML=qBlock(v); fitTables();}};
+   window.__qsel=(v)=>{const el=document.getElementById('qblk'); if(el){el.innerHTML=qBlock(v); fitTables(); window.__qend&&window.__qend();}};
    h+=`<div id="qblk">${qBlock(fs0)}</div>`;}
   const sh=d.shareholders||{};
   if((sh.top||[]).length){ h+=`<div class="src" style="margin-top:12px">주요 주주 (${sh.year} 사업보고서 기준, 지분율 상위 5명 · 최대주주측 ${sh.n}명)</div>
@@ -587,7 +587,7 @@ async function open(code){
       const fn=d.fin_notes||[]; const SV={bad:'위험',warn:'주의',info:'참고',good:'양호',fact:'현황'};
       const cnt=['bad','warn','info','good'].map(s=>[s,fn.filter(n=>n.sev===s).length]).filter(([,n])=>n).map(([s,n])=>`<span class="ftag ${s}">${SV[s]} ${n}</span>`).join('');
       const card=n=>{const cz=((d.fin_ai||{}).causes||[]).find(x=>x.title===n.title);
-        return `<div class="fcard ${n.sev}"><div class="fch"><span class="ftag ${n.sev}">${SV[n.sev]}</span>${n.basis?`<span class="fbasis">${esc(n.basis)}</span>`:''}</div><div class="ft1" title="규칙: ${esc(n.rule)}">${esc(n.title)}</div><div class="ft2">${n.text_ofs?'<b class="fbl">연결</b> ':''}${esc(n.text)}</div>${n.text_ofs?`<div class="ft2"><b class="fbl">별도</b> ${esc(n.text_ofs)}</div>`:''}${cz&&cz.cause?`<div class="ft2 fcause">원인(AI): ${esc(cz.cause)}</div>`:''}</div>`;};
+        return `<div class="fcard ${n.sev}"><div class="fch"><span class="ftag ${n.sev}">${SV[n.sev]}</span>${n.basis?`<span class="fbasis">${esc(n.basis)}</span>`:''}</div><div class="ft1" title="규칙: ${esc(n.rule)}">${esc(n.title)}</div><div class="ft2">${n.text_ofs?'<b class="fbl">연결</b> ':''}${esc(n.text)}</div>${n.text_ofs?`<div class="ft2"><b class="fbl">별도</b> ${esc(n.text_ofs)}</div>`:''}${cz&&cz.cause?`<div class="ft2 fcause">원인(AI): ${esc(cz.cause)}</div>`:''}${n.rule?`<div class="ft3 monly">규칙: ${esc(n.rule)}</div>`:''}</div>`;};
       const notes=`<div class="fnp"><div class="fnh"><b>재무 특이사항</b><span class="src">규칙 기반 자동 판정 · 카드마다 연결/별도 기준 표시 · 제목에 마우스를 올리면 판정 규칙</span><span class="fcnt">${cnt}</span></div>${d.fin_ai&&d.fin_ai.summary?`<div class="fai"><div class="fai-h"><b>AI 종합 의견</b><span class="src">Haiku · 표의 숫자와 손익계산서 계정만 근거 · ${esc((d.fin_ai.at||'').slice(0,10))}</span></div>${esc(d.fin_ai.summary)}</div>`:''}${fn.length?`<div class="fcards${fn.length>3?' mclip':''}">${fn.map(card).join('')}</div>${fn.length>3?`<button type="button" class="fmore monly">특이사항 ${fn.length-3}개 더 보기</button>`:''}`:'<div class="src" style="padding:12px 14px">재무 수치가 부족해 특이사항을 판정하지 못했습니다.</div>'}</div>`;
       // 2026-10-28 사용자 결정: 왼쪽 별도 · 오른쪽 연결 표 나란히(버튼 없음), 재무 특이사항은 표 아래 카드
       const order=[...bases].sort((a,b)=>a[0]==='OFS'?-1:1);
@@ -746,7 +746,7 @@ async function open(code){
      const rec=d.reports.filter(r=>String(r.pub_dt||'')>=cut), tp=rec.map(r=>r.target_price).filter(v=>v>0), px=(d.price_summary||{}).close;
      const avg=tp.length?tp.reduce((a,b)=>a+b,0)/tp.length:null;
      h+=`<div class="src" style="margin:0 0 6px">최근 3개월 리포트 <b>${rec.length}건</b>${avg?` · 평균 목표주가 <b>${num(Math.round(avg))}원</b> (최고 ${num(Math.max(...tp))} · 최저 ${num(Math.min(...tp))})${px?` · 현재가 ${num(px)}원 대비 ${upTag(avg)}`:''}`:''} · 최근 ${d.reports.length}건 표시 · 출처 한경컨센서스 · 제목 클릭 → 원문 페이지(한경 로그인 필요할 수 있음)</div>`;}
-    h+=`<div class="monly">${d.reports.map(r=>`<div class="mrep"><a class="t" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a><span class="m">${esc(String(r.pub_dt||''))} · ${esc(r.publisher||'-')}${r.analyst?' / '+esc(r.analyst):''} · ${esc(r.opinion||'-')}</span><span class="tp">${num(r.target_price)}${r.old_target_price&&r.old_target_price!==r.target_price?` <small style="color:var(--mute)">← ${num(r.old_target_price)}</small>`:''} ${upTag(r.target_price)}</span></div>`).join('')}</div>`;
+    h+=`<div class="monly">${d.reports.map(r=>`<div class="mrep"><a class="t" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a><span class="m">${esc(String(r.pub_dt||''))} · ${esc(r.publisher||'-')}${r.analyst?' / '+esc(r.analyst):''} · ${esc(r.opinion||'-')}${r.pdf_url?` · <a href="${esc(r.pdf_url)}" target="_blank" rel="noopener">PDF</a>`:''}</span><span class="tp">${num(r.target_price)}${r.old_target_price&&r.old_target_price!==r.target_price?` <small style="color:var(--mute)">← ${num(r.old_target_price)}</small>`:''} ${upTag(r.target_price)}</span></div>`).join('')}</div>`;
     h+=`<div class="twrap donly"><table><tr><th>일자</th><th>증권사 / 애널리스트</th><th>제목</th><th>의견</th><th class="n">목표가</th><th class="n" title="목표가 ÷ 최근 종가 − 1">상승여력</th></tr>${d.reports.map(r=>`<tr><td>${r.pub_dt}</td><td>${esc(r.publisher||'-')}${r.analyst?` / ${esc(r.analyst)}`:''}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>${r.pdf_url?` <a href="${esc(r.pdf_url)}" target="_blank" rel="noopener" class="src" title="PDF 원문(한경 로그인 필요할 수 있음)">PDF</a>`:''}</td><td>${esc(r.opinion||'-')}</td><td class="n">${num(r.target_price)}${r.old_target_price&&r.old_target_price!==r.target_price?`<br><small style="color:var(--mute)">← ${num(r.old_target_price)}</small>`:''}</td><td class="n">${upTag(r.target_price)}</td></tr>`).join('')}</table></div>`;
     const fva=d.forecast_vs_actual||[];
     if(fva.length){h+=`<div class="src" style="margin:12px 0 4px">전망 vs 실적 (억원, 달성률)</div><div class="twrap"><table><tr><th>발행</th><th>증권사</th><th>대상연도</th><th class="n">매출 전망</th><th class="n">실제</th><th class="n">달성</th><th class="n">영업이익 전망</th><th class="n">실제</th><th class="n">달성</th></tr>${fva.map(f=>`<tr><td>${f.pub_dt}</td><td>${esc(f.publisher||'')}</td><td>${f.year}</td><td class="n">${억(f.f_rev)}</td><td class="n">${억(f.a_rev)}</td><td class="n ${f.ach_rev!=null&&f.ach_rev<90?'neg':''}">${pct(f.ach_rev)}</td><td class="n">${억(f.f_op)}</td><td class="n">${억(f.a_op)}</td><td class="n ${f.ach_op!=null&&f.ach_op<80?'neg':''}">${pct(f.ach_op)}</td></tr>`).join('')}</table></div>`;}
@@ -782,6 +782,7 @@ async function open(code){
      if(b.dataset.go==='top'){window.scrollTo({top:0,behavior:'smooth'});return;} const sec=document.getElementById(b.dataset.go); sec.classList.remove('fold'); fitTables(); sec.scrollIntoView({behavior:'smooth',block:'start'});};
    $('#mback').onclick=()=>{document.body.classList.remove('mdet'); cur=null; history.replaceState(null,'',location.pathname+location.search); const r=document.querySelector(`.row[data-c="${code}"]`); if(r) r.scrollIntoView({block:'center'});};
    document.querySelectorAll('[data-mfs]').forEach(b=>b.onclick=()=>{const w=document.querySelector('.fin2col.m2'); if(!w) return; w.dataset.m=b.dataset.mfs; document.querySelectorAll('[data-mfs]').forEach(x=>x.setAttribute('aria-pressed',x===b?'true':'false')); fitTables();});
+   window.__qend=()=>document.querySelectorAll('.qsv,.sim').forEach(e=>{e.scrollLeft=e.scrollWidth;}); setTimeout(window.__qend,50);
    const fm=document.querySelector('.fmore'); if(fm) fm.onclick=()=>{document.querySelector('.fcards.mclip')?.classList.remove('mclip'); fm.remove();};}
   fitTables();
   // 섹션 접기/펼치기 — 기본 펼침: 1, 3, 3-1, 4 (나머지는 접힘), 상태는 브라우저에 기억
