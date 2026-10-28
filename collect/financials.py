@@ -240,6 +240,38 @@ def _norm_nm(nm):
     return s
 
 
+_REV_PARTS = ("이자수익", "수수료수익", "리스수익", "할부금융수익", "할부수익", "렌탈수익", "임대료수익", "기타영업수익", "보험수익", "신용카드수익", "카드수익",
+              "수수료매출", "기타매출", "상품매출", "제품매출", "용역매출", "임대수익", "금융상품관련순손익", "유가증권관련수익", "배당수익", "배당금수익")
+
+
+def _rev_fallback(rows, op):
+    """매출(영업수익) 합계 줄이 없을 때(2026-10-28 삼성카드·신한카드·빗썸 반기):
+    ① 손익계산서에 '영업비용' 합계 줄이 있으면 영업이익 + 영업비용 (항등식)
+    ② 아니면 '영업이익·영업비용' 줄보다 위(영업 구간)에 있는 수익 구성 줄의 합 — 영업외 구간의 이자·배당수익은 제외
+    → (값, 출처) 또는 (None, None)"""
+    isr = sorted([r for r in rows if r["sj_div"] in ("IS", "CIS")], key=lambda r: (r["sj_div"] != "IS", r.get("ord") if r.get("ord") is not None else 10**6))
+    if not isr:
+        return None, None
+    for sj in ("IS", "CIS"):
+        part = [r for r in isr if r["sj_div"] == sj]
+        exp = [r for r in part if _norm_nm(r["account_nm"]) in ("영업비용", "영업비용합계", "영업비용계", "영업비용총계")]
+        if exp and op is not None and exp[0].get("thstrm_amount") is not None:
+            return op + abs(exp[0]["thstrm_amount"]), "영업이익+영업비용"
+    for sj in ("IS", "CIS"):
+        part = [r for r in isr if r["sj_div"] == sj]
+        if not part or any(r.get("ord") is None for r in part):
+            continue
+        head = []
+        for r in part:
+            if _norm_nm(r["account_nm"]) in ("영업비용", "영업이익", "영업이익(손실)", "영업손익", "영업손실", "영업비용합계"):
+                break
+            head.append(r)
+        vals = [r["thstrm_amount"] for r in head if _norm_nm(r["account_nm"]) in _REV_PARTS and r.get("thstrm_amount")]
+        if vals and len(head) < len(part):
+            return sum(vals), "영업수익 구성 합"
+    return None, None
+
+
 def _pick(rows, ids, names, sj=None):
     """rows: fin_raw dict 목록. account_id 우선, 없으면 계정명 정확/포함 매칭."""
     for r in rows:
@@ -280,6 +312,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash", "cur_assets", "cur_liab", "receivables", "inventory", "capital", "payables", "contract_assets", "contract_liab", "advances") else \
                  ("CF",) if key in ("cfo", "dep", "amort", "rou_dep", "cfi", "cff", "capex_ppe", "capex_int", "disp_ppe", "disp_int", "tax_paid") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
+        if k.get("revenue") is None:              # 2026-10-28: 금융업(카드·캐피탈)·일부 비상장은 매출 합계 줄이 없음 → 영업이익+영업비용 또는 영업수익 구성 합
+            k["revenue"], k["_rev_src"] = _rev_fallback(rows, k.get("op_income"))
         # 상각비: 계정명 패턴으로 재탐색 (합산 계정 '감가상각비와무형자산상각비' 우선, 없으면 감가+무형+사용권 합)
         _da_from_rows(rows, k)
         # 차입금 근사: BS 계정명 키워드 합(중복 방지: 정확 일치만)
