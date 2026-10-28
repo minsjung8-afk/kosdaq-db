@@ -780,6 +780,8 @@ def build():
 
     global IND_STATS
     IND_STATS = _industry_stats(con)
+    global UNIT_FIX
+    UNIT_FIX = []
     index = []
     try:
         MANUAL = {r[0] for r in con.execute("SELECT corp_code FROM manual_company")}   # 사이트 '회사 추가'로 넣은 회사(2026-10-26)
@@ -796,6 +798,13 @@ def build():
         except Exception as e:  # noqa
             d["fin_notes"] = []
             print(f"[site] 특이사항 실패 {c.get('corp_name')}: {e}")
+        try:                                   # AI 요약 금액 단위 검증(억↔조 자릿수 오류 보정, 2026-10-29)
+            import unit_check
+            _uf = unit_check.apply(d)
+            if _uf:
+                UNIT_FIX.append((c["corp_name"], _uf))
+        except Exception as e:  # noqa
+            print(f"[site] 단위 검증 실패 {c.get('corp_name')}: {e}")
         _rows = d["kpi"].get("CFS") or d["kpi"].get("OFS") or [{}]
         k = next((r for r in reversed(_rows) if r.get("kind") == "annual"), _rows[-1])   # 검색 인덱스는 최근 연간 기준
         ps = d["price_summary"] or {}
@@ -823,6 +832,10 @@ def build():
             shutil.copy(TEMPLATE.parent / "dq.html", SITE / "dq.html")
     except Exception as e:  # noqa
         print("[site] 품질 점검 실패:", e)
+    n_fix = sum(1 for _, l in UNIT_FIX for x in l if x["to"]); n_chk = sum(1 for _, l in UNIT_FIX for x in l if not x["to"])
+    print(f"[site] AI 요약 단위 검증: 보정 {n_fix}건 · 확인 필요 {n_chk}건 · {len(UNIT_FIX)}사", flush=True)
+    for nm, l in UNIT_FIX[:40]:
+        print(f"[unit] {nm}: " + " / ".join(f"{x['ctx']} {x['from']}→{x['to'] or '확인 필요'}" for x in l), flush=True)
     print(f"site/ 생성: {len(index)}개사")
 
 
