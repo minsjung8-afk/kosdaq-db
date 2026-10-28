@@ -716,8 +716,9 @@ def rating_status(ratings, today=None):
                 return {"kind": "expired", "label": "유효기간 만료", "date": cur["disc_dt"], "tip": f"최근 공시 {cur['disc_dt']} 후 1년 경과 · 새 평가 공시 없음(유효기간 통상 1년, 정확한 기한은 평가서 확인)"}
         except Exception:  # noqa
             pass
-    elif cancels:
-        return {"kind": "cancel", "label": "등급 취소", "date": cancels[0]["disc_dt"], "tip": f"{cancels[0]['agency']} {cancels[0]['disc_dt']} 등급 취소 공시"}
+    elif [c for c in cancels if _cls(c) != "sub"]:
+        c0 = [c for c in cancels if _cls(c) != "sub"][0]
+        return {"kind": "cancel", "label": "등급 취소", "date": c0["disc_dt"], "tip": f"{c0['agency']} {c0['disc_dt']} 등급 취소 공시"}
     return None
 
 
@@ -726,7 +727,15 @@ def rating_view(ratings, today=None):
     장기 등급이 만료·취소이고 유효한 단기 등급(CP·전단채)이 있으면 단기 등급을 대표로, 만료된 장기 등급은 보조 표시(aux)로."""
     cur = current_rating(ratings)
     st = rating_status(ratings, today)
-    if st and cur and _is_long(cur):
+    if not cur:                                   # 본등급(선순위·단기) 공시가 없고 신종자본·후순위 등급만 있으면 → 대표 없음 + 참고 표시(본등급 아님)
+        cancels = [r for r in ratings if _is_cancel(r)]
+        subs = [r for r in ratings if _cls(r) == "sub" and not _is_cancel(r) and not _issue_cancelled(r, cancels)]
+        if subs:
+            s = subs[0]
+            return None, st, {"kind": "sub", "grade": s.get("grade"), "label": re.sub(r"\s+", "", s.get("target_type") or ""), "date": s.get("disc_dt"),
+                              "tip": f"{s.get('agency')} {s.get('disc_dt')} {s.get('target_type') or ''} — 신종자본·후순위 등급은 본등급보다 1~2노치 낮게 매겨져 대표 등급으로 쓰지 않음"}
+        return None, st, None
+    if st and _is_long(cur):
         shorts = [r for r in ratings if _cls(r) == "short"]
         s0 = current_rating(shorts)
         aux = {"grade": cur.get("grade"), "label": st["label"], "date": st.get("date"), "kind": st["kind"], "tip": st.get("tip")}
@@ -742,13 +751,14 @@ def rating_view(ratings, today=None):
 def current_rating(ratings):
     """대표 등급(공시일 내림차순 목록에서): ① 장기(기업신용평가·회사채, 단기사채 제외) 중 '정정' 아닌 최신 ② 단기(CP·전단채) 중 정정 아닌 최신 ③ 정정 포함.
     2026-10-25: '전자단기사채'가 '사채'에 걸려 장기로 잡히고, 옛 평가의 '본평가(정정)' 재공시(공시일만 최신)가 대표가 되어 부도(D)난 중앙일보가 A3로 표시되던 문제 수정"""
-    # 2026-10-28: 순서 ① 기업신용평가·선순위 사채 ② 단기(CP·전단채) ③ 신종자본·후순위(노칭) ④ 그 밖 — 각 단계에서 정정 아닌 최신, 이미 취소된 회차는 건너뜀
+    # 2026-10-28: 순서 ① 기업신용평가·선순위 사채 ② 단기(CP·전단채) ③ 그 밖 — 각 단계에서 정정 아닌 최신, 이미 취소된 회차는 건너뜀
+    # 신종자본·후순위는 본등급보다 1~2노치 낮게 매겨지므로 대표 등급으로 쓰지 않음(사용자 지적) → rating_view가 '본등급 아님' 참고 표시로만
     cancels = [r for r in ratings if _is_cancel(r)]
-    alive = [r for r in ratings if not _is_cancel(r)]
+    alive = [r for r in ratings if not _is_cancel(r) and _cls(r) != "sub"]
     live = [r for r in alive if not _issue_cancelled(r, cancels)] or alive
     plain = [r for r in live if "정정" not in (r.get("eval_kind") or "")]
     main = lambda r: _cls(r) in ("issuer", "senior")
-    for pool in ([r for r in plain if main(r)], [r for r in plain if _cls(r) == "short"], [r for r in plain if _cls(r) == "sub"], plain,
+    for pool in ([r for r in plain if main(r)], [r for r in plain if _cls(r) == "short"], plain,
                  [r for r in live if main(r)], live):
         if pool:
             return pool[0]
@@ -788,7 +798,8 @@ def build():
                       "rev": k.get("revenue"), "op": k.get("op_income"), "debt": k.get("debt_ratio"),
                       "mcap": ps.get("mcap"), "opinion": ao.get("adt_opinion"), "year": k.get("bsns_year"),
                       "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None,
-                      "rating": cur_rt["grade"] if cur_rt else None, "rt_st": (d.get("rating_status") or {}).get("label"), "rt_aux": (f"{d['rating_aux']['grade']} {d['rating_aux']['label'].replace('유효기간 ', '').replace('등급 ', '')}" if d.get("rating_aux") else None), "manual": 1 if c["corp_code"] in MANUAL else None,
+                      "rating": cur_rt["grade"] if cur_rt else None, "rt_st": (d.get("rating_status") or {}).get("label"), "rt_aux": (f"{d['rating_aux']['grade']} {d['rating_aux']['label'].replace('유효기간 ', '').replace('등급 ', '')}" if d.get("rating_aux") and d["rating_aux"].get("kind") != "sub" else None),
+                      "rt_sub": (d["rating_aux"]["grade"] if d.get("rating_aux") and d["rating_aux"].get("kind") == "sub" else None), "manual": 1 if c["corp_code"] in MANUAL else None,
                       "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"),
                       "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber")})
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
