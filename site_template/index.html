@@ -154,6 +154,31 @@ table.num td:first-child{width:28px;text-align:center;font-weight:700;color:var(
 a{color:var(--navy2)}
 @media (max-width:760px){body{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}aside{max-height:40vh;border-right:0;border-bottom:1px solid var(--line)}main{padding:14px 12px}}
 @media print{body{display:block}aside,header{display:none}section{break-inside:avoid}}
+
+/* 3. 재무현황 개편(2026-10-28): 단순 표 + 특이사항 패널 */
+.fin3{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(300px,1fr);gap:14px;align-items:start}
+@media (max-width:1250px){.fin3{grid-template-columns:minmax(0,1fr)}}
+.fin3 .fl{min-width:0}.flh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 6px}
+.fseg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--nbg2)}
+.fseg button{font:600 12px var(--font);border:0;background:transparent;color:var(--mute);padding:4px 14px;border-radius:999px;cursor:pointer}
+.fseg button[aria-pressed="true"]{background:var(--panel);color:var(--navy);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+table.ft{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
+table.ft th,table.ft td{padding:5px 10px;border-bottom:1px solid #eef1f6;white-space:nowrap;background:transparent;color:var(--fg)}
+table.ft th{font-weight:600;color:var(--mute);text-align:right;font-size:11.5px;background:#f3f5f9;border-bottom:1px solid var(--line)}
+table.ft th:first-child,table.ft td:first-child{text-align:left}
+table.ft th a{color:var(--navy2)}table.ft .fcol{display:block;font-weight:400;font-size:10px;color:var(--mute)}
+table.ft td.n{text-align:right}table.ft td.neg{color:var(--bad)}
+table.ft tr.fg td{font-weight:700;color:var(--navy);padding-top:10px;font-size:11.5px;letter-spacing:.04em;border-bottom:1px solid var(--line)}
+table.ft tr.fsum td{font-weight:700}table.ft td.fsub{padding-left:22px;color:var(--mute)}
+table.ft td:first-child small{color:var(--mute);font-size:10px}
+table.ft th.fcur{box-shadow:inset 0 -2px 0 var(--gold)}
+.fnp{border:1px solid var(--line);border-radius:10px;background:var(--panel);min-width:0}
+.fnh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}.fnh b{color:var(--navy);font-size:14px}.fcnt{margin-left:auto;display:flex;gap:4px}
+.fnp ul{list-style:none;margin:0;padding:0}.fnp li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;padding:10px 14px;border-bottom:1px solid #eef1f6}.fnp li:last-child{border-bottom:0}
+.ftag{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;align-self:start}
+.ftag.bad{color:var(--bad);background:var(--bad-bg)}.ftag.warn{color:var(--warn);background:var(--warn-bg)}.ftag.info{color:var(--navy2);background:var(--nbg2)}
+.twrap.stick table.ft tr>th:first-child{background:#f3f5f9}.twrap.stick table.ft tr>td:first-child,.twrap.stick table.ft tr:nth-child(even)>td:first-child{background:var(--panel)}
+.ft1{font-weight:700;font-size:13px}.ft2{grid-column:2;font-size:12.5px}.ft3{grid-column:2;font-size:11px;color:var(--mute)}
 </style>
 </head>
 <body>
@@ -454,18 +479,38 @@ async function open(code){
       ['g6', [['매출채권회전율','recv_turn',x],['재고자산회전율','inv_turn',x],...(isProj?[['순운전자본 <small>(수주형: 매출채권+미청구공사+재고−매입채무−초과청구−선수금)</small>','nwc_proj',억],['미청구공사(계약자산)','contract_assets',억],['초과청구공사(계약부채)','contract_liab',억],['선수금','advances',억]]:isFin?[]:[['순운전자본 <small>매출채권+재고−매입채무</small>','nwc',억]])]],
     ];
     for(const fs of ['OFS','CFS']) for(const r of (d.kpi[fs]||[])) r.capex_cf=r.capex==null?null:-r.capex;   // 2026-10-27: Capex 순액을 현금흐름표 부호로(DB는 취득−처분 양수 그대로)
-    const bases=[['OFS','별도'],['CFS','연결']].filter(([fs])=>d.kpi[fs]&&d.kpi[fs].length);
+    // 2026-10-28 사용자 요청(대한항공 시안): 왼쪽 = 연결/별도 선택 재무표(한 기준씩, 배경색 없는 단순 표) · 오른쪽 = 재무 특이사항(규칙 기반)
+    const bases=[['CFS','연결'],['OFS','별도']].filter(([fs])=>d.kpi[fs]&&d.kpi[fs].length);
     if(!bases.length) h+=`<div class="src">재무 미수집</div>`;
     else{
-      const prevOf=(rows,i)=>{const r=rows[i]; if(r.kind==='annual'){const p=rows[i-1]; return p&&p.kind==='annual'?p:null;} if(r.kind==='interim'){const p=rows[i-1]; return p&&p.kind==='prev_interim'?p:null;} return null;};
-      const chg=(cur,prev,f)=>{ if(cur==null||prev==null) return '<span class="chg"></span>'; let v,t; if(f===억){ if(prev<=0) return '<span class="chg"></span>'; v=(cur/prev-1)*100; t=Math.abs(v).toFixed(1)+'%'; } else if(f===pct){ v=cur-prev; t=Math.abs(v).toFixed(1)+'%p'; } else { if(prev===0) return '<span class="chg"></span>'; v=(cur-prev)/Math.abs(prev)*100; t=Math.abs(v).toFixed(1)+'%'; } if(Math.abs(v)>999) t='>999%'; return `<span class="chg ${v>0?'up':v<0?'dn':''}">${v>0?'▲':v<0?'▼':''}${t}</span>`; };
-      const cell=(rows,i,k,f,sub,first)=>{const r=rows[i],p=prevOf(rows,i); return `<td class="n${first?' sep':''}"><span class="val ${r[k]<0?'neg':''}">${f(r[k])}</span>${sub?`${p?chg(r[k],p[k],f):''}<span class="dsub${p?'':' np'}">(${f(r[sub]==null?null:Math.abs(r[sub]))})</span>`:(p?chg(r[k],p[k],f):'')}</td>`;};
-      const head1=`<tr><th></th>${bases.map(([fs,nm])=>`<th class="sep top" colspan="${d.kpi[fs].length}">${nm}</th>`).join('')}</tr>`;
+      const FS0=bases[0][0];
+      window.__fsSel=(fs)=>{document.querySelectorAll('.fsv').forEach(e=>e.hidden=e.dataset.fs!==fs);document.querySelectorAll('.fsb').forEach(b=>b.setAttribute('aria-pressed',b.dataset.fs===fs?'true':'false'));const qs=document.querySelector('#qblk select');if(qs&&!qs.querySelector(`option[value="${fs}"]`)?.disabled){qs.value=fs;window.__qsel&&window.__qsel(fs);}fitTables();};
+      const bbOf=(fs,lab)=>((d.borrow_bd||{})[fs]||[]).find(c=>c.label===lab);
+      const bsum=(col,k,cs)=>col&&col.k&&col.k[k]?cs.reduce((a,c)=>a+(col.k[k][c]||0),0):null;
+      const ALL=['유동','비유동','미구분'];
+      const R=[['g','손익'],['매출액',r=>r.revenue],['영업이익',r=>r.op_income],['영업이익률',r=>r.op_margin,pct],['당기순이익',r=>r.net_income],['당기순이익률',r=>r.net_margin,pct],['EBITDA',r=>r.ebitda],
+        ['g','재무상태'],['자산총계',r=>r.total_assets],['부채총계',r=>r.total_liab],['자본총계',r=>r.equity],['현금성자산',r=>r.cash],
+        ['g','차입금'],['총차입금',r=>r.borrowings,null,'sum'],
+          ['단기차입금(유동)',(r,fs)=>bsum(bbOf(fs,r.label),'차입금',['유동']),null,'s2'],['장기차입금(비유동)',(r,fs)=>bsum(bbOf(fs,r.label),'차입금',['비유동','미구분']),null,'s2'],
+          ['사채',(r,fs)=>bsum(bbOf(fs,r.label),'사채',ALL),null,'s2'],['차입금·사채(합산 계정)',(r,fs)=>bsum(bbOf(fs,r.label),'차입금·사채',ALL),null,'s2'],['리스부채',(r,fs)=>bsum(bbOf(fs,r.label),'리스',ALL),null,'s2'],
+          ['순차입금',r=>r.net_borrowings,null,'sum'],
+        ['g','현금흐름'],['영업활동CF',r=>r.cfo],['투자활동CF',r=>r.cfi],['Capex 순액',r=>r.capex_cf,null,'s2','(−) 순투자 유출 · (+) 처분 우위'],['재무활동CF',r=>r.cff],['FCF',r=>r.fcf,null,null,'영업활동CF + Capex 순액'],
+        ['g','안정성'],['부채비율',r=>r.debt_ratio,pct],['차입금의존도',r=>r.borrow_dep,pct],['유동비율',r=>r.cur_ratio,pct],['EBITDA/이자비용',r=>r.interest_cover,x],['순차입금/EBITDA',r=>r.nd_ebitda,x,null,'반기·분기는 LTM EBITDA 기준'],
+        ['g','활동성·운전자본'],['매출채권회전율',r=>r.recv_turn,x],['재고자산회전율',r=>r.inv_turn,x],...(isProj?[['순운전자본(수주형)',r=>r.nwc_proj,null,null,'매출채권+미청구공사+재고−매입채무−초과청구−선수금'],['미청구공사',r=>r.contract_assets,null,'s2'],['초과청구공사',r=>r.contract_liab,null,'s2'],['선수금',r=>r.advances,null,'s2']]:isFin?[]:[['순운전자본',r=>r.nwc,null,null,'매출채권+재고−매입채무']])];
       const plink=r=>r.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener" title="DART 보고서 열기">${r.label||r.bsns_year}</a>`:(r.label||r.bsns_year);
-      const head2=`<tr><th>항목</th>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>`<th class="n col${i===0?' sep':''}${r.kind==='interim'?' cur':''}" ${r.kind==='interim'?'style="box-shadow:inset 0 -3px 0 var(--gold)"':''}>${plink(r)}${r.kind!=='annual'?'<br><small style="font-weight:400;color:#c9d6ea;font-size:10px">누적</small>':''}</th>`).join('')).join('')}</tr>`;
-      const body=groups.map(([cls,cols],gi)=>cols.map(([n,k,f,sub,sl,isSub],ri)=>`<tr class="${cls}${gi>0&&ri===0?' gs':''}${isSub?' subr':''}"><td>${n}${sub?` <small>괄호: ${sl||'유무형상각비'}</small>`:''}</td>${bases.map(([fs])=>d.kpi[fs].map((r,i)=>cell(d.kpi[fs],i,k,f,sub,i===0)).join('')).join('')}</tr>`).join('')).join('');
-      h+=`<div class="src" style="margin:6px 0 6px">단위 억원 · 연간 2개년 + 전년동기·최근분기(누적) · ▲▼는 전년(동기) 대비 증감(금액·배수 %, 비율 %p) · 연도 클릭 → DART 보고서 <span style="margin-left:8px">${[['손익','var(--g1)','var(--navy2)'],['자산·부채·자본','var(--g2)','var(--gold)'],['현금창출력','var(--g7)','#6b7d1f'],['차입·현금','var(--g4)','#c2662d'],['안정성','var(--g3)','var(--good)'],['수익성','var(--g5)','#6d4fb0'],['활동성·운전자본','var(--g6)','#1f7f8f']].map(([n,bg,bd])=>`<span style="display:inline-block;background:${bg};border-left:3px solid ${bd};padding:0 6px;margin-right:4px;border-radius:2px">${n}</span>`).join('')}</span></div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div>`;
-      {const RN={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const fs0=bases[0]&&bases[0][0]; const rows=fs0?d.kpi[fs0]:[];
+      const tbl=(fs,nm)=>{const rows=d.kpi[fs]; let body='',grp=null,buf='';
+        const flush=()=>{if(grp&&buf) body+=`<tr class="fg"><td colspan="${rows.length+1}">${grp}</td></tr>`+buf; buf='';};
+        for(const [lab,fn,fmt,cls,tip] of R){ if(lab==='g'){flush(); grp=fn; continue;}
+          const vals=rows.map(r=>{try{return fn(r,fs)}catch(e){return null}}); if(vals.every(v=>v==null)) continue; const f=fmt||억;
+          buf+=`<tr class="${cls==='sum'?'fsum':''}"><td class="${cls==='s2'?'fsub':''}"${tip?` title="${esc(tip)}"`:''}>${lab}${tip?' <small>ⓘ</small>':''}</td>${vals.map((v,i)=>`<td class="n${rows[i].kind==='interim'?' fcur':''}${v!=null&&v<0?' neg':''}">${f(v)}</td>`).join('')}</tr>`; }
+        flush();
+        return `<div class="fsv" data-fs="${fs}"${fs===FS0?'':' hidden'}><div class="twrap"><table class="ft"><tr><th>${nm}</th>${rows.map(r=>`<th class="n${r.kind==='interim'?' fcur':''}">${plink(r)}${r.kind!=='annual'?'<span class="fcol">누적</span>':''}</th>`).join('')}</tr>${body}</table></div></div>`;};
+      const seg=bases.length>1?`<div class="fseg" role="group" aria-label="재무제표 기준">${bases.map(([fs,nm])=>`<button type="button" class="fsb" data-fs="${fs}" aria-pressed="${fs===FS0}" onclick="window.__fsSel('${fs}')">${nm}</button>`).join('')}</div>`:`<span class="src">${bases[0][1]} 기준(${bases[0][0]==='CFS'?'별도':'연결'} 재무 없음)</span>`;
+      const fn=d.fin_notes||[]; const SV={bad:'위험',warn:'주의',info:'참고'};
+      const cnt=['bad','warn','info'].map(s=>[s,fn.filter(n=>n.sev===s).length]).filter(([,n])=>n).map(([s,n])=>`<span class="ftag ${s}">${SV[s]} ${n}</span>`).join('');
+      const notes=`<div class="fnp"><div class="fnh"><b>재무 특이사항</b><span class="src">${FS0==='CFS'?'연결':'별도'} 기준 · 연결/별도 비교 포함 · 규칙 기반 자동 판정</span><span class="fcnt">${cnt}</span></div>${fn.length?`<ul>${fn.map(n=>`<li><span class="ftag ${n.sev}">${SV[n.sev]}</span><div class="ft1">${esc(n.title)}</div><div class="ft2">${esc(n.text)}</div><div class="ft3">규칙: ${esc(n.rule)}</div></li>`).join('')}</ul>`:'<div class="src" style="padding:12px 14px">걸린 규칙 없음 — 수익성·레버리지·유동성·현금흐름 기준에서 특이사항이 나오지 않았습니다.</div>'}</div>`;
+      h+=`<div class="fin3"><div class="fl"><div class="flh">${seg}<span class="src">단위 억원 · 최근 분기 열은 누적 · 연도 클릭 → DART 보고서</span></div>${bases.map(([fs,nm])=>tbl(fs,nm)).join('')}</div>${notes}</div>`;
+      {const RN={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const rows=d.kpi[FS0]||[];
        const srcs=rows.map(r=>`${r.label||r.bsns_year} ${RN[r.reprt_code]||''}${r.kind!=='annual'?'(누적)':''}${r.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">${r.rcept_no}</a>`:''}`);
        if(srcs.length) h+=`<div class="src" style="margin:4px 0 2px"><b>기준 보고서</b> · ${srcs.join(' · ')}</div>`;}
     }
@@ -479,7 +524,8 @@ async function open(code){
    const nr=d.notes_raw;
    const bb=d.borrow_bd;
    if(bb&&(bb.CFS||bb.OFS)){   // 차입금 현황: 차입금·사채·리스 × 유동/비유동, 연간 3개년 + 최근 분기 (사용자 요청 2026-10-24 — 주석 원문보다 요약표)
-     const bases=[['OFS','별도'],['CFS','연결']].filter(([fs])=>bb[fs]&&bb[fs].length);
+     const FS1=d.kpi&&d.kpi.CFS&&d.kpi.CFS.length?'CFS':'OFS';
+     for(const B of [['CFS','연결'],['OFS','별도']].filter(([fs])=>bb[fs]&&bb[fs].length)){ const bases=[B];   // 2026-10-28: 연결/별도 선택(3. 재무현황 버튼과 연동)
      const g=(col,k,c)=>{const v=col.k[k]&&col.k[k][c]; return v||0;};
      const anyv=(k,c)=>bases.some(([fs])=>bb[fs].some(col=>g(col,k,c)));
      // '차입금·사채' = 재무상태표에 한 줄로 공시된 합산 계정('단기차입금및사채'·'유동차입금(사채포함)' 등) — 해당 기간에만 행이 생김
@@ -498,7 +544,7 @@ async function open(code){
        body+=`<tr class="g3"><td>${cn} 소계</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(sumCur(col,c),i===0?' sep':'')).join('')).join('')}</tr>`;});
      body+=`<tr class="g3 gs"><td><b>총차입금</b> (괄호: 유동 비중)</td>${bases.map(([fs])=>bb[fs].map((col,i)=>`<td class="n${i===0?' sep':''}"><span class="val"><b>${억(col.total)}</b></span>${col.total?`<span class="dsub np">(${(sumCur(col,'유동')/col.total*100).toFixed(0)}%)</span>`:''}</td>`).join('')).join('')}</tr>`;
      body+=`<tr class="g3"><td>순차입금 (− 현금성자산)</td>${bases.map(([fs])=>bb[fs].map((col,i)=>td(col.cash==null?null:col.total-col.cash,i===0?' sep':'')).join('')).join('')}</tr>`;
-     h+=`<div class="src" style="margin:4px 0 6px">단위 억원 · 재무상태표의 차입성 계정(단기·장기차입금, 유동성장기부채, 사채·CB·BW·EB·CP, 리스부채)을 유동/비유동 × 종류로 재분류 · 합계 = 3. 재무현황의 총차입금(근사) · 연도 클릭 → DART 보고서${merged?' · 합산 계정 = 그 기간 재무상태표에 차입금과 사채를 한 줄로 공시(분리 불가)':''}${unk?' · 구분불명 = 계정명·위치로 유동성 판정 불가':''}</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div>`;
+     h+=`<div class="fsv" data-fs="${B[0]}"${B[0]===FS1||!bb[FS1]?'':' hidden'}><div class="src" style="margin:4px 0 6px">단위 억원 · 재무상태표의 차입성 계정(단기·장기차입금, 유동성장기부채, 사채·CB·BW·EB·CP, 리스부채)을 유동/비유동 × 종류로 재분류 · 합계 = 3. 재무현황의 총차입금(근사) · 연도 클릭 → DART 보고서${merged?' · 합산 계정 = 그 기간 재무상태표에 차입금과 사채를 한 줄로 공시(분리 불가)':''}${unk?' · 구분불명 = 계정명·위치로 유동성 판정 불가':''}</div><div class="twrap"><table class="fin">${head1}${head2}${body}</table></div></div>`; }
    } else if(d.kpi&&(d.kpi.CFS||d.kpi.OFS)) h+=`<div class="src" style="padding:4px 0 2px">차입금 현황 표: 재무상태표 세부 계정 미수집(사이트 재생성 후 표시)</div>`;
    if(!ns&&!nr&&!bb) h+=`<div class="src" style="padding:4px 0 2px">차입금 만기구조 · 금융기관별 차입 · 우발채무(보증·담보·소송·약정) — 최신 정기보고서 주석 수집 후 표시. 현재는 3. 재무현황의 총차입금·순차입금과 5. 공시 타임라인의 담보제공·소송 키워드를 참고하세요.</div>`;
    if(ns){
