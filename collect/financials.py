@@ -343,11 +343,12 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 cands.append((tbl, None))
         # 상식 점검(2026-10-26 HL D&I 2026 반기: 주석 변동표 오독으로 상각비 3,195억(실제 약 90억) → EBITDA 왜곡):
         # 직전 연간 상각비를 기간 비율로 환산한 값의 1/4~4배 밖이거나 총자산의 25% 초과면 버리고 다음 후보
-        ref = None
+        ref = pa = None
         try:
             pr = con.execute("""SELECT da FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND bsns_year<? AND da IS NOT NULL
                                 ORDER BY bsns_year DESC LIMIT 1""", (corp_code, fs_div, bsns_year if reprt_code != "11011" else bsns_year)).fetchone()
             if pr and pr[0]:
+                pa = abs(pr[0])
                 ref = abs(pr[0]) * {"11013": 0.25, "11012": 0.5, "11014": 0.75}.get(reprt_code, 1.0)
         except Exception:  # noqa
             pass
@@ -371,6 +372,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 continue
             if cap and v > cap:
                 continue
+            if reprt_code != "11011" and pa and abs(v - pa) <= pa * 0.003:
+                continue                               # 분기·반기 값이 직전 연간과 똑같으면 전기(연간) 열을 읽은 것(2026-10-29 CJ대한통운 별도 2026 반기 1,996억 = 2025 연간)
             k["da"] = v
             break
         k["ebitda"] = (k["op_income"] + k["da"]) if k.get("op_income") is not None and k["da"] is not None else None

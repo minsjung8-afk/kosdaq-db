@@ -451,3 +451,137 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
                 print(f"[notes-v2] DART 한도 도달 — {i}/{len(todo)}에서 중단", flush=True); break
     print(f"[notes-v2] 완료 {i}/{len(todo)} · 표보존 {n} · 상각비 확보 {got}", flush=True)
     return got
+
+
+# ───────── 2026-10-29: 과거 기간 상각비 보강(소노인터내셔널 2024·2025, 대한유화 2024·2025 반기 EBITDA 공백) ─────────
+# 원인: run()의 연간 경로는 회사당 '최신 사업보고서 1건'만, 그것도 연간 상각비가 하나도 없는 회사만 읽음 → 그 전 연도·지난 반기는 영영 비어 있었음.
+#       감사보고서 제출 비상장사는 business.rcept_no 가 없어 아예 대상에서 빠짐.
+# 절차: fin_kpi 에서 영업이익은 있는데 상각비가 빈 행(최근 4개 사업연도) → 그 행의 접수번호 보고서 원문 1콜 → 주석(성격별 > 현금흐름 조정 > 변동표) → da_notes → build_kpi
+#   - 접수번호가 '…:전기'(다음 해 보고서의 전기 열로 채운 행)이면 같은 기간 다른 구분(연결/별도) 행의 접수번호, 없으면 DART 목록(1콜)에서 그 기간 보고서를 찾음
+#   - 주석에 연결/별도 구분이 없는 문서(감사보고서는 연결·별도가 따로 나옴)는 그 문서를 접수번호로 가진 구분에만 저장 — 연결감사보고서 값을 별도에 넣지 않음
+#   - 시도 기록(da_try)을 남겨 못 찾은 보고서는 30일 동안 다시 받지 않음
+_RPT_ANN = r"(사업보고서|(연결)?감사보고서)\s*\({y}\.\d{{2}}\)"
+_RPT_INT = {"11012": "06", "11013": "03", "11014": "09"}
+
+
+def _resolve_rcept(cc, y, rc, fs):
+    from common import dart_get
+    y = int(y)
+    if rc == "11011":
+        js = dart_get("list", corp_code=cc, bgn_de=f"{y}0101", end_de=f"{y + 1}1231", page_count=100)
+        pat = re.compile(_RPT_ANN.format(y=y))
+    else:
+        js = dart_get("list", corp_code=cc, bgn_de=f"{y}0101", end_de=f"{y + 1}0331", pblntf_ty="A", page_count=100)
+        pat = re.compile(rf"(반기|분기)보고서\s*\({y}\.{_RPT_INT.get(rc, '06')}\)")
+    best = None
+    for r in sorted(js.get("list", []) or [], key=lambda r: r["rcept_dt"]):   # 정정본은 뒤에 오므로 마지막 것
+        m = pat.search((r.get("report_nm") or "").strip())
+        if not m:
+            continue
+        nm = r["report_nm"]
+        if rc == "11011" and "감사보고서" in nm and ("연결" in nm) != (fs == "CFS"):
+            if best and "사업보고서" in best[1]:
+                continue
+            best = best or (r["rcept_no"], nm)            # 구분이 안 맞는 감사보고서는 다른 후보가 없을 때만
+            continue
+        if best and "사업보고서" in best[1] and "사업보고서" not in nm:
+            continue
+        best = (r["rcept_no"], nm)
+    return best
+
+
+def backfill(con=None, limit=None, years=4, workers=4, codes=None):
+    """→ 상각비를 새로 채운 (회사, 기간) 수"""
+    import common
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import date
+    from financials import build_kpi
+    con = con or connect()
+    ensure(con)
+    con.execute("CREATE TABLE IF NOT EXISTS da_try (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, rcept_no TEXT, ok INTEGER, at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code, rcept_no))")
+    y0 = str(date.today().year - years)
+    tried = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_try WHERE ok=0 AND at >= date('now','-30 day')")}
+    rows = con.execute("""SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no FROM fin_kpi
+                          WHERE da IS NULL AND op_income IS NOT NULL AND bsns_year >= ? ORDER BY bsns_year, reprt_code""", (y0,)).fetchall()
+    own = {}                                               # (cc,y,rc) → {fs: 접수번호}
+    for cc, y, rc, fs, rn in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no FROM fin_kpi WHERE bsns_year >= ?", (y0,)):
+        own.setdefault((cc, y, rc), {})[fs] = rn
+    need = {}
+    for cc, y, rc, fs, rn in rows:
+        if (cc, y, rc) in tried or (codes and cc not in codes):
+            continue
+        need.setdefault((cc, y, rc), set()).add(fs)
+    todo = []                                              # (cc, y, rc, rcept, {fs들}) — 같은 문서는 한 번만
+    for (cc, y, rc), fss in need.items():
+        by = {}
+        for fs in fss:
+            rn = (own.get((cc, y, rc), {}).get(fs) or "")
+            if not rn or ":" in rn:
+                alt = [v for k, v in own.get((cc, y, rc), {}).items() if v and ":" not in v]
+                rn = alt[0] if alt else None
+            by.setdefault(rn, set()).add(fs)
+        for rn, s in by.items():
+            todo.append((cc, y, rc, rn, s))
+    if limit:
+        todo = todo[:limit]
+    print(f"[da_backfill] 상각비 빈 행 {len(rows)}건 → 보고서 {len(todo)}건(최근 {years}개 사업연도, 30일 내 실패분 제외) · 병렬 {workers}", flush=True)
+
+    def work(t):
+        cc, y, rc, rn, fss = t
+        if common.QUOTA_HIT:
+            return t, None, None
+        nm = None
+        if not rn:
+            hit = _resolve_rcept(cc, y, rc, sorted(fss)[0])
+            if not hit:
+                return t, "", None
+            rn, nm = hit
+        return t, rn, extract_notes_v2(fetch_document_xml(rn))
+
+    got = i = 0
+    with ThreadPoolExecutor(workers) as ex:
+        for b in range(0, len(todo), workers * 5):
+            res = list(ex.map(lambda t: _safe(work, t), todo[b:b + workers * 5]))
+            for t, rn, secs in res:
+                i += 1
+                cc, y, rc, _rn0, fss = t
+                if rn is None:
+                    continue                                # 한도·오류 — 기록 없이 다음 실행에서 다시
+                ok = 0
+                if secs:
+                    # 연결·별도 주석이 둘 다 있는 문서(사업·반기보고서)만 구분별로 읽음. 감사보고서는 주석 제목이 '주석' 하나라 별도로 표시되므로
+                    # 구분을 무시하고 읽어, 그 문서를 접수번호로 가진 구분(연결감사보고서 → 연결)에만 저장
+                    tagged = {s.get("fs") for s in secs} >= {"CFS", "OFS"}
+                    mine = {fs for fs, v in own.get((cc, y, rc), {}).items() if v == rn}
+                    for fs in sorted(fss):
+                        if not tagged and mine and fs not in mine:
+                            continue                        # 구분 하나뿐인 문서(감사보고서)는 자기 구분에만
+                        r = da_from_secs(secs, fs=fs if tagged else None, interim=rc != "11011")
+                        if r["da"]:
+                            con.execute("INSERT OR REPLACE INTO da_notes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                                        (cc, y, rc, fs, r["dep"], r["amort"], r["rou"], r["da"], rn, "backfill", now()))
+                            ok = 1
+                    if ok:
+                        build_kpi(con, cc, y, rc)
+                        got += 1
+                con.execute("INSERT OR REPLACE INTO da_try VALUES (?,?,?,?,?,datetime('now'))", (cc, y, rc, rn or "", ok))
+            con.commit()
+            if i % 200 < workers * 5:
+                print(f"[da_backfill] {i}/{len(todo)} · 상각비 확보 {got} · DART {common.CALLS}콜", flush=True)
+            if common.QUOTA_HIT:
+                print(f"[da_backfill] DART 한도 도달 — {i}/{len(todo)}에서 중단(다음 실행에서 이어감)", flush=True)
+                break
+    print(f"[da_backfill] 완료 {i}/{len(todo)} · 상각비 확보 {got}", flush=True)
+    return got
+
+
+def _safe(fn, t):
+    try:
+        return fn(t)
+    except Exception as e:  # noqa
+        import common
+        if common.QUOTA_HIT or "한도" in str(e):
+            common.QUOTA_HIT = True
+            return t, None, None                            # 한도 — 기록 없이 다음 실행에서
+        print(f"[da_backfill] {t[0]} {t[1]}/{t[2]} 실패: {str(e)[:60]}", flush=True)
+        return t, "", None                                  # 그 밖의 오류는 시도 기록(30일 뒤 재시도)
