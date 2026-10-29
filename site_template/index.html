@@ -306,9 +306,13 @@ if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.se
  window.addEventListener('beforeinstallprompt',e=>{e.preventDefault(); bip=e; const b=document.getElementById('instBtn'); if(b&&!inst()) b.hidden=false;});
  window.addEventListener('appinstalled',()=>{const b=document.getElementById('instBtn'); if(b) b.hidden=true;});
  window.addEventListener('DOMContentLoaded',()=>{const b=document.getElementById('instBtn'), t=document.getElementById('instTip'); if(!b) return;
-   if(ios&&!inst()) b.hidden=false;
+   const sam=/SamsungBrowser/i.test(navigator.userAgent), andr=/Android/i.test(navigator.userAgent), inapp=/KAKAOTALK|NAVER|Line\/|Instagram|FBAN|FBAV|DaumApps|BAND/i.test(navigator.userAgent);
+   if((ios||andr)&&!inst()) b.hidden=false;          // 설치창 이벤트가 없는 브라우저(삼성 인터넷 일부 버전 등)도 버튼은 보이고, 누르면 방법 안내
    b.onclick=async()=>{ if(bip){ bip.prompt(); try{await bip.userChoice;}catch(e){} bip=null; b.hidden=true; return; }
-     t.innerHTML=ios?'Safari 아래쪽 <b>공유 버튼(□↑)</b> → <b>홈 화면에 추가</b>를 누르면 ‘심사DB’ 앱으로 설치됩니다.':'브라우저 메뉴(⋮) → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 누르세요.'; t.hidden=!t.hidden; };});}
+     t.innerHTML=inapp?'카카오톡·네이버 등 앱 안의 브라우저에서는 설치가 안 됩니다. 메뉴에서 <b>다른 브라우저로 열기</b>(크롬·삼성 인터넷)를 누른 뒤 다시 시도하세요.'
+       :ios?'Safari 아래쪽 <b>공유 버튼(□↑)</b> → <b>홈 화면에 추가</b>를 누르면 ‘심사DB’ 앱으로 설치됩니다.'
+       :sam?'주소창의 <b>⬇ 설치 아이콘</b>을 누르거나, 아래 메뉴(≡) → <b>현재 페이지 추가</b> → <b>홈 화면</b>을 누르세요. 바로가기로만 만들어지면 크롬에서 설치해 주세요.'
+       :'브라우저 메뉴(⋮) → <b>앱 설치</b>(또는 홈 화면에 추가 → <b>설치</b>)를 누르세요.'; t.hidden=!t.hidden; };});}
 const 억=v=>v==null?'-':(v/1e8).toLocaleString('ko-KR',{maximumFractionDigits:0});
 const pct=v=>v==null?'-':v.toFixed(1)+'%';
 // 1조 이상 금액은 '1,297조 8,739억'으로(2026-10-29 사용자 요청 — '12,978,739억'은 읽기 불편). 표 안의 억원 열은 그대로
