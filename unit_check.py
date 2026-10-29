@@ -7,13 +7,13 @@
   ② 앞 14자 안에서 금액에 가장 가까운 계정 키워드 하나(차입·매출·영업이익·현금·자산·부채·자본·EBITDA·순이익)로 대조할 재무 수치 후보를 고름
      후보 = 해당 계정의 연결·별도 전 기간 값 + (차입 키워드면) 재무 특이사항 문구에 계산돼 있는 억원 금액
   ③ 금액이 회사 규모 상한(자산·부채·매출 최댓값의 1.5배)을 넘거나, 후보와 25% 안으로 맞는 값이 없을 때만 의심
-  ④ 의심 금액(후보 최댓값의 2배 이상)을 10·100·1000배로 나눈 값이 후보와 3% 안에서 맞으면(올려 고치지는 않음) → 그 값으로 고치고 원문을 괄호로 남김
-  ⑤ 계정 키워드가 있고 상한을 넘는데 맞는 후보가 없으면 → 숫자는 그대로 두고 '⚠ 단위 확인 필요' 표시(추정값으로 바꾸지 않음)
+  ④ 의심 금액(후보 최댓값의 2배 이상)을 10·100·1000배로 나눈 값이 후보와 3% 안에서 맞거나, 상한을 넘으면 → '⚠ 단위 확인 필요' 표시
+  ⑤ 숫자는 절대 자동으로 바꾸지 않음(2026-10-29: 다른 기간·계정과 우연히 맞아 오보정된 사례 확인) — 추정값은 로그(_unit_fix.guess)에만 남김
 """
 import re
 
 AMT = re.compile(r"(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(조|억)(\s*원)?(?!\s*(?:USD|달러|불|엔|위안|유로|\$))")
-KW = [("차입", ("borrowings", "net_borrowings")), ("매출", ("revenue",)), ("영업이익", ("op_income",)), ("EBITDA", ("ebitda",)),
+KW = [("현금성자산", ("cash",)), ("현금흐름", ("cfo", "fcf")), ("매출총이익", ()), ("차입", ("borrowings", "net_borrowings")), ("매출", ("revenue",)), ("영업이익", ("op_income",)), ("EBITDA", ("ebitda",)),
       ("순이익", ("net_income",)), ("현금", ("cash",)), ("자산", ("total_assets",)), ("부채", ("total_liab",)), ("자본", ("equity",))]
 MONEY = ("revenue", "op_income", "net_income", "ebitda", "total_assets", "total_liab", "equity", "cash", "borrowings", "net_borrowings", "cfo", "fcf")
 
@@ -46,7 +46,7 @@ def _fix_text(s, by, cap, nn, log):
         ctx = s[max(0, m.start() - 14):m.start()]
         cands = []
         # 금액 바로 앞에 가장 가까이 나온 계정 키워드 하나만 씀('현금성자산'은 현금 — '자산'으로 읽으면 자산총계와 맞춰져 오보정, 2026-10-29 대한항공 5.4조→54조 사례)
-        hits = [(ctx.rfind(kw), -len(kw), kw, fields) for kw, fields in KW if kw in ctx]
+        hits = [(ctx.rfind(kw) + len(kw), len(kw), kw, fields) for kw, fields in KW if kw in ctx]   # 금액에 가장 가까이 끝나는 키워드, 같으면 긴 것('현금성자산' > '자산')
         if hits:
             _, _, kw, fields = max(hits)
             for f in fields:
@@ -62,9 +62,9 @@ def _fix_text(s, by, cap, nn, log):
         for f in (10, 100, 1000):
             x = v / f
             if cands and near(x, 0.03) and (not cap or x <= cap):
-                new = f"{_fmt(x, unit, raw)}{unit}{won}"
-                log.append({"from": m.group(0).strip(), "to": new.strip(), "ctx": ctx.strip()})
-                return f"{new} (AI 원문 {m.group(0).strip()} → 단위 보정)"
+                # 2026-10-29: 자동으로 숫자를 바꾸지 않음 — 후보 대조가 다른 기간·다른 계정과 우연히 맞는 오보정이 확인됨(HL만도 EBITDA·GS리테일 영업현금흐름 등). 표시만
+                log.append({"from": m.group(0).strip(), "to": None, "ctx": ctx.strip(), "guess": f"{_fmt(x, unit, raw)}{unit}"})
+                return f"{m.group(0)} ⚠ 단위 확인 필요"
         if over:
             log.append({"from": m.group(0).strip(), "to": None, "ctx": ctx.strip()})
             return f"{m.group(0)} ⚠ 단위 확인 필요"
