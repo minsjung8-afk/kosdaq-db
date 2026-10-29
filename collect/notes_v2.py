@@ -577,6 +577,13 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
                     if ok:
                         build_kpi(con, cc, y, rc)
                         got += 1
+                        if codes:                                   # 진단: 주석에서 찾았는데 KPI에 안 들어간 경우(2026-10-30 소노인터내셔널) — build_kpi 판정 근거 출력
+                            for fs in sorted(fss):
+                                kp = con.execute("SELECT da, total_assets, op_income, typeof(bsns_year) FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (cc, y, rc, fs)).fetchone()
+                                dn = con.execute("SELECT da, typeof(bsns_year), src FROM da_notes WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (cc, y, rc, fs)).fetchone()
+                                pr = con.execute("SELECT bsns_year, da FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND bsns_year<? AND da IS NOT NULL ORDER BY bsns_year DESC LIMIT 1", (cc, fs, y)).fetchone()
+                                nraw = con.execute("SELECT COUNT(*) FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (cc, y, rc, fs)).fetchone()[0]
+                                print(f"[da_backfill] 진단 {cc} {y}/{rc}/{fs}: fin_kpi={tuple(kp) if kp else None} · da_notes={tuple(dn) if dn else None} · 직전연간={tuple(pr) if pr else None} · fin_raw {nraw}행 · y타입 {type(y).__name__}", flush=True)
                 st = stat.setdefault((y, rc), {"ok": 0, "절없음": 0, "절있음_상각없음": 0, "보고서없음": 0, "오류": 0})
                 st["ok" if ok else "보고서없음" if not rn else "오류" if secs is None else "절없음" if not secs else "절있음_상각없음"] += 1
                 if not ok and codes:
