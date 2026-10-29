@@ -464,6 +464,7 @@ _RPT_ANN = r"(사업보고서|(연결)?감사보고서)\s*\({y}\.\d{{2}}\)"
 _RPT_INT = {"11012": "06", "11013": "03", "11014": "09"}
 DIAG = {}
 SCAN = {}                                                  # (cc,y,rc,접수번호) → 원문 직접 탐색 상각비(절 구분 실패 대비)
+XML = {}                                                   # 묶음 안에서만 보관, 처리 뒤 제거
 
 
 def _resolve_rcept(cc, y, rc, fs):
@@ -492,9 +493,11 @@ def _resolve_rcept(cc, y, rc, fs):
     return best
 
 
-def backfill(con=None, limit=None, years=4, workers=4, codes=None):
-    """→ 상각비를 새로 채운 (회사, 기간) 수"""
+def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=None):
+    """→ 상각비를 새로 채운 (회사, 기간) 수. budget_sec: 이 시간(초)이 지나면 묶음 경계에서 멈춤(2026-10-30: 야간 수집이 4,500건에 170분을 다 써 다른 단계·사이트 반영이 끊김)"""
     import common
+    import time as _time
+    t0 = _time.time()
     from concurrent.futures import ThreadPoolExecutor
     from datetime import date
     from financials import build_kpi
@@ -541,7 +544,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
             rn, nm = hit
         xml = fetch_document_xml(rn)
         secs = extract_notes_v2(xml)
-        SCAN[(cc, y, rc, rn)] = _da_scan(xml, interim=rc != "11011")
+        XML[(cc, y, rc, rn)] = xml                         # 직접 탐색은 필요할 때만(2026-10-30: 매번 돌리니 건당 4초 → 야간 2,400건에 170분)
         if codes:                                          # --codes(소수 진단) 실행이면 못 찾은 원인 파악용 구조 요약
             DIAG[(cc, y, rc, rn)] = (f"TITLE {len(re.findall(r'<TITLE', xml, flags=re.I))} · SECTION {len(re.findall(r'<SECTION-', xml, flags=re.I))} · "
                                      f"{len(xml) // 1000}KB · 절 {len(secs)}: " + " / ".join(f"{s['t'][:20]}({s.get('fs')})" for s in secs[:25])
@@ -568,8 +571,11 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
                         if not tagged and mine and fs not in mine:
                             continue                        # 구분 하나뿐인 문서(감사보고서)는 자기 구분에만
                         r = da_from_secs(secs or [], fs=fs if tagged else None, interim=rc != "11011")
-                        if not r["da"] and not tagged and ((mine == {fs}) or (not mine and fs == "CFS")) and SCAN.get((cc, y, rc, rn)):
-                            r = {"dep": None, "amort": None, "rou": None, "da": SCAN[(cc, y, rc, rn)]}   # 구분 하나뿐인 문서만 — 사업보고서는 연결·별도 표가 둘 다 있어 첫 표가 어느 쪽인지 모름
+                        if not r["da"] and not tagged and ((mine == {fs}) or (not mine and fs == "CFS")):
+                            if (cc, y, rc, rn) not in SCAN:
+                                SCAN[(cc, y, rc, rn)] = _da_scan(XML.get((cc, y, rc, rn)), interim=rc != "11011")
+                            if SCAN[(cc, y, rc, rn)]:
+                                r = {"dep": None, "amort": None, "rou": None, "da": SCAN[(cc, y, rc, rn)]}   # 구분 하나뿐인 문서만 — 사업보고서는 연결·별도 표가 둘 다 있어 첫 표가 어느 쪽인지 모름
                         if r["da"]:
                             con.execute("INSERT OR REPLACE INTO da_notes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                                         (cc, y, rc, fs, r["dep"], r["amort"], r["rou"], r["da"], rn, "backfill", now()))
@@ -589,11 +595,15 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
                 if not ok and codes:
                     print(f"[da_backfill] 못 찾음 {cc} {y}/{rc} {rn or '보고서 없음'} — {DIAG.get((cc, y, rc, rn), '')}", flush=True)
                 con.execute("INSERT OR REPLACE INTO da_try VALUES (?,?,?,?,?,datetime('now'))", (cc, y, rc, rn or "", ok))
+                XML.pop((cc, y, rc, rn), None); SCAN.pop((cc, y, rc, rn), None)
             con.commit()
             if i % 200 < workers * 5:
                 print(f"[da_backfill] {i}/{len(todo)} · 상각비 확보 {got} · DART {common.CALLS}콜", flush=True)
             if common.QUOTA_HIT:
                 print(f"[da_backfill] DART 한도 도달 — {i}/{len(todo)}에서 중단(다음 실행에서 이어감)", flush=True)
+                break
+            if budget_sec and _time.time() - t0 > budget_sec:
+                print(f"[da_backfill] 시간 예산 {budget_sec // 60}분 소진 — {i}/{len(todo)}에서 중단(다음 실행에서 이어감)", flush=True)
                 break
     print(f"[da_backfill] 완료 {i}/{len(todo)} · 상각비 확보 {got}", flush=True)
     for k in sorted(stat):                                 # 기간별 성공·실패 원인(2026-10-29: 400~1000번째 600건 중 1건 성공 — 원인 추적용)
