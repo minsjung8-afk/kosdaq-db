@@ -463,6 +463,7 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
 _RPT_ANN = r"(사업보고서|(연결)?감사보고서)\s*\({y}\.\d{{2}}\)"
 _RPT_INT = {"11012": "06", "11013": "03", "11014": "09"}
 DIAG = {}
+SCAN = {}                                                  # (cc,y,rc,접수번호) → 원문 직접 탐색 상각비(절 구분 실패 대비)
 
 
 def _resolve_rcept(cc, y, rc, fs):
@@ -540,6 +541,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
             rn, nm = hit
         xml = fetch_document_xml(rn)
         secs = extract_notes_v2(xml)
+        SCAN[(cc, y, rc, rn)] = _da_scan(xml, interim=rc != "11011")
         if codes:                                          # --codes(소수 진단) 실행이면 못 찾은 원인 파악용 구조 요약
             DIAG[(cc, y, rc, rn)] = (f"TITLE {len(re.findall(r'<TITLE', xml, flags=re.I))} · SECTION {len(re.findall(r'<SECTION-', xml, flags=re.I))} · "
                                      f"{len(xml) // 1000}KB · 절 {len(secs)}: " + " / ".join(f"{s['t'][:20]}({s.get('fs')})" for s in secs[:25])
@@ -556,15 +558,17 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
                 if rn is None:
                     continue                                # 한도·오류 — 기록 없이 다음 실행에서 다시
                 ok = 0
-                if secs:
+                if True:
                     # 연결·별도 주석이 둘 다 있는 문서(사업·반기보고서)만 구분별로 읽음. 감사보고서는 주석 제목이 '주석' 하나라 별도로 표시되므로
                     # 구분을 무시하고 읽어, 그 문서를 접수번호로 가진 구분(연결감사보고서 → 연결)에만 저장
-                    tagged = {s.get("fs") for s in secs} >= {"CFS", "OFS"}
+                    tagged = {s.get("fs") for s in (secs or [])} >= {"CFS", "OFS"}
                     mine = {fs for fs, v in own.get((cc, y, rc), {}).items() if v == rn}
                     for fs in sorted(fss):
                         if not tagged and mine and fs not in mine:
                             continue                        # 구분 하나뿐인 문서(감사보고서)는 자기 구분에만
-                        r = da_from_secs(secs, fs=fs if tagged else None, interim=rc != "11011")
+                        r = da_from_secs(secs or [], fs=fs if tagged else None, interim=rc != "11011")
+                        if not r["da"] and not tagged and ((mine == {fs}) or (not mine and fs == "CFS")) and SCAN.get((cc, y, rc, rn)):
+                            r = {"dep": None, "amort": None, "rou": None, "da": SCAN[(cc, y, rc, rn)]}   # 구분 하나뿐인 문서만 — 사업보고서는 연결·별도 표가 둘 다 있어 첫 표가 어느 쪽인지 모름
                         if r["da"]:
                             con.execute("INSERT OR REPLACE INTO da_notes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                                         (cc, y, rc, fs, r["dep"], r["amort"], r["rou"], r["da"], rn, "backfill", now()))
@@ -595,3 +599,30 @@ def _safe(fn, t):
             return t, None, None                            # 한도 — 기록 없이 다음 실행에서
         print(f"[da_backfill] {t[0]} {t[1]}/{t[2]} 실패: {str(e)[:60]}", flush=True)
         return t, "", None                                  # 그 밖의 오류는 시도 기록(30일 뒤 재시도)
+
+
+_NAT_HEAD = re.compile(r"비\s*용\s*의\s*성\s*격\s*별\s*분\s*류")
+_NAT_SIG = re.compile(r"(급여|퇴직급여|복리후생|지급수수료|원재료|상품|재고자산의?변동)")
+
+
+def _da_scan(xml, interim=False):
+    """주석 절 구분을 못 하는 원문(감사보고서 등 — 2026-10-29 소노인터내셔널: 절 0개)용 직접 탐색.
+    '비용의 성격별 분류' 문구 뒤 표 3개 안에서, 급여·지급수수료 등 성격별 항목과 상각비 행이 함께 있는 첫 표(=당기) → 상각비 합.
+    유형자산 변동표의 '감가상각비' 행을 잘못 집지 않도록 성격별 항목 2개 이상을 요구."""
+    for m in _NAT_HEAD.finditer(xml or ""):
+        seg = xml[m.start():m.start() + 60000]
+        n = 0
+        for b in _blocks(seg):
+            if "tbl" not in b:
+                continue
+            n += 1
+            if n > 3:
+                break
+            rows = b["tbl"]["rows"]
+            sig = sum(1 for r in rows if r and _NAT_SIG.search((r[0] or "").replace(" ", "")))
+            if sig < 2:
+                continue
+            v = _da_from_nature(b["tbl"], interim)
+            if v:
+                return v
+    return None
