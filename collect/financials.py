@@ -368,6 +368,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 continue
             if ta and v > ta * 0.25:
                 continue
+            if ta and src != "본문" and v < ta * 0.0002:
+                continue                               # 주석값이 총자산의 0.02% 미만이면 단위(천원) 누락 의심 → 버림(2026-10-30 소노인터내셔널 1,094억→1.09억)
             if ref and not (ref / 4 <= v <= ref * 4):
                 continue
             if cap and v > cap:

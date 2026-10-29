@@ -25,8 +25,19 @@ PARSER_VER = 4          # 4: 비용의 성격별 분류 절 추가 수집(2026-1
 
 
 def _unit_of(text):
-    m = re.search(r"단위\s*[:：]?\s*([천백십억만]*원)", text or "")
-    return UNIT.get(m.group(1), 1) if m else 1
+    """표 앞 문구의 '(단위: 천원)' → 배수. 여러 개면 표에 가장 가까운(마지막) 것(2026-10-30 소노인터내셔널: 앞쪽 다른 단위 문구를 집어 1,094억을 1.09억으로 저장 → 상식 점검에 걸려 KPI 공백)"""
+    ms = re.findall(r"단위\s*[:：]?\s*([천백십억만]*원)", text or "")
+    return UNIT.get(ms[-1], 1) if ms else 1
+
+
+def _tbl_unit(rows):
+    """표 안(머리글·첫 행)에 적힌 '(단위: 천원)' — 없으면 None"""
+    for r in rows[:3]:
+        for c in r:
+            m = re.search(r"단위\s*[:：]?\s*([천백십억만]*원)", c or "")
+            if m:
+                return UNIT.get(m.group(1), 1)
+    return None
 
 
 def _num(cell):
@@ -56,7 +67,7 @@ def _blocks(sec_xml, cap=True):
             if len(rows) >= MAX_ROWS:
                 break
         if rows:
-            unit = _unit_of(_strip(sec_xml[max(0, tm.start() - 600):tm.start()]))
+            unit = _tbl_unit(rows) or _unit_of(_strip(sec_xml[max(0, tm.start() - 1500):tm.start()]))   # 600→1500자: 제목·설명 문단의 XML 태그가 길면 단위 문구가 창 밖으로 밀림
             out.append({"tbl": {"unit": unit, "rows": rows}})
         pos = tm.end()
     tail = _strip(sec_xml[pos:])
