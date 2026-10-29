@@ -772,6 +772,9 @@ def build():
     (SITE / "data" / "c").mkdir(parents=True)
     shutil.copy(TEMPLATE, SITE / "index.html")
     shutil.copytree(TEMPLATE.parent / "lib", SITE / "lib")          # 차트 라이브러리(Lightweight Charts, Apache-2.0)
+    for fn in ("manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):   # PWA(2026-10-29, 앱 이름 '심사DB')
+        shutil.copy(TEMPLATE.parent / fn, SITE / fn)
+    (SITE / "sw.js").write_text((TEMPLATE.parent / "sw.js").read_text(encoding="utf-8").replace("__BUILD__", __import__("datetime").datetime.now().strftime("%Y%m%d%H%M")), encoding="utf-8")
     fdir = ROOT / "functions" / "api"                                   # Pages Functions(회사 추가: /api/corp 검색, /api/add 등록) — pages deploy가 저장소 루트 functions/를 함께 올림(2026-10-26)
     fdir.mkdir(parents=True, exist_ok=True)
     for src in TEMPLATE.parent.glob("fn_api_*.js"):
