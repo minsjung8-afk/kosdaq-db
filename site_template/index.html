@@ -40,6 +40,8 @@ header .srcline .lbl{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:#
 header .srcline .chip{font-size:10.5px;font-weight:700;color:#D3E3F2;white-space:nowrap;border:1px solid rgba(201,162,39,.42);background:rgba(255,255,255,.055);border-radius:999px;padding:3px 10px}
 header .srcline .chip small{font-weight:500;color:#9fb6cc;margin-left:4px}
 header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6}
+#instBtn{font:700 12px var(--font);color:#0F2942;background:var(--gold-soft);border:0;border-radius:999px;padding:5px 12px;margin-bottom:6px;cursor:pointer}
+#instTip{max-width:260px;margin:0 0 6px auto;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.1);color:#E8EEF6;font-size:12px;text-align:left;line-height:1.5}
 #visit{position:fixed;right:14px;bottom:12px;z-index:50;padding:4px 11px;border-radius:999px;background:rgba(15,30,55,.82);color:#cfdcf0;font-size:11.5px;box-shadow:0 2px 8px rgba(0,0,0,.18);pointer-events:none}#visit:empty{display:none}#visit b{color:#fff;font-variant-numeric:tabular-nums}#visit .vl{font-size:10.5px;letter-spacing:.04em}
 @media print{#visit{display:none}}
 #band{grid-column:1/-1;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;padding:11px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
@@ -163,7 +165,8 @@ a{color:var(--navy2)}
   html,body{height:auto}
   body{display:block;font-size:13.5px}
   header{padding:10px max(14px,env(safe-area-inset-right,0px)) 10px max(14px,env(safe-area-inset-left,0px))}
-  header .eyebrow,header .lead,header .srcline,header .meta{display:none}
+  header .eyebrow,header .lead,header .srcline,header #meta{display:none}
+  header .hin{align-items:center}header .meta{text-align:right}#instBtn{margin:0}
   header h1{font-size:15px;margin:0}
   #band{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:8px 10px}
   #band .bc{padding:6px 8px}#band .v{font-size:12.5px}#band .k{font-size:9.5px}#band .s{display:none}
@@ -277,7 +280,7 @@ table.ft th.fcur{box-shadow:inset 0 -2px 0 var(--gold)}
     <span class="chip">금융감독원<small>신용평가서 공시</small></span>
     <span class="chip">Google News<small>헤드라인</small></span>
     <span class="chip">Claude AI<small>사업내용 요약</small></span></div>
- </div><div class="meta" id="meta">불러오는 중</div></div></header>
+ </div><div class="meta"><button type="button" id="instBtn" hidden>⬇ 앱 설치 (심사DB)</button><div id="instTip" hidden></div><div id="meta">불러오는 중</div></div></div></header>
 <div id="band"></div>
 <aside>
   <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button><button class="mbtn" data-m="UNLISTED">비상장</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div><button class="mbtn" id="addBtn" style="margin-top:6px" title="DB에 없는 회사(감사보고서 제출 법인)를 관리자 비밀번호로 추가">＋ 회사 추가</button></div>
@@ -297,6 +300,15 @@ table.ft th.fcur{box-shadow:inset 0 -2px 0 var(--gold)}
 const $=s=>document.querySelector(s);
 // PWA: 홈 화면 추가·오프라인(마지막으로 본 화면) 지원 — 데이터는 항상 네트워크 우선(2026-10-29)
 if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+// 앱 설치 버튼: 크롬·엣지·안드로이드는 설치 창을 바로 띄우고, 아이폰·아이패드 Safari는 '공유 → 홈 화면에 추가' 안내(2026-10-29)
+{let bip=null; const inst=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+ const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ window.addEventListener('beforeinstallprompt',e=>{e.preventDefault(); bip=e; const b=document.getElementById('instBtn'); if(b&&!inst()) b.hidden=false;});
+ window.addEventListener('appinstalled',()=>{const b=document.getElementById('instBtn'); if(b) b.hidden=true;});
+ window.addEventListener('DOMContentLoaded',()=>{const b=document.getElementById('instBtn'), t=document.getElementById('instTip'); if(!b) return;
+   if(ios&&!inst()) b.hidden=false;
+   b.onclick=async()=>{ if(bip){ bip.prompt(); try{await bip.userChoice;}catch(e){} bip=null; b.hidden=true; return; }
+     t.innerHTML=ios?'Safari 아래쪽 <b>공유 버튼(□↑)</b> → <b>홈 화면에 추가</b>를 누르면 ‘심사DB’ 앱으로 설치됩니다.':'브라우저 메뉴(⋮) → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 누르세요.'; t.hidden=!t.hidden; };});}
 const 억=v=>v==null?'-':(v/1e8).toLocaleString('ko-KR',{maximumFractionDigits:0});
 const pct=v=>v==null?'-':v.toFixed(1)+'%';
 // 1조 이상 금액은 '1,297조 8,739억'으로(2026-10-29 사용자 요청 — '12,978,739억'은 읽기 불편). 표 안의 억원 열은 그대로
