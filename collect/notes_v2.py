@@ -549,6 +549,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
         return t, rn, secs
 
     got = i = 0
+    stat = {}                                              # (y, rc) → {ok, 절없음, 절있음_상각없음, 보고서없음, 오류}
     with ThreadPoolExecutor(workers) as ex:
         for b in range(0, len(todo), workers * 5):
             res = list(ex.map(lambda t: _safe(work, t), todo[b:b + workers * 5]))
@@ -576,6 +577,8 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
                     if ok:
                         build_kpi(con, cc, y, rc)
                         got += 1
+                st = stat.setdefault((y, rc), {"ok": 0, "절없음": 0, "절있음_상각없음": 0, "보고서없음": 0, "오류": 0})
+                st["ok" if ok else "보고서없음" if not rn else "오류" if secs is None else "절없음" if not secs else "절있음_상각없음"] += 1
                 if not ok and codes:
                     print(f"[da_backfill] 못 찾음 {cc} {y}/{rc} {rn or '보고서 없음'} — {DIAG.get((cc, y, rc, rn), '')}", flush=True)
                 con.execute("INSERT OR REPLACE INTO da_try VALUES (?,?,?,?,?,datetime('now'))", (cc, y, rc, rn or "", ok))
@@ -586,6 +589,8 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
                 print(f"[da_backfill] DART 한도 도달 — {i}/{len(todo)}에서 중단(다음 실행에서 이어감)", flush=True)
                 break
     print(f"[da_backfill] 완료 {i}/{len(todo)} · 상각비 확보 {got}", flush=True)
+    for k in sorted(stat):                                 # 기간별 성공·실패 원인(2026-10-29: 400~1000번째 600건 중 1건 성공 — 원인 추적용)
+        print(f"[da_backfill]   {k[0]}/{k[1]}: " + " · ".join(f"{a} {b}" for a, b in stat[k].items() if b), flush=True)
     return got
 
 
