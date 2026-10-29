@@ -462,6 +462,7 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
 #   - 시도 기록(da_try)을 남겨 못 찾은 보고서는 30일 동안 다시 받지 않음
 _RPT_ANN = r"(사업보고서|(연결)?감사보고서)\s*\({y}\.\d{{2}}\)"
 _RPT_INT = {"11012": "06", "11013": "03", "11014": "09"}
+DIAG = {}
 
 
 def _resolve_rcept(cc, y, rc, fs):
@@ -508,7 +509,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
         own.setdefault((cc, y, rc), {})[fs] = rn
     need = {}
     for cc, y, rc, fs, rn in rows:
-        if (cc, y, rc) in tried or (codes and cc not in codes):
+        if ((cc, y, rc) in tried and not codes) or (codes and cc not in codes):
             continue
         need.setdefault((cc, y, rc), set()).add(fs)
     todo = []                                              # (cc, y, rc, rcept, {fs들}) — 같은 문서는 한 번만
@@ -537,7 +538,13 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
             if not hit:
                 return t, "", None
             rn, nm = hit
-        return t, rn, extract_notes_v2(fetch_document_xml(rn))
+        xml = fetch_document_xml(rn)
+        secs = extract_notes_v2(xml)
+        if codes:                                          # --codes(소수 진단) 실행이면 못 찾은 원인 파악용 구조 요약
+            DIAG[(cc, y, rc, rn)] = (f"TITLE {len(re.findall(r'<TITLE', xml, flags=re.I))} · SECTION {len(re.findall(r'<SECTION-', xml, flags=re.I))} · "
+                                     f"{len(xml) // 1000}KB · 절 {len(secs)}: " + " / ".join(f"{s['t'][:20]}({s.get('fs')})" for s in secs[:25])
+                                     + " · 성격별 문구 " + str(len(re.findall(r'성격별', xml))))
+        return t, rn, secs
 
     got = i = 0
     with ThreadPoolExecutor(workers) as ex:
@@ -565,6 +572,8 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
                     if ok:
                         build_kpi(con, cc, y, rc)
                         got += 1
+                if not ok and codes:
+                    print(f"[da_backfill] 못 찾음 {cc} {y}/{rc} {rn or '보고서 없음'} — {DIAG.get((cc, y, rc, rn), '')}", flush=True)
                 con.execute("INSERT OR REPLACE INTO da_try VALUES (?,?,?,?,?,datetime('now'))", (cc, y, rc, rn or "", ok))
             con.commit()
             if i % 200 < workers * 5:
