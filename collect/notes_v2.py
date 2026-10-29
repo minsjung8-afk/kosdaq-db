@@ -522,6 +522,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None):
             by.setdefault(rn, set()).add(fs)
         for rn, s in by.items():
             todo.append((cc, y, rc, rn, s))
+    todo.sort(key=lambda t: (t[2] not in ("11011", "11012"), t[1], t[2]))   # 사이트에 보이는 연간·반기 먼저(분기는 뒤), 같은 우선순위 안에선 과거 → 최근(직전 연간이 상식 점검 기준)
     if limit:
         todo = todo[:limit]
     print(f"[da_backfill] 상각비 빈 행 {len(rows)}건 → 보고서 {len(todo)}건(최근 {years}개 사업연도, 30일 내 실패분 제외) · 병렬 {workers}", flush=True)
