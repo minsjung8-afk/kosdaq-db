@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -425,6 +425,7 @@ def main():
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("da", lambda: __import__("da_xbrl").run(con=con)),
                  ("da_notes", lambda: __import__("notes_v2").run(con=con)),   # XBRL에 없는 상각비는 주석 변동표에서(2026-10-24)   # 상각비(XBRL) — 건당 수초로 느려 분기·주석·요약 뒤로(2026-10-23)
+                 ("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4000)),   # 지난 연도·분기 상각비 공백 보강(2026-10-29 소노인터내셔널·대한유화 EBITDA 누락) — 하루 최대 4,000건
                  ("audit_scan", lambda: __import__("audit_filers").run()),   # 감사보고서만 내는 비상장 500억↑ 선별 — 남는 한도로 매일 이어감(2026-10-29 사용자 요청)
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2011-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 2011년까지(2026-10-23 사용자 요청) — KRX는 연속 호출 수백 건 후 차단되므로 야간 분할
         import os as _os
@@ -466,6 +467,9 @@ def main():
         import notes_v2
         notes_v2.run(set(ccs) if a.codes else None, limit=a.limit, con=con)
         print("KPI 재계산:", __import__("financials").rebuild_kpi_all(con), "건", flush=True)
+    if a.job == "da_backfill":                # 2026-10-29: 지난 연도·지난 분기 상각비 보강(EBITDA 공백) — 빈 행의 보고서 원문 1콜씩, DART만
+        import notes_v2
+        notes_v2.backfill(con, limit=a.limit, codes=set(ccs) if a.codes else None)
     if a.job == "rawdump":                    # 진단: 지정 종목의 fin_raw 손익 행(연결·별도, 최근 분기)을 로그에 출력 — DART 호출 없음
         if a.type == "손익전체":            # 2026-10-28 금융업 매출(영업수익) 미매핑 진단: 최근 사업보고서 손익 계정 전부(account_id·계정명·금액)
             for cc, sc in pairs:
