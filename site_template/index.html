@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>상장사 및 신용등급 보유사 심사참고 DB</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#143454">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="심사DB"><meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="icon" href="icon-192.png">
 <script src="lib/lightweight-charts.standalone.production.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <style>
@@ -290,6 +295,8 @@ table.ft th.fcur{box-shadow:inset 0 -2px 0 var(--gold)}
 </div>
 <script>
 const $=s=>document.querySelector(s);
+// PWA: 홈 화면 추가·오프라인(마지막으로 본 화면) 지원 — 데이터는 항상 네트워크 우선(2026-10-29)
+if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 const 억=v=>v==null?'-':(v/1e8).toLocaleString('ko-KR',{maximumFractionDigits:0});
 const pct=v=>v==null?'-':v.toFixed(1)+'%';
 // 1조 이상 금액은 '1,297조 8,739억'으로(2026-10-29 사용자 요청 — '12,978,739억'은 읽기 불편). 표 안의 억원 열은 그대로

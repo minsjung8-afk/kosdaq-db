@@ -1,0 +1,16 @@
+{
+  "name": "심사DB",
+  "short_name": "심사DB",
+  "description": "상장사·신용등급 보유사의 재무·차입·메자닌·주가·신용등급을 한 화면에 — 심사 참고용",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f6fa",
+  "theme_color": "#143454",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
