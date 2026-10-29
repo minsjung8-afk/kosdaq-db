@@ -351,6 +351,15 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 ref = abs(pr[0]) * {"11013": 0.25, "11012": 0.5, "11014": 0.75}.get(reprt_code, 1.0)
         except Exception:  # noqa
             pass
+        cap = None                                     # 같은 사업연도 연간 상각비가 있으면 분기·반기 누적은 그 비율 이내(2026-10-29 동부건설 2025 반기 156억 > 연간 152억 오독)
+        if reprt_code != "11011":
+            try:
+                sa = con.execute("SELECT da FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND bsns_year=? AND da IS NOT NULL",
+                                 (corp_code, fs_div, bsns_year)).fetchone()
+                if sa and sa[0]:
+                    cap = abs(sa[0]) * {"11013": 0.5, "11012": 0.8, "11014": 1.0}.get(reprt_code, 1.0)
+            except Exception:  # noqa
+                pass
         ta = k.get("total_assets")
         k["da"] = None
         for src, v in cands:
@@ -359,6 +368,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             if ta and v > ta * 0.25:
                 continue
             if ref and not (ref / 4 <= v <= ref * 4):
+                continue
+            if cap and v > cap:
                 continue
             k["da"] = v
             break

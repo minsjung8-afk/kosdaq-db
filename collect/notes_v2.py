@@ -261,6 +261,25 @@ def _da_from_nature(tbl, interim=False):
     return tot * unit if hit and tot else None
 
 
+_CF_ROW = re.compile(r"(감가상각|무형자산상각|사용권자산상각|투자부동산상각|^상각비)")
+_CF_EX = re.compile(r"(대손|손상|환입|처분|충당|누계|채권|할인|현재가치|평가|이연)")
+
+
+def _da_from_cf(tbl):
+    """'현금흐름표' 주석의 '당기순이익 조정' 표 1개 → 상각비 합(원). 행: 감가상각비(에 대한 조정)·무형자산상각비·사용권자산상각비 등, 열: 첫 숫자 열(당기·당반기 누적).
+    2026-10-29 동부건설 2026 반기: 현금흐름표 본문은 '영업에서 창출된 현금' 한 줄 · 변동표 없음 → 주석 37 '감가상각비에 대한 조정 7,408 + 무형자산상각비 255'(백만원)"""
+    rows, unit = tbl["rows"], tbl.get("unit", 1) or 1
+    tot, hit = 0.0, False
+    for r in rows or []:
+        nm = (r[0] or "").replace(" ", "") if r else ""
+        if not _CF_ROW.search(nm) or _CF_EX.search(nm):
+            continue
+        nums = [_num(c) for c in r[1:] if _num(c) is not None]
+        if nums:
+            tot += abs(nums[0]); hit = True
+    return tot * unit if hit and tot else None
+
+
 def da_from_secs(secs, fs=None, interim=False):
     """[{t, fs, blocks}] → {dep, amort, rou, da}. 각 절에서 상각비 행이 있는 첫 표(=당기 변동표)만 사용. fs 지정 시 그 구분 절만(구분 없는 절은 포함)."""
     res = {"dep": None, "amort": None, "rou": None, "inv": None}
@@ -282,7 +301,20 @@ def da_from_secs(secs, fs=None, interim=False):
     out = {"dep": dep or None, "amort": res["amort"], "rou": res["rou"]}
     parts = [v for v in out.values() if v]
     out["da"] = sum(parts) if parts else None
-    # 비용의 성격별 분류가 있으면 그 값을 우선(손익계산서 비용 기준으로 명시된 금액 — 변동표 오독 위험이 없음)
+    # 현금흐름표 주석의 조정 항목(감가상각비 등)이 있으면 변동표보다 우선(현금흐름 조정 = 당기 비용으로 확정된 금액, 2026-10-29)
+    for s in secs:
+        if fs and s.get("fs") and s["fs"] != fs:
+            continue
+        if "현금흐름" in s["t"].replace(" ", ""):
+            for b in s["blocks"]:
+                if "tbl" in b:
+                    v = _da_from_cf(b["tbl"])
+                    if v:
+                        out["da"], out["src"] = v, "현금흐름"
+                        break
+            if out.get("src"):
+                break
+    # 비용의 성격별 분류가 있으면 그 값을 최우선(손익계산서 비용 기준으로 명시된 금액 — 변동표 오독 위험이 없음)
     for s in secs:
         if fs and s.get("fs") and s["fs"] != fs:
             continue
@@ -293,7 +325,7 @@ def da_from_secs(secs, fs=None, interim=False):
                     if v:
                         out["da"], out["src"] = v, "성격별"
                         break
-            if out.get("src"):
+            if out.get("src") == "성격별":
                 break
     return out
 
@@ -353,7 +385,7 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
     have_q = {(r[0], r[1]) for r in con.execute("SELECT corp_code, rcept_no FROM da_notes")}
     k0 = 0
     for r in con.execute("SELECT corp_code, rcept_no, report_nm, notes_j FROM notes_latest WHERE notes_j IS NOT NULL"):
-        if (not corp_codes or r[0] in corp_codes) and (r[0], r[1]) not in have_q:
+        if (not corp_codes or r[0] in corp_codes) and (corp_codes or (r[0], r[1]) not in have_q):   # --codes 지정 시 파서 개선분 반영 위해 다시 계산
             try:
                 secs = json.loads(ztext(r[3]) or "[]")
                 y, rc = _report_key(r[2])
@@ -363,7 +395,7 @@ def run(corp_codes=None, limit=None, con=None, workers=4):
                 log(con, r[0], "notes_v2", "fail", e)
     have_a = {(r[0], r[1]) for r in con.execute("SELECT corp_code, rcept_no FROM da_notes WHERE src='annual'")}
     for r in con.execute("SELECT corp_code, rcept_no, report_nm, secs_j FROM notes_annual WHERE secs_j IS NOT NULL"):
-        if (not corp_codes or r[0] in corp_codes) and (r[0], r[1]) not in have_a:
+        if (not corp_codes or r[0] in corp_codes) and (corp_codes or (r[0], r[1]) not in have_a):
             try:
                 secs = json.loads(ztext(r[3]) or "[]")
                 y, rc = _report_key(r[2])
