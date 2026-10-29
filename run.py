@@ -408,7 +408,7 @@ def main():
                 except Exception:  # noqa
                     _c["v"] = set()
             return _c["v"]
-        steps = [("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
+        steps = [("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=90 * 60)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
                  ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
                  ("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
