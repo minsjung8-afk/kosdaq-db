@@ -408,7 +408,8 @@ def main():
                 except Exception:  # noqa
                     _c["v"] = set()
             return _c["v"]
-        steps = [("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
+        steps = [("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
+                 ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
                  ("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
                  ("summarize", lambda: (__import__("summarize").run_all(None, model="haiku", force=False),
@@ -425,7 +426,6 @@ def main():
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("da", lambda: __import__("da_xbrl").run(con=con)),
                  ("da_notes", lambda: __import__("notes_v2").run(con=con)),   # XBRL에 없는 상각비는 주석 변동표에서(2026-10-24)   # 상각비(XBRL) — 건당 수초로 느려 분기·주석·요약 뒤로(2026-10-23)
-                 ("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4000)),   # 지난 연도·분기 상각비 공백 보강(2026-10-29 소노인터내셔널·대한유화 EBITDA 누락) — 하루 최대 4,000건
                  ("audit_scan", lambda: __import__("audit_filers").run()),   # 감사보고서만 내는 비상장 500억↑ 선별 — 남는 한도로 매일 이어감(2026-10-29 사용자 요청)
                  ("price_backfill", lambda: __import__("prices").backfill(pairs, start="2011-01-01", max_calls=1500))]   # 과거 시세(최근→과거, 시장별 1,500콜/일): 2011년까지(2026-10-23 사용자 요청) — KRX는 연속 호출 수백 건 후 차단되므로 야간 분할
         import os as _os
