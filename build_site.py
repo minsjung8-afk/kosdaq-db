@@ -336,7 +336,13 @@ def company_detail(con, c):
                                 ORDER BY COALESCE(rcept_no,'') DESC, bsns_year DESC, CASE COALESCE(reprt_code,'11011') WHEN '11014' THEN 3 WHEN '11012' THEN 2 WHEN '11013' THEN 1 ELSE 0 END DESC LIMIT 1)
                                ORDER BY trmend_book_amt DESC LIMIT 8""", cc, cc),   # 최신 보고서(접수번호 최대) 세트
     }
-    d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], d["ratings"])
+    # 2026-10-29 사용자 결정: 타사 보증부 등급(은행·계열사 지급보증·신용보강 사채·CP)은 대상회사 신용도가 아니므로 대표 등급·플래그·평가서 요약에서 제외(이력 표에는 '보증부'로 남김)
+    for r in d["ratings"] or []:
+        r["guar"] = _guar(r)
+    gfiles = {r.get("file_url") for r in d["ratings"] or [] if r["guar"] and r.get("file_url")}
+    if d.get("rating_summary") and d["rating_summary"].get("file_url") in gfiles:
+        d["rating_summary"] = None
+    d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], [r for r in d["ratings"] or [] if not r["guar"]])
     rv = d.get("review")
     if rv and rv.get("opinion") and not re.match(r"^\s*적정", rv["opinion"]):     # 반기·분기 검토의견 비적정 — 다음 연말 감사의견의 선행 신호
         d["flags"].insert(0, (f"{rv['period']} 검토의견 비적정", "red", f"{rv['bsns_year']} {rv['period']} {rv['opinion']} ({rv.get('adtor') or ''})"))
@@ -659,6 +665,14 @@ _SUB_RE = re.compile(r"신종자본|후순위|조건부자본|영구채|하이�
 _SHORT_RE = re.compile(r"기업어음|단기사채|CP|전단채")
 
 
+_GUAR_RE = re.compile(r"(?<!무)보증|신용보강|지급확약")
+
+
+def _guar(r):
+    """타사 보증부 등급인지: 평가대상 종류에 '보증'(무보증 제외)·'신용보강'·'지급확약'이 있으면 True — 예: '제57(ORIX 지급보증)회 외 금융채', '보증사채'"""
+    return bool(_GUAR_RE.search(r.get("target_type") or ""))
+
+
 def _cls(r):
     """평가대상 분류(2026-10-28 한화투자증권: 신종자본증권 A가 대표, 만기 ELB '취소'가 장기 AA- 취소로 표시되던 문제)
     ① 기업신용평가 → issuer ② 신종자본·후순위·조건부자본 → sub(선순위보다 낮게 매겨지는 노칭 등급) ③ CP·전단채 → short
@@ -812,7 +826,7 @@ def build():
         k = next((r for r in reversed(_rows) if r.get("kind") == "annual"), _rows[-1])   # 검색 인덱스는 최근 연간 기준
         ps = d["price_summary"] or {}
         ao = d["audit"][0] if d["audit"] else {}
-        cur_rt, d["rating_status"], d["rating_aux"] = rating_view(d["ratings"])
+        cur_rt, d["rating_status"], d["rating_aux"] = rating_view([r for r in d["ratings"] or [] if not r.get("guar")])   # 보증부 등급 제외(2026-10-29)
         d["rating_cur"] = cur_rt
         (SITE / "data" / "c" / f"{c['stock_code']}.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
         index.append({"code": c["stock_code"], "name": c["corp_name"], "sector": c["sector_krx"], "sect": c.get("sect_tp"), "market": c["market"], "delisted": c.get("delisted_dt"),
