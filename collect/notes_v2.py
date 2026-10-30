@@ -564,9 +564,16 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
 
     got = i = 0
     stat = {}                                              # (y, rc) → {ok, 절없음, 절있음_상각없음, 보고서없음, 오류}
+    # 2026-10-30: 20건씩 묶어 가장 느린 1건을 기다리던 구조(대형사 사업보고서 1건 20~30초 → 분당 14건) → 끝나는 순서대로 처리하고 빈자리를 채움, 병렬 8
+    from concurrent.futures import wait, FIRST_COMPLETED
+    workers = max(workers, 8)
     with ThreadPoolExecutor(workers) as ex:
-        for b in range(0, len(todo), workers * 5):
-            res = list(ex.map(lambda t: _safe(work, t), todo[b:b + workers * 5]))
+        pending, nxt, stop = set(), 0, False
+        while (pending or nxt < len(todo)) and not stop:
+            while nxt < len(todo) and len(pending) < workers * 2:
+                pending.add(ex.submit(_safe, work, todo[nxt])); nxt += 1
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            res = [f.result() for f in done]
             for t, rn, secs in res:
                 i += 1
                 cc, y, rc, _rn0, fss = t
@@ -608,14 +615,16 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
                 con.execute("INSERT OR REPLACE INTO da_try VALUES (?,?,?,?,?,datetime('now'))", (cc, y, rc, rn or "", ok))
                 XML.pop((cc, y, rc, rn), None); SCAN.pop((cc, y, rc, rn), None)
             con.commit()
-            if i % 200 < workers * 5:
+            if i % 200 < len(res):
                 print(f"[da_backfill] {i}/{len(todo)} · 상각비 확보 {got} · DART {common.CALLS}콜", flush=True)
             if common.QUOTA_HIT:
                 print(f"[da_backfill] DART 한도 도달 — {i}/{len(todo)}에서 중단(다음 실행에서 이어감)", flush=True)
-                break
+                stop = True
             if budget_sec and _time.time() - t0 > budget_sec:
                 print(f"[da_backfill] 시간 예산 {budget_sec // 60}분 소진 — {i}/{len(todo)}에서 중단(다음 실행에서 이어감)", flush=True)
-                break
+                stop = True
+        for f in pending:                                  # 중단 시 아직 안 끝난 다운로드는 결과만 버림(저장 안 함 → 다음 실행에서 다시)
+            f.cancel()
     print(f"[da_backfill] 완료 {i}/{len(todo)} · 상각비 확보 {got}", flush=True)
     for k in sorted(stat):                                 # 기간별 성공·실패 원인(2026-10-29: 400~1000번째 600건 중 1건 성공 — 원인 추적용)
         print(f"[da_backfill]   {k[0]}/{k[1]}: " + " · ".join(f"{a} {b}" for a, b in stat[k].items() if b), flush=True)
