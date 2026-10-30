@@ -99,7 +99,8 @@ def _pdf_text(data: bytes, max_pages=40):
     return "\n".join((rd.pages[i].extract_text() or "") for i in range(min(n, max_pages))), n
 
 
-def run_rating(corp_codes=None, force=False, model="claude-sonnet-4-5"):
+def run_rating(corp_codes=None, force=False, model="claude-sonnet-4-5", guard=""):
+    model = MODELS.get(model, model)
     """등급 보유사: 최신 기업신용평가(없으면 사채) 평가서 PDF → 사업 요약. PDF는 메모리에서만 처리."""
     import anthropic  # noqa
     import requests  # noqa
@@ -147,7 +148,7 @@ def run_rating(corp_codes=None, force=False, model="claude-sonnet-4-5"):
             if len(text) < 500:
                 continue
             msg = client.messages.create(model=model, max_tokens=4000,
-                                         messages=[{"role": "user", "content": RATING_PROMPT + text[:150_000]}])
+                                         messages=[{"role": "user", "content": RATING_PROMPT + _guard_text(guard, con, cc) + text[:150_000]}])
             js = _parse_json(msg.content[0].text)
             con.execute("INSERT OR REPLACE INTO rating_summary VALUES (?,?,?,?,?,?,?,?,?)",
                         (cc, r["agency"], r["disc_dt"], r["grade"], r["file_url"], json.dumps(js, ensure_ascii=False),
@@ -217,8 +218,8 @@ def _latest_ratings(con, include_cp=False):
     return out
 
 
-def run_all(corp_codes=None, model="haiku", force=False, workers=10, limit=None):
-    """전 종목 요약. force=True여도 '같은 모델·같은 근거'로 이미 만든 건 건너뜀(타임아웃 후 재개)."""
+def run_all(corp_codes=None, model="haiku", force=False, workers=10, limit=None, renew=False, guard=""):
+    """전 종목 요약. force=True여도 '같은 모델·같은 근거'로 이미 만든 건 건너뜀(타임아웃 후 재개). renew=True면 무조건 다시(단위 오류 재생성용), guard=프롬프트 앞에 붙일 추가 지시"""
     import time
     import requests
     from concurrent.futures import ThreadPoolExecutor
@@ -241,10 +242,10 @@ def run_all(corp_codes=None, model="haiku", force=False, workers=10, limit=None)
         old = json.loads(b["summary_json"]) if b["summary_json"] else None
         rr = rat.get(cc)
         want_kind = "combined" if rr else "biz"
-        if old and old.get("_model") == mid and old.get("_kind", "biz") == want_kind and \
+        if old and not renew and old.get("_model") == mid and old.get("_kind", "biz") == want_kind and \
            (not rr or (old.get("_rating") or {}).get("disc_dt") == rr["disc_dt"]):
             continue                                  # 이미 최신 근거로 같은 모델 요약 완료
-        if old and not force:
+        if old and not force and not renew:
             continue
         todo.append((cc, b, rr))
     todo.sort(key=lambda x: x[2] is None)            # 등급 보유사 먼저
@@ -264,12 +265,12 @@ def run_all(corp_codes=None, model="haiku", force=False, workers=10, limit=None)
             except Exception:  # noqa
                 pdf_txt = ""
             if len(pdf_txt) >= 500:
-                js = _call(client, mid, COMBINED_PROMPT + "\n[A] 신용평가서(" + rr["agency"] + " " + rr["disc_dt"] + " " + str(rr["grade"]) + "):\n"
+                js = _call(client, mid, COMBINED_PROMPT + _guard_text(guard, con, cc) + "\n[A] 신용평가서(" + rr["agency"] + " " + rr["disc_dt"] + " " + str(rr["grade"]) + "):\n"
                            + pdf_txt[:45000] + "\n\n[B] 사업보고서(" + str(b["bsns_year"]) + "):\n" + btxt[:35000])
                 js["_kind"] = "combined"
                 js["_rating"] = {k: rr[k] for k in ("agency", "disc_dt", "grade", "file_url")}
                 return cc, b, js
-        js = _call(client, mid, PROMPT + btxt[:MAX_CHARS])
+        js = _call(client, mid, PROMPT + _guard_text(guard, con, cc) + btxt[:MAX_CHARS])
         js["_kind"] = "biz"
         return cc, b, js
 
@@ -378,7 +379,7 @@ def _fin_digest(con, cc):
     return "\n".join(out)
 
 
-def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6):
+def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6, guard=""):
     """대상: market=UNLISTED 중 사업보고서 원문(business.full_text)이 없는 회사. 감사보고서 접수번호는 fin_raw(감사보고서 파서 적재분)에서."""
     import time
     import requests
@@ -439,7 +440,7 @@ def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6):
                 extra = ""
         if len(pdf_txt) < 500 and len(ov) < 200 and len(extra) < 300:
             raise RuntimeError("근거 부족(신용평가서·회사의 개요·주요 주석 모두 없음)")
-        content = (UNLISTED_PROMPT + (UNLISTED_RULE if len(pdf_txt) < 500 else "")
+        content = (UNLISTED_PROMPT + _guard_text(guard, con_local(), cc) + (UNLISTED_RULE if len(pdf_txt) < 500 else "")
                    + ("\n[A] 신용평가서(" + rr["agency"] + " " + rr["disc_dt"] + " " + str(rr["grade"]) + "):\n" + pdf_txt[:45000] if len(pdf_txt) >= 500 else "\n[A] 신용평가서: 없음")
                    + "\n\n[B] 감사보고서 주석 '회사의 개요'(" + str(ay or "") + "):\n" + (ov or "없음")
                    + "\n\n[C] 감사보고서 재무 요약(억원):\n" + (fin or "없음")
@@ -482,3 +483,60 @@ def run_unlisted(corp_codes=None, model="haiku", force=False, workers=6):
                 print(f"[summarize_unlisted] {i}/{len(todo)} · 성공 {n} · 실패 {fail} · {int(time.time() - t0)}초", flush=True)
     con.commit()
     print(f"[summarize_unlisted] 완료 {n}/{len(todo)} · 실패 {fail}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# 금액 단위 오류 요약 재생성(2026-10-30 사용자 승인): 사이트 빌드의 단위 검증(unit_check)에 걸린 회사만 다시 요약 — 억원 환산 지시 + 재무 요약 대조
+UNIT_GUARD = """
+[금액 단위 — 반드시 지킬 것] 모든 금액은 억원으로 쓴다. 원문 표의 단위(원·천원·백만원)를 확인해 환산하고, 1조원 = 10,000억원이다(예: 7조 2,356억원은 '7.2조원' 또는 '72,356억원', 절대 '72.4조원'이 아님).
+숫자를 쓰기 전에 아래 [재무 요약(억원)]의 매출·자산·차입금 규모와 자릿수가 맞는지 대조하라. 외화 금액은 통화(USD 등)를 붙이고 원화로 환산하지 않는다.
+[재무 요약(억원)]
+"""
+
+
+def _guard_text(guard, con, cc):
+    if not guard:
+        return ""
+    try:
+        return guard + (_fin_digest(con, cc) or "없음") + "\n\n"
+    except Exception:  # noqa
+        return guard + "\n\n"
+
+
+def unit_targets(con):
+    """사이트 빌드와 같은 검증을 돌려 '단위 확인 필요'가 하나라도 붙는 회사(사업요약·평가서 요약 기준, 재무 AI 의견 제외)"""
+    import build_site
+    import unit_check
+    out = []
+    for c in con.execute("SELECT * FROM company ORDER BY corp_name"):
+        try:
+            d = build_site.company_detail(con, dict(c))
+            unit_check.apply(d)
+            bs = ((d.get("business") or {}).get("summary") or {})
+            rs = ((d.get("rating_summary") or {}).get("summary") or {})
+            if isinstance(bs, dict) and bs.get("_unit_fix"):          # 재무 AI 의견 플래그는 fin_ai 재생성에서
+                out.append(c["corp_code"])
+            if isinstance(rs, dict) and rs.get("_unit_fix"):
+                out.append("R:" + c["corp_code"])
+        except Exception:  # noqa
+            pass
+    return out
+
+
+def run_unitfix(model="haiku", workers=8, limit=None):
+    con = connect()
+    allc = unit_targets(con)
+    rcodes = {c[2:] for c in allc if c.startswith("R:")}
+    codes = [c for c in allc if not c.startswith("R:")]
+    if limit:
+        codes = codes[:limit]
+    listed = {r[0] for r in con.execute("SELECT corp_code FROM business WHERE full_z IS NOT NULL OR full_text IS NOT NULL")}
+    a = {c for c in codes if c in listed}; b = set(codes) - a
+    print(f"[unitfix] 단위 확인 필요 {len(codes)}사 → 사업보고서 기반 {len(a)} · 감사보고서 기반 {len(b)} · 모델 {model}", flush=True)
+    if a:
+        run_all(a, model=model, force=True, workers=workers, renew=True, guard=UNIT_GUARD)
+    if b:
+        run_unlisted(b, model=model, force=True, workers=min(workers, 6), guard=UNIT_GUARD)
+    if rcodes:
+        print(f"[unitfix] 신용평가서 요약 재생성 {len(rcodes)}사", flush=True)
+        run_rating(rcodes, force=True, model=model, guard=UNIT_GUARD)

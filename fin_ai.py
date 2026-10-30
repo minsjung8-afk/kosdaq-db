@@ -14,8 +14,14 @@ import threading
 
 from common import connect, now
 
-MODEL = "claude-haiku-4-5"
-PRICE_IN, PRICE_OUT = 1.0, 5.0          # 달러 / 100만 토큰
+MODEL = os.environ.get("FIN_AI_MODEL", "claude-haiku-4-5")
+PRICES = {"claude-haiku-4-5": (1.0, 5.0), "claude-sonnet-4-5": (3.0, 15.0)}   # 달러 / 100만 토큰
+PRICE_IN, PRICE_OUT = PRICES.get(MODEL, (3.0, 15.0))
+# 2026-10-30 사용자 승인(11/8 크레딧): 상위 종목은 Sonnet — 심사 빈도 높은 순(신용등급 보유 → 비상장 → 자산 큰 순). run(tier=N)
+PROMPT_SONNET_EXTRA = """
+- 심사 논점 중심으로: 순차입금/EBITDA·이자보상배율 추세, 1년 내 상환 부담 대비 현금·영업현금흐름, 운전자본 변동이 현금흐름을 어떻게 눌렀는지, 분기·반기 누적치는 연환산 관점으로.
+- 숫자 간 모순(예: 영업이익 흑자인데 영업현금흐름 큰 적자)이 있으면 그 자체를 지적하고 손익계산서 계정에서 확인되는 범위에서만 원인을 적는다.
+"""
 PROMPT = """당신은 여전사 기업금융 심사역이다. 아래는 한 회사의 재무 요약, 규칙으로 자동 판정한 재무 특이사항, 최근 기간 손익계산서 계정이다.
 규칙:
 - 아래에 주어진 숫자만 근거로 쓴다. 외부 지식·업황·뉴스·추측으로 원인을 만들지 않는다.
@@ -77,23 +83,42 @@ def _payload(con, c, d):
             + f"\n\n[재무 특이사항(규칙 판정)]\n{notes or '- 없음'}\n\n[손익계산서 {last.get('label') if last else ''} 계정(당기/전기, 누적)]\n" + "\n".join(lines[:60]))
 
 
-def run(corp_codes=None, limit=None, force=False, workers=8):
+def _tier_order(con, n):
+    """Sonnet 대상 상위 n사: 신용등급 보유사 → 비상장 → 최근 연간 자산 큰 순"""
+    rows = con.execute("""SELECT c.corp_code,
+                            CASE WHEN EXISTS(SELECT 1 FROM credit_rating r WHERE r.corp_code=c.corp_code) THEN 0 WHEN c.market='UNLISTED' THEN 1 ELSE 2 END AS pri,
+                            COALESCE((SELECT MAX(total_assets) FROM fin_kpi k WHERE k.corp_code=c.corp_code AND k.reprt_code='11011'), 0) AS ta
+                          FROM company c ORDER BY pri, ta DESC""").fetchall()
+    return [r[0] for r in rows[:n]]
+
+
+def run(corp_codes=None, limit=None, force=False, workers=8, tier=None, model=None, budget=None):
+    global MODEL, PRICE_IN, PRICE_OUT
+    if model:
+        MODEL = {"haiku": "claude-haiku-4-5", "sonnet": "claude-sonnet-4-5"}.get(model, model)
+        PRICE_IN, PRICE_OUT = PRICES.get(MODEL, (3.0, 15.0))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("[fin_ai] ANTHROPIC_API_KEY 없음 — 건너뜀"); return
     import anthropic  # noqa
     from concurrent.futures import ThreadPoolExecutor
     import build_site
     import fin_notes
-    budget = float(os.environ.get("FIN_AI_BUDGET", "60"))
+    budget = float(budget or os.environ.get("FIN_AI_BUDGET", "60"))
     con = connect()
     _ensure(con)
     have = {r["corp_code"]: r["key"] for r in con.execute("SELECT corp_code, key FROM fin_ai")}
-    used = con.execute("SELECT COALESCE(SUM(tin),0), COALESCE(SUM(tout),0) FROM fin_ai").fetchone()
+    used = con.execute("SELECT COALESCE(SUM(tin),0), COALESCE(SUM(tout),0) FROM fin_ai WHERE model=?", (MODEL,)).fetchone()   # 예산은 모델별 누적
     spent0 = used[0] / 1e6 * PRICE_IN + used[1] / 1e6 * PRICE_OUT
     todo = []
+    if tier:
+        corp_codes = set(_tier_order(con, tier))
+        force = True                                   # 상위 종목은 모델을 올려 다시 만든다(같은 모델로 이미 있으면 아래에서 건너뜀)
+    have_model = {r["corp_code"]: r["model"] for r in con.execute("SELECT corp_code, model FROM fin_ai")}
     for c in [dict(r) for r in con.execute("SELECT * FROM company ORDER BY corp_name")]:
         if corp_codes and c["corp_code"] not in corp_codes and c["stock_code"] not in corp_codes:
             continue
+        if tier and have_model.get(c["corp_code"]) == MODEL and have.get(c["corp_code"]):
+            continue                                   # 이미 이 모델로 만든 것은 그대로(키가 바뀐 건 일반 경로가 갱신)
         d = build_site.company_detail(con, c)
         if not (d.get("kpi") or {}):
             continue
@@ -118,7 +143,7 @@ def run(corp_codes=None, limit=None, force=False, workers=8):
             if st["stop"]:
                 return
         try:
-            msg = client.messages.create(model=MODEL, max_tokens=900, messages=[{"role": "user", "content": PROMPT + text}])
+            msg = client.messages.create(model=MODEL, max_tokens=1100, messages=[{"role": "user", "content": PROMPT + (PROMPT_SONNET_EXTRA if "sonnet" in MODEL else "") + text}])
             out = msg.content[0].text.strip()
             i, j = out.find("{"), out.rfind("}")
             js = json.loads(out[i:j + 1])

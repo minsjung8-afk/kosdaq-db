@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill", "da_ai"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -321,7 +321,10 @@ def main():
                     print(f"[unlisted_add] 요약 오류: {e}", flush=True)
     if a.job == "fin_ai":                    # 재무 특이사항 AI 보강(Haiku, 예산 FIN_AI_BUDGET 기본 60달러) — 2026-10-28
         import fin_ai
-        fin_ai.run(set(a.codes) if a.codes else None, limit=a.limit, force=a.force)
+        if a.type == "상위":                 # 2026-10-30: 상위 N사(등급보유→비상장→자산순)를 --model(sonnet)로, 예산 70달러
+            fin_ai.run(None, limit=a.limit or 400, force=True, tier=a.limit or 400, model=a.model, budget=70)
+        else:
+            fin_ai.run(set(a.codes) if a.codes else None, limit=a.limit, force=a.force)
     if a.job == "audit_scan":                # 감사보고서만 내는 비상장사 명단 → 자본총계 선별(남는 DART 한도로 매일 이어감, DB의 audit_candidate 표만 변경, 2026-10-29)
         __import__("audit_filers").run(limit=a.limit)
     if a.job == "filer_scan":                # 사업보고서 제출 비상장사 전수 명단(드라이런, DB 변경 없음 → unlisted_candidates.csv 아티팩트, 2026-10-28)
@@ -409,6 +412,7 @@ def main():
                     _c["v"] = set()
             return _c["v"]
         steps = [("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=90 * 60)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
+                 ("da_ai", lambda: __import__("da_ai").run(con, limit=300)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 300건, 2026-10-30)
                  ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
                  ("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
@@ -455,7 +459,9 @@ def main():
     if a.job in ("summarize", "all"):
         import summarize
         # 등급 보유사 = 신용평가서+사업보고서 통합(항목별 근거), 나머지 = 사업보고서 — 병렬·재개 가능
-        if a.type == "비상장":              # 2026-10-25: 사업보고서 없는 비상장 등급사 = 신용평가서 + 감사보고서 '회사의 개요' + 재무 요약
+        if a.type == "단위":                # 2026-10-30: 단위 검증에 걸린 요약만 억원 지시로 재생성
+            summarize.run_unitfix(model=a.model, limit=a.limit)
+        elif a.type == "비상장":              # 2026-10-25: 사업보고서 없는 비상장 등급사 = 신용평가서 + 감사보고서 '회사의 개요' + 재무 요약
             summarize.run_unlisted(set(ccs) if a.codes else None, model=a.model, force=a.force)
         else:
             summarize.run_all(set(ccs) if a.codes else None, model=a.model, force=a.force, limit=a.limit)
@@ -467,6 +473,8 @@ def main():
         import notes_v2
         notes_v2.run(set(ccs) if a.codes else None, limit=a.limit, con=con)
         print("KPI 재계산:", __import__("financials").rebuild_kpi_all(con), "건", flush=True)
+    if a.job == "da_ai":                     # 2026-10-30: 규칙 파서가 못 집은 상각비를 Haiku로(예산 DA_AI_BUDGET 기본 15달러)
+        __import__("da_ai").run(con, limit=a.limit, codes=set(ccs) if a.codes else None)
     if a.job == "da_backfill":                # 2026-10-29: 지난 연도·지난 분기 상각비 보강(EBITDA 공백) — 빈 행의 보고서 원문 1콜씩, DART만
         import notes_v2
         notes_v2.backfill(con, limit=a.limit, codes=set(ccs) if a.codes else None)
