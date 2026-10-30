@@ -322,7 +322,7 @@ def main():
     if a.job == "fin_ai":                    # 재무 특이사항 AI 보강(Haiku, 예산 FIN_AI_BUDGET 기본 60달러) — 2026-10-28
         import fin_ai
         if a.type == "상위":                 # 2026-10-30: 상위 N사(등급보유→비상장→자산순)를 --model(sonnet)로, 예산 70달러
-            fin_ai.run(None, limit=a.limit or 400, force=True, tier=a.limit or 400, model=a.model, budget=70)
+            fin_ai.run(None, limit=a.limit or 400, force=True, tier=a.limit or 400, model=a.model, budget=150)   # 2026-10-30 16:59 사용자 "예산 올려줄게": 150달러
         else:
             fin_ai.run(set(a.codes) if a.codes else None, limit=a.limit, force=a.force)
     if a.job == "audit_scan":                # 감사보고서만 내는 비상장사 명단 → 자본총계 선별(남는 DART 한도로 매일 이어감, DB의 audit_candidate 표만 변경, 2026-10-29)
@@ -412,7 +412,7 @@ def main():
                     _c["v"] = set()
             return _c["v"]
         steps = [("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=90 * 60)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
-                 ("da_ai", lambda: __import__("da_ai").run(con, limit=300)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 300건, 2026-10-30)
+                 ("da_ai", lambda: __import__("da_ai").run(con, limit=1500)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 1,500건·예산 40달러, 2026-10-30 사용자 "예산 올려줄게")
                  ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
                  ("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
