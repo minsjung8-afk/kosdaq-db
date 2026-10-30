@@ -87,7 +87,7 @@ def run(con=None, limit=None, codes=None, workers=6):
     from financials import build_kpi
     con = con or connect()
     _ensure(con); notes_v2.ensure(con)
-    budget = float(os.environ.get("DA_AI_BUDGET", "15"))
+    budget = float(os.environ.get("DA_AI_BUDGET", "40"))   # 2026-10-30 16:59 사용자 승인으로 15→40
     used = con.execute("SELECT COALESCE(SUM(tin),0), COALESCE(SUM(tout),0) FROM da_ai_log").fetchone()
     spent0 = used[0] / 1e6 * PRICE_IN + used[1] / 1e6 * PRICE_OUT
     todo = _targets(con, codes, limit)
