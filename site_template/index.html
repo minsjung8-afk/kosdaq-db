@@ -44,12 +44,14 @@ header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6}
 #instTip{max-width:260px;margin:0 0 6px auto;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.1);color:#E8EEF6;font-size:12px;text-align:left;line-height:1.5}
 #visit{position:fixed;right:14px;bottom:12px;z-index:50;padding:4px 11px;border-radius:999px;background:rgba(15,30,55,.82);color:#cfdcf0;font-size:11.5px;box-shadow:0 2px 8px rgba(0,0,0,.18);pointer-events:none}#visit:empty{display:none}#visit b{color:#fff;font-variant-numeric:tabular-nums}#visit .vl{font-size:10.5px;letter-spacing:.04em}
 @media print{#visit{display:none}}
-#band{grid-column:1/-1;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;padding:11px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
+#band{grid-column:1/-1;display:grid;grid-template-columns:1.5fr repeat(5,minmax(0,1fr));gap:9px;padding:11px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
 #band .bc{padding:8px 12px 9px;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 2px rgba(15,41,66,.05),0 4px 14px rgba(15,41,66,.05)}
 #band .bc:first-child{border-left:3px solid var(--gold)}
 #band .k{font-size:10px;letter-spacing:.06em;color:var(--ink2);font-weight:700;white-space:nowrap}
 #band .v{font-size:15.5px;font-weight:800;color:var(--navy-deep);font-variant-numeric:tabular-nums;margin-top:2px;letter-spacing:-.3px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #band .s{font-size:10.5px;color:var(--mute);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#band .s.wrap{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}   /* 수록 회사 구성은 두 줄로 전부 표시(2026-10-30) */
+@media (max-width:1300px){#band .s.wrap{display:block;font-size:10px}}   /* 좁은 화면에서도 구성은 보이게 */
 @media (max-width:1300px){header .lead{display:none}header .srcline .chip small{display:none}#band{gap:7px;padding:9px 16px}#band .bc{padding:7px 10px}#band .v{font-size:14px}#band .s{display:none}header .meta{font-size:10.5px}}
 /* 좌측 패널 */
 aside{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
@@ -343,13 +345,15 @@ function renderBand(m){
   const qn={'03':'1분기','06':'반기','09':'3분기'};
   const lq=m.latest_q?`${m.latest_q.slice(0,4)} ${qn[m.latest_q.slice(5)]||''}보고서`:'';
   const cells=[
-    ['수록 회사',`${n(m.count)}개사`,(['KOSPI','KOSDAQ','KONEX','UNLISTED'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스',UNLISTED:'비상장'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준')+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'')],
+    ['수록 회사',`${n(m.count)}개사`,(()=>{const ur=items.filter(i=>i.market==='UNLISTED'&&i.rating).length, lr=items.filter(i=>i.market!=='UNLISTED'&&i.rating).length;   // 2026-10-30 사용자 요청: 구성 전부, 안 잘리게(두 줄 허용)
+      return (['KOSPI','KOSDAQ','KONEX'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준')
+        +(bm.UNLISTED?` · 비상장 ${n(bm.UNLISTED)}`:'')+`<br>등급보유 ${n(m.rated)}(상장 ${n(lr)}·비상장 ${n(ur)})`+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'');})()],
     ['재무 기준',m.fin_year?`${m.fin_year} 사업보고서`:'-',(lq?`최신 ${lq.replace('보고서','')} · `:'')+`${n(m.fin_annual)}사 · DART`],
     ['분기 손익 (12분기)',`${n(m.fin_q)}사`,'누적 차감 복원 · LTM · DART'],
     ['주가 기준일',m.price_asof||'-','종가·거래량·시총 · KRX 일별시세'],
     ['대용가 기준일',m.subst_dd||'-','담보가 = 대용가 × 90% · KRX'],
     ['신용등급 보유',`${n(m.rated)}사`,(m.rating_asof?`최근 ${m.rating_asof} · `:'')+'금감원 공시']];
-  $('#band').innerHTML=cells.map(([k,v,s])=>`<div class="bc"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s" title="${esc(s)}">${esc(s)}</div></div>`).join('');
+  $('#band').innerHTML=cells.map(([k,v,s],i)=>`<div class="bc"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s${i===0?' wrap':''}" title="${esc(s.replace(/<br>/g,' / '))}">${i===0?s:esc(s)}</div></div>`).join('');
 }
 let mkt='',sortKey='name',sortDesc=false;
 const MK={KOSDAQ:0,KOSPI:1,KONEX:2,UNLISTED:3};
