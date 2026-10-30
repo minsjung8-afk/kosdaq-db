@@ -609,7 +609,10 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
                                 nraw = con.execute("SELECT COUNT(*) FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (cc, y, rc, fs)).fetchone()[0]
                                 print(f"[da_backfill] 진단 {cc} {y}/{rc}/{fs}: fin_kpi={tuple(kp) if kp else None} · da_notes={tuple(dn) if dn else None} · 직전연간={tuple(pr) if pr else None} · fin_raw {nraw}행 · y타입 {type(y).__name__}", flush=True)
                 st = stat.setdefault((y, rc), {"ok": 0, "절없음": 0, "절있음_상각없음": 0, "보고서없음": 0, "오류": 0})
-                st["ok" if ok else "보고서없음" if not rn else "오류" if secs is None else "절없음" if not secs else "절있음_상각없음"] += 1
+                kind = "ok" if ok else "보고서없음" if not rn else "오류" if secs is None else "절없음" if not secs else "절있음_상각없음"
+                st[kind] += 1
+                if kind == "절있음_상각없음" and len(st.setdefault("_ex", [])) < 12:   # 표본(접수번호·절 제목) — 다음 파서 개선 대상 고르기용(2026-10-30: 2024 연간 421건)
+                    st["_ex"].append(f"{cc}:{rn}:" + "/".join(x["t"][:12] for x in secs if re.search(r"유형|무형|사용권|성격|현금흐름", x["t"]))[:160])
                 if not ok and codes:
                     print(f"[da_backfill] 못 찾음 {cc} {y}/{rc} {rn or '보고서 없음'} — {DIAG.get((cc, y, rc, rn), '')}", flush=True)
                 con.execute("INSERT OR REPLACE INTO da_try VALUES (?,?,?,?,?,datetime('now'))", (cc, y, rc, rn or "", ok))
@@ -627,7 +630,9 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
             f.cancel()
     print(f"[da_backfill] 완료 {i}/{len(todo)} · 상각비 확보 {got}", flush=True)
     for k in sorted(stat):                                 # 기간별 성공·실패 원인(2026-10-29: 400~1000번째 600건 중 1건 성공 — 원인 추적용)
-        print(f"[da_backfill]   {k[0]}/{k[1]}: " + " · ".join(f"{a} {b}" for a, b in stat[k].items() if b), flush=True)
+        print(f"[da_backfill]   {k[0]}/{k[1]}: " + " · ".join(f"{a} {b}" for a, b in stat[k].items() if b and a != "_ex"), flush=True)
+        for ex_ in stat[k].get("_ex", []):
+            print(f"[da_backfill]     표본 {ex_}", flush=True)
     return got
 
 
