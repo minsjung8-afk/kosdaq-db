@@ -486,6 +486,16 @@ def main():
                                     FROM da_reject d JOIN company c USING (corp_code) LEFT JOIN fin_kpi k ON k.corp_code=d.corp_code AND k.bsns_year=d.bsns_year AND k.reprt_code=d.reprt_code AND k.fs_div=d.fs_div
                                     WHERE d.bsns_year>='2024' ORDER BY d.bsns_year DESC LIMIT 40"""):
                 print(f"[da_reject]   {r[1]} {r[2]}/{r[3]}/{r[4]} {r[5]} {r[6]/1e8:,.1f}억 (총자산 {(r[8] or 0)/1e8:,.0f}억) — {r[7]}", flush=True)
+            # 사이트에 보이는 기간(2024~ 연간·반기)의 공백을 상태별로: 미시도 / 수정 전 실패 / 수정 후 실패(AI 미처리) / AI도 실패 / 후보 기각
+            for r in con.execute("""SELECT k.bsns_year||'/'||k.reprt_code AS p,
+                        SUM(t.corp_code IS NULL) AS 미시도,
+                        SUM(t.ok=0 AND t.at < '2026-10-29 22:30') AS 수정전실패,
+                        SUM(t.ok=0 AND t.at >= '2026-10-29 22:30' AND a.corp_code IS NULL) AS AI미처리,
+                        SUM(a.ok=0) AS AI실패, SUM(t.ok=1 OR a.ok=1) AS 후보기각, COUNT(*) AS 합계
+                 FROM fin_kpi k LEFT JOIN da_try t ON t.corp_code=k.corp_code AND t.bsns_year=k.bsns_year AND t.reprt_code=k.reprt_code
+                 LEFT JOIN da_ai_log a ON a.corp_code=k.corp_code AND a.bsns_year=k.bsns_year AND a.reprt_code=k.reprt_code
+                 WHERE k.da IS NULL AND k.op_income IS NOT NULL AND k.bsns_year>='2024' AND k.reprt_code IN ('11011','11012') GROUP BY 1 ORDER BY 1"""):
+                print(f"[da_gap] {r[0]}: 합계 {r[6]} · 미시도 {r[1]} · 수정전실패 {r[2]} · AI미처리 {r[3]} · AI실패 {r[4]} · 후보기각 {r[5]}", flush=True)
             n_ai = con.execute("SELECT COUNT(*) FROM da_notes WHERE src='ai'").fetchone()[0]
             n_ai_null = con.execute("SELECT COUNT(*) FROM da_notes n JOIN fin_kpi k USING (corp_code, bsns_year, reprt_code, fs_div) WHERE n.src='ai' AND k.da IS NULL").fetchone()[0]
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
