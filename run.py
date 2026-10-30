@@ -501,6 +501,19 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "차입":   # 2026-10-30: 차입금 '구분불명' 진단 — 지정 종목의 재무상태표 차입성 행(ord·유동/비유동 소계 위치)
+        from financials import borrow_items, _norm_nm
+        for cc, sc in pairs:
+            for fs in ("CFS", "OFS"):
+                per = con.execute("SELECT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND fs_div=? AND sj_div='BS' GROUP BY 1,2 ORDER BY 1 DESC, 2 DESC LIMIT 3", (cc, fs)).fetchall()
+                for y, rc in per:
+                    rows = [dict(r) for r in con.execute("SELECT sj_div, account_id, account_nm, thstrm_amount, ord FROM fin_raw WHERE corp_code=? AND fs_div=? AND bsns_year=? AND reprt_code=? ORDER BY ord", (cc, fs, y, rc))]
+                    bs = [r for r in rows if r["sj_div"] == "BS"]
+                    heads = [(r["ord"], _norm_nm(r["account_nm"])) for r in bs if _norm_nm(r["account_nm"]) in ("유동자산", "유동부채", "비유동부채", "부채총계", "자본총계")]
+                    print(f"=== {sc} {fs} {y}/{rc}: BS {len(bs)}행 · 소계 위치 {heads}", flush=True)
+                    for it in borrow_items(rows):
+                        o = next((r["ord"] for r in bs if _norm_nm(r["account_nm"]) == it["nm"] and r["thstrm_amount"] == it["amt"]), None)
+                        print(f"    {it['nm']:<30} {it['amt'] / 1e8:>12,.0f}억  kind={it['kind']}  cur={it['cur']}  ord={o}", flush=True)
     elif a.job == "rawdump":                    # 진단: 지정 종목의 fin_raw 손익 행(연결·별도, 최근 분기)을 로그에 출력 — DART 호출 없음
         if a.type == "손익전체":            # 2026-10-28 금융업 매출(영업수익) 미매핑 진단: 최근 사업보고서 손익 계정 전부(account_id·계정명·금액)
             for cc, sc in pairs:
