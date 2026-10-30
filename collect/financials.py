@@ -345,8 +345,9 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         # 직전 연간 상각비를 기간 비율로 환산한 값의 1/4~4배 밖이거나 총자산의 25% 초과면 버리고 다음 후보
         ref = pa = None
         try:
-            pr = con.execute("""SELECT da FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND bsns_year<? AND da IS NOT NULL
-                                ORDER BY bsns_year DESC LIMIT 1""", (corp_code, fs_div, bsns_year if reprt_code != "11011" else bsns_year)).fetchone()
+            # 2026-10-30 소노인터내셔널: 직전 연간이 비어 2021(232억)을 기준으로 삼아 2023·2024(1,029억·1,094억, 실제 증가)를 버림 → 바로 전 해만 기준으로
+            pr = con.execute("""SELECT da FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND bsns_year=? AND da IS NOT NULL""",
+                             (corp_code, fs_div, str(int(bsns_year) - 1))).fetchone()
             if pr and pr[0]:
                 pa = abs(pr[0])
                 ref = abs(pr[0]) * {"11013": 0.25, "11012": 0.5, "11014": 0.75}.get(reprt_code, 1.0)
@@ -370,8 +371,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 continue
             if ta and src != "본문" and v < ta * 0.0002:
                 continue                               # 주석값이 총자산의 0.02% 미만이면 단위(천원) 누락 의심 → 버림(2026-10-30 소노인터내셔널 1,094억→1.09억)
-            if ref and not (ref / 4 <= v <= ref * 4):
-                continue
+            if ref and src != "본문" and not (ref / 4 <= v <= ref * 4):
+                continue                               # 본문(현금흐름표) 값은 기준 점검 없이 신뢰 — 점검은 주석 오독 방지용(2026-10-26 HL D&I)
             if cap and v > cap:
                 continue
             if reprt_code != "11011" and pa and abs(v - pa) <= pa * 0.003:
