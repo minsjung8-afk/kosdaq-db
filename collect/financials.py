@@ -370,8 +370,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 continue
             if ta and v > ta * 0.25:
                 rejects.append((src, v, "총자산25%초과")); continue
-            if ta and src != "본문" and v < ta * 0.0002:
-                rejects.append((src, v, "총자산0.02%미만")); continue   # 주석값이 총자산의 0.02% 미만이면 단위(천원) 누락 의심 → 버림(2026-10-30 소노인터내셔널 1,094억→1.09억)
+            if ta and src != "본문" and v < ta * 0.000001:
+                rejects.append((src, v, "총자산0.0001%미만")); continue   # 2026-10-30 18:40: 0.02% 기준은 지주·증권·보험·건설(자산 대비 상각비 극소)과 1분기 값 754건을 잘못 버림 → 사실상 0인 값만 거르고, 단위 누락은 파서(patch219)와 직전 연간 대조로 막는다
             if ref and src != "본문" and not (ref / 4 <= v <= ref * 4):
                 rejects.append((src, v, f"직전연간 1/4~4배 밖(ref {ref:.0f})")); continue   # 본문(현금흐름표) 값은 기준 점검 없이 신뢰 — 점검은 주석 오독 방지용(2026-10-26 HL D&I)
             if cap and v > cap:
