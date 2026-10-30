@@ -15,6 +15,7 @@ import re
 AMT = re.compile(r"(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(조|억)(\s*원)?(?!\s*(?:USD|달러|불|엔|위안|유로|\$))")
 KW = [("현금성자산", ("cash",)), ("현금흐름", ("cfo", "fcf")), ("매출총이익", ()), ("차입", ("borrowings", "net_borrowings")), ("매출", ("revenue",)), ("영업이익", ("op_income",)), ("EBITDA", ("ebitda",)),
       ("순이익", ("net_income",)), ("현금", ("cash",)), ("자산", ("total_assets",)), ("부채", ("total_liab",)), ("자본", ("equity",))]
+_OTHER = re.compile(r"운용자산|AUM|수탁|시장\s*규모|산업\s*규모|업계|그룹\s*전체|계열|자회사|종속|관계사|지분법|시가총액|자산규모|하이닉스")
 MONEY = ("revenue", "op_income", "net_income", "ebitda", "total_assets", "total_liab", "equity", "cash", "borrowings", "net_borrowings", "cfo", "fcf")
 
 
@@ -44,6 +45,8 @@ def _fix_text(s, by, cap, nn, log):
         if v <= 0:
             return m.group(0)
         ctx = s[max(0, m.start() - 14):m.start()]
+        if _OTHER.search(s[max(0, m.start() - 40):m.start()]):
+            return m.group(0)                    # 2026-10-30: 운용자산(AUM)·시장규모·계열사(SK스퀘어의 SK하이닉스 매출 등) 금액은 이 회사 재무와 대조할 대상이 아님 — 오탐 제외
         cands = []
         # 금액 바로 앞에 가장 가까이 나온 계정 키워드 하나만 씀('현금성자산'은 현금 — '자산'으로 읽으면 자산총계와 맞춰져 오보정, 2026-10-29 대한항공 5.4조→54조 사례)
         hits = [(ctx.rfind(kw) + len(kw), len(kw), kw, fields) for kw, fields in KW if kw in ctx]   # 금액에 가장 가까이 끝나는 키워드, 같으면 긴 것('현금성자산' > '자산')
