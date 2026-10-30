@@ -39,6 +39,7 @@ NL_RE = re.compile(r"\n{3,}")
 def _strip(xml_fragment: str) -> str:
     t = re.sub(r"</T[DH]>", " | ", xml_fragment, flags=re.I)
     t = re.sub(r"</(P|TR|TITLE|TABLE|DIV|BR)[^>]*>", "\n", t, flags=re.I)
+    t = re.sub(r"<BR\s*/?>", "\n", t, flags=re.I)   # 2026-10-31: DART 원문은 <BR> 단독 태그 — 줄바꿈 없이 지워져 '13. 유형자산'과 다음 문장이 한 줄로 붙어 주석 항목 제목을 못 잡음(우진비앤지 등 2,400여 보고서 '절있음_상각없음'의 원인)
     t = TAG_RE.sub("", t)
     t = html.unescape(t)
     t = WS_RE.sub(" ", t)
