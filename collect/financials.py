@@ -202,6 +202,8 @@ def borrow_items(rows):
                 return r["ord"]
         return None
     o_cl, o_ncl, o_tl = _ord("유동부채"), _ord("비유동부채"), _ord("부채총계")
+    if o_tl is not None and o_ncl is not None and o_tl < o_ncl:
+        o_tl = None                                    # 2026-10-30 대한항공: XBRL 순번이 유동부채 42 → 부채총계 51 → 비유동부채 52 로 소계가 세부보다 앞에 와 비유동 차입금(53·56)이 '구분불명'이 됨 → 부채총계 상한을 쓰지 않음
     o_ca = _ord("유동자산"); o_cash = next((r["ord"] for r in bs if "현금및현금성자산" in _norm_nm(r.get("account_nm")) and r.get("ord") is not None), None)
     hdr_first = True if (o_ca is None or o_cash is None) else o_ca < o_cash
     def pos_cur(o):
