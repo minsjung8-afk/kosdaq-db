@@ -20,7 +20,17 @@ from business import _strip, fetch_document_xml  # noqa: E402
 import notes_v2  # noqa: E402
 
 MODEL = os.environ.get("DA_AI_MODEL", "claude-sonnet-4-5")   # 2026-10-30 21:48 사용자: 예산 안에서 정확도 우선 → Sonnet(건당 약 1.5센트, Haiku의 3배)
-PRICE_IN, PRICE_OUT = {"claude-haiku-4-5": (1.0, 5.0)}.get(MODEL, (3.0, 15.0))
+PRICES = {"claude-haiku-4-5": (1.0, 5.0)}
+PRICE_IN, PRICE_OUT = PRICES.get(MODEL, (3.0, 15.0))
+
+
+def _spent(con):
+    """da_ai_log 누적 비용 — 행마다 그 행의 모델 단가로(2026-10-31: Haiku 1,440건을 Sonnet 단가로 셈해 $46로 부풀려 예산이 즉시 소진됐던 오류 수정)"""
+    tot = 0.0
+    for m, tin, tout in con.execute("SELECT model, COALESCE(SUM(tin),0), COALESCE(SUM(tout),0) FROM da_ai_log GROUP BY model"):
+        pi, po = PRICES.get(m or "", (3.0, 15.0))
+        tot += tin / 1e6 * pi + tout / 1e6 * po
+    return tot
 PROMPT = """당신은 회계 주석에서 숫자를 뽑는 심사 보조원이다. 아래는 한 회사 정기보고서의 상각비 관련 주석 발췌다(연결·별도 주석이 섞여 있을 수 있고, 각 절 앞에 [연결]/[별도]/[구분없음] 표시).
 찾을 것: {기간} 기준 손익에 반영된 ① 감가상각비(유형자산) ② 무형자산상각비 ③ 사용권자산 상각비 ④ 투자부동산 감가상각비.
 규칙:
@@ -88,9 +98,8 @@ def run(con=None, limit=None, codes=None, workers=6):
     from financials import build_kpi
     con = con or connect()
     _ensure(con); notes_v2.ensure(con)
-    budget = float(os.environ.get("DA_AI_BUDGET", "40"))   # 2026-10-30 16:59 사용자 승인으로 15→40
-    used = con.execute("SELECT COALESCE(SUM(tin),0), COALESCE(SUM(tout),0) FROM da_ai_log").fetchone()
-    spent0 = used[0] / 1e6 * PRICE_IN + used[1] / 1e6 * PRICE_OUT
+    budget = float(os.environ.get("DA_AI_BUDGET", "90"))   # 2026-10-30 16:59 15→40, 10-31 사용자 "예산 올려줄게·정확도 우선" → 90(전 모델 누적 기준)
+    spent0 = _spent(con)
     todo = _targets(con, codes, limit)
     print(f"[da_ai] 대상 {len(todo)}건 · 누적 ${spent0:.2f} · 예산 ${budget:.0f} · {MODEL}", flush=True)
     client = anthropic.Anthropic()
