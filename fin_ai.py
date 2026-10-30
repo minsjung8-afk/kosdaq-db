@@ -89,7 +89,11 @@ def _tier_order(con, n):
                             CASE WHEN EXISTS(SELECT 1 FROM credit_rating r WHERE r.corp_code=c.corp_code) THEN 0 WHEN c.market='UNLISTED' THEN 1 ELSE 2 END AS pri,
                             COALESCE((SELECT MAX(total_assets) FROM fin_kpi k WHERE k.corp_code=c.corp_code AND k.reprt_code='11011'), 0) AS ta
                           FROM company c ORDER BY pri, ta DESC""").fetchall()
-    return [r[0] for r in rows[:n]]
+    import re
+    names = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+    # 은행·보험·증권·금융지주는 EBITDA·순차입금 틀이 안 맞아(2026-10-30 시험: KB금융 '순차입금/EBITDA 1.3배' 같은 무의미한 서술) 제외 — 여전사(캐피탈·카드)는 사용자 업종이라 유지
+    skip = re.compile(r"은행|보험|생명|화재|증권|금융지주|투자증권|자산운용|신탁")
+    return [r[0] for r in rows if not skip.search(names.get(r[0], ""))][:n]
 
 
 def run(corp_codes=None, limit=None, force=False, workers=8, tier=None, model=None, budget=None):
