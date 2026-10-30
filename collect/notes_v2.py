@@ -516,7 +516,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
     ensure(con)
     con.execute("CREATE TABLE IF NOT EXISTS da_try (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, rcept_no TEXT, ok INTEGER, at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code, rcept_no))")
     y0 = str(date.today().year - years)
-    tried = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_try WHERE ok=0 AND at >= date('now','-30 day')")}
+    tried = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_try WHERE ok=0 AND at >= date('now','-30 day') AND at >= '2026-10-29 22:30'")}   # 단위 수정(patch219, 10-30 07:30 KST) 전 실패 기록은 무효
     rows = con.execute("""SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no FROM fin_kpi
                           WHERE da IS NULL AND op_income IS NOT NULL AND bsns_year >= ? ORDER BY bsns_year, reprt_code""", (y0,)).fetchall()
     own = {}                                               # (cc,y,rc) → {fs: 접수번호}
