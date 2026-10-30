@@ -478,7 +478,20 @@ def main():
     if a.job == "da_backfill":                # 2026-10-29: 지난 연도·지난 분기 상각비 보강(EBITDA 공백) — 빈 행의 보고서 원문 1콜씩, DART만
         import notes_v2
         notes_v2.backfill(con, limit=a.limit, codes=set(ccs) if a.codes else None)
-    if a.job == "rawdump":                    # 진단: 지정 종목의 fin_raw 손익 행(연결·별도, 최근 분기)을 로그에 출력 — DART 호출 없음
+    if a.job == "rawdump" and a.type == "상각":   # 2026-10-30: 상각비 후보가 있는데 KPI에 안 들어간 행 — 사유별 집계 + 표본(da_reject, kpi 재계산 후)
+        try:
+            for r in con.execute("SELECT substr(reason,1,instr(reason||' /',' /')-1) rs, COUNT(*) FROM da_reject GROUP BY 1 ORDER BY 2 DESC LIMIT 15"):
+                print(f"[da_reject] {r[1]:5d}  {r[0]}", flush=True)
+            for r in con.execute("""SELECT d.corp_code, c.corp_name, d.bsns_year, d.reprt_code, d.fs_div, d.src, d.v, d.reason, k.total_assets
+                                    FROM da_reject d JOIN company c USING (corp_code) LEFT JOIN fin_kpi k ON k.corp_code=d.corp_code AND k.bsns_year=d.bsns_year AND k.reprt_code=d.reprt_code AND k.fs_div=d.fs_div
+                                    WHERE d.bsns_year>='2024' ORDER BY d.bsns_year DESC LIMIT 40"""):
+                print(f"[da_reject]   {r[1]} {r[2]}/{r[3]}/{r[4]} {r[5]} {r[6]/1e8:,.1f}억 (총자산 {(r[8] or 0)/1e8:,.0f}억) — {r[7]}", flush=True)
+            n_ai = con.execute("SELECT COUNT(*) FROM da_notes WHERE src='ai'").fetchone()[0]
+            n_ai_null = con.execute("SELECT COUNT(*) FROM da_notes n JOIN fin_kpi k USING (corp_code, bsns_year, reprt_code, fs_div) WHERE n.src='ai' AND k.da IS NULL").fetchone()[0]
+            print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
+        except Exception as e:  # noqa
+            print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump":                    # 진단: 지정 종목의 fin_raw 손익 행(연결·별도, 최근 분기)을 로그에 출력 — DART 호출 없음
         if a.type == "손익전체":            # 2026-10-28 금융업 매출(영업수익) 미매핑 진단: 최근 사업보고서 손익 계정 전부(account_id·계정명·금액)
             for cc, sc in pairs:
                 print(f"=== {sc} {cc} 손익전체", flush=True)
