@@ -19,8 +19,8 @@ from common import connect, now  # noqa: E402
 from business import _strip, fetch_document_xml  # noqa: E402
 import notes_v2  # noqa: E402
 
-MODEL = os.environ.get("DA_AI_MODEL", "claude-haiku-4-5")
-PRICE_IN, PRICE_OUT = 1.0, 5.0
+MODEL = os.environ.get("DA_AI_MODEL", "claude-sonnet-4-5")   # 2026-10-30 21:48 사용자: 예산 안에서 정확도 우선 → Sonnet(건당 약 1.5센트, Haiku의 3배)
+PRICE_IN, PRICE_OUT = {"claude-haiku-4-5": (1.0, 5.0)}.get(MODEL, (3.0, 15.0))
 PROMPT = """당신은 회계 주석에서 숫자를 뽑는 심사 보조원이다. 아래는 한 회사 정기보고서의 상각비 관련 주석 발췌다(연결·별도 주석이 섞여 있을 수 있고, 각 절 앞에 [연결]/[별도]/[구분없음] 표시).
 찾을 것: {기간} 기준 손익에 반영된 ① 감가상각비(유형자산) ② 무형자산상각비 ③ 사용권자산 상각비 ④ 투자부동산 감가상각비.
 규칙:
