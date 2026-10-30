@@ -364,21 +364,29 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 pass
         ta = k.get("total_assets")
         k["da"] = None
+        rejects = []                                   # (src, v, 사유) — 왜 비었는지 추적용(2026-10-30: AI 보완 1,188건이 사이트에 안 보임)
         for src, v in cands:
             if v is None:
                 continue
             if ta and v > ta * 0.25:
-                continue
+                rejects.append((src, v, "총자산25%초과")); continue
             if ta and src != "본문" and v < ta * 0.0002:
-                continue                               # 주석값이 총자산의 0.02% 미만이면 단위(천원) 누락 의심 → 버림(2026-10-30 소노인터내셔널 1,094억→1.09억)
+                rejects.append((src, v, "총자산0.02%미만")); continue   # 주석값이 총자산의 0.02% 미만이면 단위(천원) 누락 의심 → 버림(2026-10-30 소노인터내셔널 1,094억→1.09억)
             if ref and src != "본문" and not (ref / 4 <= v <= ref * 4):
-                continue                               # 본문(현금흐름표) 값은 기준 점검 없이 신뢰 — 점검은 주석 오독 방지용(2026-10-26 HL D&I)
+                rejects.append((src, v, f"직전연간 1/4~4배 밖(ref {ref:.0f})")); continue   # 본문(현금흐름표) 값은 기준 점검 없이 신뢰 — 점검은 주석 오독 방지용(2026-10-26 HL D&I)
             if cap and v > cap:
-                continue
+                rejects.append((src, v, f"같은해 연간 비율 초과(cap {cap:.0f})")); continue
             if reprt_code != "11011" and pa and abs(v - pa) <= pa * 0.003:
-                continue                               # 분기·반기 값이 직전 연간과 똑같으면 전기(연간) 열을 읽은 것(2026-10-29 CJ대한통운 별도 2026 반기 1,996억 = 2025 연간)
+                rejects.append((src, v, "직전연간과 동일(전기열)")); continue   # 분기·반기 값이 직전 연간과 똑같으면 전기(연간) 열을 읽은 것(2026-10-29 CJ대한통운 별도 2026 반기 1,996억 = 2025 연간)
             k["da"] = v
             break
+        try:
+            con.execute("CREATE TABLE IF NOT EXISTS da_reject (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, src TEXT, v REAL, reason TEXT, at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))")
+            con.execute("DELETE FROM da_reject WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, bsns_year, reprt_code, fs_div))
+            if k["da"] is None and rejects:
+                con.execute("INSERT INTO da_reject VALUES (?,?,?,?,?,?,?,datetime('now'))", (corp_code, bsns_year, reprt_code, fs_div, rejects[0][0], rejects[0][1], " / ".join(f"{s}:{r}" for s, _, r in rejects)))
+        except Exception:  # noqa
+            pass
         k["ebitda"] = (k["op_income"] + k["da"]) if k.get("op_income") is not None and k["da"] is not None else None
         ie = abs(k["int_exp"]) if k.get("int_exp") else None
         k["interest_cover"] = round(k["ebitda"] / ie, 1) if k.get("ebitda") is not None and ie else None   # EBITDA/이자비용
