@@ -74,7 +74,8 @@ def _targets(con, codes=None, limit=None):
                           FROM fin_kpi k JOIN da_try t ON t.corp_code=k.corp_code AND t.bsns_year=k.bsns_year AND t.reprt_code=k.reprt_code
                           WHERE k.da IS NULL AND k.op_income IS NOT NULL AND k.bsns_year >= '2024' AND t.ok=0 AND t.rcept_no<>'' AND t.at >= '2026-10-29 22:30'
                           AND NOT EXISTS (SELECT 1 FROM da_ai_log a WHERE a.corp_code=k.corp_code AND a.bsns_year=k.bsns_year AND a.reprt_code=k.reprt_code)
-                          GROUP BY k.corp_code, k.bsns_year, k.reprt_code ORDER BY k.bsns_year DESC, k.reprt_code""").fetchall()
+                          GROUP BY k.corp_code, k.bsns_year, k.reprt_code
+                          ORDER BY (k.reprt_code NOT IN ('11011','11012')), k.bsns_year DESC, k.reprt_code""").fetchall()   # 사이트에 보이는 연간·반기 먼저, 분기(LTM용)는 뒤(2026-10-30 19:48)
     out = [tuple(r) for r in rows if not codes or r[0] in codes]
     return out[:limit] if limit else out
 
