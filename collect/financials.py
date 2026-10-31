@@ -142,8 +142,10 @@ def _da_from_rows(rows, k):
 
 
 import re as _re
-_BOR_NM = _re.compile(r"(차입금|사채|리스부채|유동성장기부채|금융리스|어음|전자단기사채|기업어음)")
-_BOR_EX = _re.compile(r"(할인발행차금|전환권조정|교환권조정|신주인수권조정|상환할증금|할증금|이자|미지급|충당|파생|평가|조정|매입채무|미수|대여|보증|선급|이연|자산|수익|비용|손익|지급어음|매출채권)")
+_BOR_NM = _re.compile(r"(차입금|차입부채|사채|리스부채|유동성장기부채|금융리스|어음|전자단기사채|기업어음)")   # 2026-10-31 '차입부채'(금융사 계정명) 추가 — 전에는 account_id로만 잡혀 id 없는 보고서에서 빠짐
+_BOR_EX = _re.compile(r"(할인발행차금|전환권조정|교환권조정|신주인수권조정|상환할증금|할증금|이자|미지급|충당|파생|평가|조정|매입채무|미수|대여|보증|선급|이연|자산|수익|비용|손익|지급어음|매출채권|리스채권|청구공사|공사채|투자사채|의상환|의차입)")
+# 2026-10-31 전수 점검: '금융리스채권'(리스 채권 = 자산, 414행)·'미청구공사채권'(공'사채'권, 28행)·'초과청구공사채무'가 차입금으로 합산되던 오류 → 제외
+# 투자사채(하나에프앤아이: 채권 투자자산)·'단기차입금의상환/차입'(이엠티: 현금흐름 항목이 BS로 태깅) 제외. ('채권할인차입금'은 차입금이므로 '채권' 전체를 막지 않고 리스채권·청구공사·공사채만 막음)
 _BOR_ID = _re.compile(r"(Borrowing|BondsIssued|Debenture|LeaseLiabilit|ConvertibleBond|ExchangeableBond|BondsWithWarrant|CommercialPaper|ShortTermBond)", _re.I)
 _BOR_ID_EX = _re.compile(r"(Interest|Discount|Premium|Adjust|Conversion|Payable|Receivable|Proceeds|Repayment|Asset|Expense|Cost|Gain|Loss)", _re.I)
 _BOR_AGG = _re.compile(r"(및|합계|총계)")
@@ -176,6 +178,44 @@ def _bor_kind(nm):
     return "차입금"
 
 
+_BOR_SUB = _re.compile(r"(차입부채|합계|총계|및)")
+_BOR_BARE = _re.compile(r"(차입금|사채|리스부채|금융부채|차입금및사채)")   # 수식어 없는 이름 — 유동/비유동 세부와 함께 적히면 소계
+
+
+def _drop_subtotals(cand):
+    """소계 줄 제거(2026-10-31 전수 점검: BNK캐피탈·롯데캐피탈 등 금융사는 '차입부채'(=사채+차입금 소계)와 구성항목을 함께 적어
+    총차입금이 실제의 1.8배로 나옴 — 43개사 148행). 이름이 아니라 금액으로 판정한다:
+    ① 소계형 이름(차입부채·합계·총계·및, 또는 수식어 없는 차입금·사채 등)의 금액이 다른 줄 2개 이상의 합과 일치(±0.01%)하면 제외
+    ② 두 줄 금액이 같고 이름이 다르면(스팩: '전환사채'='차입부채') 소계형 이름(차입부채·합계·총계·및) 쪽을 제외
+    ('단기차입부채'처럼 소계가 아닌 실제 계정은 금액이 다른 줄의 합과 맞지 않으므로 그대로 남는다)"""
+    from itertools import combinations
+    n = len(cand)
+    if n < 2:
+        return cand
+    drop = set()
+    for i, (nm, v, _, _) in enumerate(cand):
+        if not v or not (_BOR_SUB.search(nm) or _BOR_BARE.fullmatch(nm)):
+            continue      # 소계일 수 있는 이름에만 적용 — 네패스 '단기차입금'이 다른 세 줄 합과 우연히 일치해 지워진 사례(2026-10-31 사전검증)
+        others = [(j, c[1]) for j, c in enumerate(cand) if j != i and j not in drop and c[1]]
+        tol = abs(v) * 0.0001 + 1
+        # ② 같은 금액·다른 이름
+        same = [j for j, w in others if abs(w - v) <= tol and cand[j][0] != nm]
+        if same and _BOR_SUB.search(nm) and not all(_BOR_SUB.search(cand[j][0]) for j in same):
+            drop.add(i); continue
+        # ① 다른 줄 2개 이상의 합(줄 수가 많으면 조합 폭발 방지: 상위 12개만)
+        pool = sorted(others, key=lambda x: -abs(x[1]))[:12]
+        hit = False
+        for k in range(2, min(len(pool), 6) + 1):
+            for comb in combinations(pool, k):
+                if abs(sum(w for _, w in comb) - v) <= tol:
+                    hit = True; break
+            if hit:
+                break
+        if hit:
+            drop.add(i)
+    return [c for i, c in enumerate(cand) if i not in drop]
+
+
 def borrow_items(rows):
     """재무상태표 차입성 부채 세부 → [{nm, amt, kind, cur}] (cur: '유동'|'비유동'|None).
     총차입금(_borrowings)과 같은 후보·중복 규칙을 쓰므로 합계가 KPI 총차입금과 일치한다.
@@ -192,6 +232,7 @@ def borrow_items(rows):
             cand.append((nm, r["thstrm_amount"], aid, r.get("ord")))
     if not cand:
         return []
+    cand = _drop_subtotals(cand)
     agg = [c for c in cand if _BOR_AGG.search(c[0])]
     detail = [c for c in cand if not _BOR_AGG.search(c[0])]
     use = detail if (agg and any(_re.search(r"(차입금|사채|유동성장기부채)", c[0]) for c in detail)) else cand
