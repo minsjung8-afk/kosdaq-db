@@ -17,17 +17,23 @@ EVENT_FLAGS = {
 
 
 # ---------- 사업보고서 찾기 ----------
-def latest_annual_report(corp_code, bsns_year):
-    """해당 사업연도 사업보고서 접수번호(정정본 포함 최신)"""
+def annual_report_candidates(corp_code, bsns_year):
+    """해당 사업연도 사업보고서 접수번호 후보(최신순: 정정본 → 원본).
+    2026-11-01 전수 점검(상장사 159곳 사업내용 없음) 원인 ①: 3월 결산(3S 등)은 2025 사업연도 보고서 제목이 '사업보고서 (2026.03)'라
+    '(2025.xx)'만 찾던 패턴에 안 걸림 → 결산월이 12월이 아니면 '(다음해.MM)'도 허용(접수 기간은 어차피 다음 해 1년으로 제한)"""
     bgn = f"{int(bsns_year) + 1}0101"
     end = f"{int(bsns_year) + 1}1231"
     js = dart_get("list", corp_code=corp_code, bgn_de=bgn, end_de=end, pblntf_ty="A", page_count=100)
-    pat = re.compile(rf"사업보고서.*\({bsns_year}\.\d{{2}}\)")   # 결산월 무관
+    pat = re.compile(rf"사업보고서.*\(({bsns_year}\.\d{{2}}|{int(bsns_year) + 1}\.(0[1-9]|1[01]))\)")
     cands = [r for r in js.get("list", []) if pat.search(r["report_nm"])]
-    if not cands:
-        return None
     cands.sort(key=lambda r: r["rcept_dt"], reverse=True)
-    return cands[0]["rcept_no"]
+    return [r["rcept_no"] for r in cands]
+
+
+def latest_annual_report(corp_code, bsns_year):
+    """해당 사업연도 사업보고서 접수번호(정정본 포함 최신)"""
+    c = annual_report_candidates(corp_code, bsns_year)
+    return c[0] if c else None
 
 
 # ---------- 원문 파싱 ----------
@@ -148,11 +154,19 @@ def fetch_document_xml(rcept_no: str) -> str:
 
 
 def prefetch_report(corp_code, bsns_year):
-    """(병렬용) 사업보고서 접수번호 + 원문 XML 내려받기 — DB 접근 없음"""
-    rcept_no = latest_annual_report(corp_code, bsns_year)
-    if not rcept_no:
-        return rcept_no, None
-    return rcept_no, fetch_document_xml(rcept_no)
+    """(병렬용) 사업보고서 접수번호 + 원문 XML 내려받기 — DB 접근 없음.
+    2026-11-01 전수 점검 원인 ②: KB금융 2025 [기재정정] 사업보고서(20260619000667)는 원문 API가 zip이 아닌 응답을 줘(BadZipFile) 수집 전체가 실패 →
+    최신(정정본)이 안 열리면 그 앞 후보(원본)로 내려간다"""
+    cands = annual_report_candidates(corp_code, bsns_year)
+    if not cands:
+        return None, None
+    last = None
+    for rn in cands[:3]:
+        try:
+            return rn, fetch_document_xml(rn)
+        except Exception as e:  # noqa
+            last = e
+    raise last
 
 
 NOTE_KEYS = ("차입금", "사채", "우발", "약정", "담보", "보증", "특수관계자", "소송", "리스", "금융부채", "매입채무", "파생", "계열회사", "제재")
