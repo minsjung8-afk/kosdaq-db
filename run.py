@@ -544,6 +544,18 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "현금흐름":   # 2026-10-31 사용자 질문(CJ): 현금흐름표 본문에 상각비 줄이 있는지 — 최근 사업보고서 CF 행 전부(연결·별도)
+        for cc, sc in pairs:
+            for fs in ("CFS", "OFS"):
+                y = con.execute("SELECT MAX(bsns_year) FROM fin_raw WHERE corp_code=? AND reprt_code='11011' AND fs_div=? AND sj_div='CF'", (cc, fs)).fetchone()[0]
+                if not y:
+                    print(f"=== {sc} {fs}: 현금흐름표 없음", flush=True); continue
+                rows = con.execute("SELECT account_nm, thstrm_amount, account_id FROM fin_raw WHERE corp_code=? AND reprt_code='11011' AND fs_div=? AND bsns_year=? AND sj_div='CF' ORDER BY ord", (cc, fs, y)).fetchall()
+                hit = [r for r in rows if "상각" in (r[0] or "")]
+                print(f"=== {sc} {fs} {y} 사업보고서 현금흐름표 본문 {len(rows)}행 · '상각' 포함 행 {len(hit)}", flush=True)
+                for r in rows[:60]:
+                    print(f"    {(r[0] or '')[:40]:<40} {(r[1] or 0)/1e8:>14,.1f}억  {r[2] or ''}", flush=True)
+        pairs = []
     elif a.job == "rawdump" and a.type == "상각검증":   # 2026-10-31 신뢰도 측정: 주석 파서·AI가 뽑은 상각비를, 같은 행에 XBRL 현금흐름표(본문) 상각비가 있는 경우 그 값과 대조
         from financials import _da_from_rows
         import collections
