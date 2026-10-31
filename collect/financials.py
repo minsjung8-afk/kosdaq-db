@@ -361,7 +361,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 sa = con.execute("SELECT da FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND bsns_year=? AND da IS NOT NULL",
                                  (corp_code, fs_div, bsns_year)).fetchone()
                 if sa and sa[0]:
-                    cap = abs(sa[0]) * {"11013": 0.5, "11012": 0.8, "11014": 1.0}.get(reprt_code, 1.0)
+                    cap = abs(sa[0]) * 1.05                 # 2026-10-31: 0.5/0.8 비율은 상반기 비중이 큰 회사·연간값이 일부 항목만 잡힌 경우(미래에셋증권·현대해상 반기 ≒ 연간 81%)를 잘못 버림(375행) → 누적 분기·반기는 연간을 넘을 수 없다는 상한만
             except Exception:  # noqa
                 pass
         ta = k.get("total_assets")
@@ -374,8 +374,10 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                 rejects.append((src, v, "총자산25%초과")); continue
             if ta and src != "본문" and v < ta * 0.000001:
                 rejects.append((src, v, "총자산0.0001%미만")); continue   # 2026-10-30 18:40: 0.02% 기준은 지주·증권·보험·건설(자산 대비 상각비 극소)과 1분기 값 754건을 잘못 버림 → 사실상 0인 값만 거르고, 단위 누락은 파서(patch219)와 직전 연간 대조로 막는다
-            if ref and src != "본문" and not (ref / 4 <= v <= ref * 4):
-                rejects.append((src, v, f"직전연간 1/4~4배 밖(ref {ref:.0f})")); continue   # 본문(현금흐름표) 값은 기준 점검 없이 신뢰 — 점검은 주석 오독 방지용(2026-10-26 HL D&I)
+            if ref and ta and pa < ta * 0.0002:
+                ref = None                             # 2026-10-31: 기준이 되는 직전 연간값 자체가 총자산 대비 0.02% 미만이면(HD현대 2023 연결 12억 — 오독) 기준으로 못 씀 → 점검 생략
+            if ref and src != "본문" and not (ref / 8 <= v <= ref * 8):
+                rejects.append((src, v, f"직전연간 1/8~8배 밖(ref {ref:.0f})")); continue   # 본문(현금흐름표) 값은 기준 점검 없이 신뢰 — 점검은 주석 오독 방지용(2026-10-26 HL D&I). 1/4~4배는 연결범위 변동·리스 도입·기준값이 일부 항목뿐인 경우 806행을 잘못 버림(2026-10-31) → 1/8~8배(단위 오류 1,000배는 여전히 걸러짐)
             if cap and v > cap:
                 rejects.append((src, v, f"같은해 연간 비율 초과(cap {cap:.0f})")); continue
             if reprt_code != "11011" and pa and abs(v - pa) <= pa * 0.003:
