@@ -539,6 +539,38 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "상각검증":   # 2026-10-31 신뢰도 측정: 주석 파서·AI가 뽑은 상각비를, 같은 행에 XBRL 현금흐름표(본문) 상각비가 있는 경우 그 값과 대조
+        from financials import _da_from_rows
+        import collections
+        stat = collections.defaultdict(lambda: collections.Counter())
+        worst = []
+        n = 0
+        for cc, y, rc, fs, v, src in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, src FROM da_notes WHERE da IS NOT NULL AND src IN ('backfill','ai','latest','annual')"):
+            rows = [dict(r) for r in con.execute("SELECT sj_div, account_nm, account_id, thstrm_amount FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND sj_div IN ('CF','IS','CIS')", (cc, y, rc, fs))]
+            if not rows:
+                continue
+            k = {}
+            _da_from_rows(rows, k)
+            parts = [abs(x) for x in (k.get("dep"), k.get("amort"), k.get("rou_dep")) if x is not None]
+            if not parts:
+                continue
+            truth = sum(parts)
+            if truth <= 0:
+                continue
+            n += 1
+            r = v / truth
+            band = "±10%" if 0.9 <= r <= 1.1 else "±30%" if 0.7 <= r <= 1.3 else "±2배" if 0.5 <= r <= 2 else "2~10배" if 0.1 <= r <= 10 else "10배+"
+            stat[src][band] += 1
+            if band in ("2~10배", "10배+") and len(worst) < 40:
+                worst.append((cc, y, rc, fs, src, v, truth, r))
+        print(f"[da_audit] 대조 가능 행 {n} (주석/AI 값과 XBRL 현금흐름표 값이 둘 다 있는 행)", flush=True)
+        for src, c in stat.items():
+            tot = sum(c.values())
+            print(f"[da_audit] {src}: {tot}행 · " + " · ".join(f"{b} {c[b]} ({c[b]/tot*100:.0f}%)" for b in ("±10%", "±30%", "±2배", "2~10배", "10배+")), flush=True)
+        names = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        for cc, y, rc, fs, src, v, truth, r in worst:
+            print(f"[da_audit]   {names.get(cc, cc)} {y}/{rc}/{fs} {src} 주석 {v/1e8:,.1f}억 vs 본문 {truth/1e8:,.1f}억 (x{r:.2f})", flush=True)
+        pairs = []
     elif a.job == "rawdump" and a.type == "자산":   # 2026-10-31: 총자산 100만 배 이상(이큐셀 1,486,253,622억·다원넥스뷰) 진단 — BS '자산' 행 전부와 KPI 값
         for cc, sc in pairs:
             for r in con.execute("SELECT bsns_year, reprt_code, fs_div, total_assets, equity, revenue FROM fin_kpi WHERE corp_code=? ORDER BY bsns_year DESC, reprt_code LIMIT 8", (cc,)):
