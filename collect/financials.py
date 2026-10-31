@@ -424,6 +424,19 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k["capex_disp"] = sum(dp) if dp else None
         k["capex"] = (sum(cp) - sum(dp)) if cp else None
         k["fcf"] = (k["cfo"] - k["capex"]) if k.get("cfo") is not None and k["capex"] is not None else None
+        # 2026-10-31 보고서 자체의 단위 오류(이큐셀 2025 반기 총자산 1,486,253,622억 = 100만 배, 디와이에이·CMG제약·이트론·에프알텍·진코스텍·다원넥스뷰·대산FB·신영스팩11호 등 26행):
+        # DART가 제출된 XBRL 값을 그대로 주므로 우리 쪽 파싱 문제가 아님. 앞뒤 기간 총자산과 50배 이상 차이(또는 0)면 그 기간 KPI 숫자를 전부 비우고 kpi_flag에 기록 — 틀린 숫자보다 빈칸
+        bad = _ta_outlier(con, corp_code, fs_div, bsns_year, reprt_code, k.get("total_assets"))
+        if bad:
+            con.execute("CREATE TABLE IF NOT EXISTS kpi_flag (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, reason TEXT, at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))")
+            con.execute("INSERT OR REPLACE INTO kpi_flag VALUES (?,?,?,?,?,datetime('now'))", (corp_code, bsns_year, reprt_code, fs_div, bad))
+            k = {}
+            ie = None
+        else:
+            try:
+                con.execute("DELETE FROM kpi_flag WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, bsns_year, reprt_code, fs_div))
+            except Exception:  # noqa
+                pass
         rcept = next((r["rcept_no"] for r in rows if r.get("rcept_no")), None)
         if rcept is None:   # 기존 행에 저장된 접수번호 유지
             old = con.execute("SELECT rcept_no FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
@@ -447,6 +460,40 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio"),
                      k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None)))
     con.commit()
+
+
+_PORD = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}
+
+
+def _ta_outlier(con, corp_code, fs_div, bsns_year, reprt_code, ta):
+    """총자산이 바로 앞·뒤 기간(둘 다 있으면 둘 다, 하나뿐이면 그 하나)과 50배 이상 차이거나 0이면 사유 문자열, 아니면 None.
+    스팩 합병처럼 진짜로 급변하면 다음 기간이 쌓이는 순간 한쪽 이웃과 비슷해져 자동 해제"""
+    try:
+        rows = con.execute("SELECT bsns_year, reprt_code, total_assets FROM fin_kpi WHERE corp_code=? AND fs_div=? AND total_assets IS NOT NULL AND total_assets > 0 AND NOT (bsns_year=? AND reprt_code=?)",
+                           (corp_code, fs_div, bsns_year, reprt_code)).fetchall()
+    except Exception:  # noqa
+        return None
+    if not rows:
+        return None
+    try:   # 이미 단위 오류로 표시된 기간은 이웃으로 쓰지 않음
+        flagged = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM kpi_flag WHERE corp_code=? AND fs_div=?", (corp_code, fs_div))}
+        rows = [r for r in rows if (r[0], r[1]) not in flagged]
+    except Exception:  # noqa
+        pass
+    if not rows:
+        return None
+    me = (int(bsns_year), _PORD.get(reprt_code, 4))
+    pts = sorted(((int(r[0]), _PORD.get(r[1], 4)), r[2]) for r in rows)
+    prev = max((p for p in pts if p[0] < me), default=None)
+    nxt = min((p for p in pts if p[0] > me), default=None)
+    nb = [p[1] for p in (prev, nxt) if p]
+    if not nb:
+        return None
+    if not ta:
+        return f"총자산 0/없음(이웃 {nb[0]:.0f})"
+    if all(ta >= v * 50 or ta * 50 <= v for v in nb):
+        return f"총자산 이웃 기간 대비 50배 이상 차이({ta:.0f} vs {','.join(f'{v:.0f}' for v in nb)})"
+    return None
 
 
 from datetime import date
