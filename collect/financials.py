@@ -302,7 +302,16 @@ _FALLBACK_RE = {
 }
 
 
+_DA_SRC_COL = {"ok": False}
+
+
 def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
+    if not _DA_SRC_COL["ok"]:
+        try:
+            con.execute("ALTER TABLE fin_kpi ADD COLUMN da_src TEXT")
+        except Exception:  # noqa — 이미 있음
+            pass
+        _DA_SRC_COL["ok"] = True
     for fs_div in ("CFS", "OFS"):
         rows = [dict(r) for r in con.execute(
             "SELECT * FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
@@ -383,7 +392,14 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             if reprt_code != "11011" and pa and abs(v - pa) <= pa * 0.003:
                 rejects.append((src, v, "직전연간과 동일(전기열)")); continue   # 분기·반기 값이 직전 연간과 똑같으면 전기(연간) 열을 읽은 것(2026-10-29 CJ대한통운 별도 2026 반기 1,996억 = 2025 연간)
             k["da"] = v
+            k["da_src"] = src                      # 2026-10-31 사용자 결정(A안): 상각비 출처를 KPI에 남겨 사이트에서 '추정' 표시 — 본문(현금흐름표)이 아니면 주석 파서/AI 값
             break
+        if k.get("da_src") == "da_notes":
+            try:
+                ns = con.execute("SELECT src FROM da_notes WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
+                k["da_src"] = f"da_notes:{ns[0]}" if ns and ns[0] else "da_notes"
+            except Exception:  # noqa
+                pass
         try:
             con.execute("CREATE TABLE IF NOT EXISTS da_reject (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, src TEXT, v REAL, reason TEXT, at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))")
             con.execute("DELETE FROM da_reject WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, bsns_year, reprt_code, fs_div))
@@ -447,8 +463,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
             cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
             payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio,
-            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
@@ -458,7 +474,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda"),
                      k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op"),
                      k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio"),
-                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None)))
+                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None), k.get("da_src")))
     con.commit()
 
 
