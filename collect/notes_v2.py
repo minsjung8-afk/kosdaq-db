@@ -680,7 +680,11 @@ def _diag_notes_struct(xml):
             nxt = re.search(r"<(SECTION-\d|TITLE)[^>]*>", xml[m.end():m.end() + 400000], flags=re.I)
             body = xml[m.end():m.end() + 700]
             tags = re.findall(r"<([A-Z][A-Z0-9-]*)", body, flags=re.I)[:14]
-            out.append(f"{t[:14]}: 감싼 SECTION 레벨 {enclosing or '없음'} · 다음 태그 {nxt.group(1) if nxt else '없음'}@{nxt.start() if nxt else -1} · 본문 태그 {','.join(tags)} · {_strip(body)[:120]!r}")
+            raw = xml[m.end():m.end() + 4000]
+            k = raw.find("1. ")                                  # 첫 항목 제목('1. 일반사항' 등) 주변 원문 그대로(태그 포함) — 제목 줄 패턴(_HEAD_RE)이 왜 안 맞는지 확인용
+            raw = raw[max(0, k - 200):k + 600] if k >= 0 else raw[:800]
+            heads = [ln[:40] for ln in _strip(xml[m.end():m.end() + 150000]).split("\n") if re.match(r"\s*\d{1,2}\s*[.．]\s*\S", ln)][:14]
+            out.append(f"{t[:14]}: 감싼 SECTION 레벨 {enclosing or '없음'} · 다음 태그 {nxt.group(1) if nxt else '없음'}@{nxt.start() if nxt else -1} · 본문 태그 {','.join(tags)} · {_strip(body)[:120]!r} · 숫자줄 {heads} · 원문 {raw!r}")
     except Exception as e:  # noqa
         out.append(f"진단 오류 {e}")
     return " ‖ ".join(out) or "주석 TITLE 없음"
