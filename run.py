@@ -516,6 +516,24 @@ def main():
                  WHERE k.da IS NULL AND k.op_income IS NOT NULL AND k.bsns_year>='2024' AND k.reprt_code IN ('11011','11012') AND n1.corp_code IS NULL
                  ORDER BY k.total_assets DESC LIMIT 25"""):
                 print(f"[da_gap]     표본(다른구분만) {r[0]} {r[1]}/{r[2]} 빈행 {r[3]}(총자산 {(r[4] or 0)/1e8:,.0f}억) ← {r[5]} {r[6]/1e8:,.1f}억 {r[7]}", flush=True)
+            # 2026-10-31: 아직 빈 행의 '최근' 기각 사유를 숫자 떼고 묶음(위 상위 15개는 ref/cap 숫자가 사유 문자열에 섞여 2건씩 흩어짐) + 총자산 큰 순 표본
+            import re as _re
+            cls, samp = {}, []
+            for r in con.execute("""SELECT c.corp_name, d.bsns_year, d.reprt_code, d.fs_div, d.src, d.v, d.reason, k.total_assets,
+                                           (SELECT da FROM fin_kpi p WHERE p.corp_code=d.corp_code AND p.fs_div=d.fs_div AND p.reprt_code='11011' AND p.bsns_year=CAST(CAST(d.bsns_year AS INTEGER)-1 AS TEXT)) AS prev_da
+                                    FROM da_reject d JOIN fin_kpi k ON k.corp_code=d.corp_code AND k.bsns_year=d.bsns_year AND k.reprt_code=d.reprt_code AND k.fs_div=d.fs_div
+                                    JOIN company c ON c.corp_code=d.corp_code
+                                    WHERE k.da IS NULL AND k.op_income IS NOT NULL AND k.bsns_year>='2024' AND k.reprt_code IN ('11011','11012')
+                                      AND d.at = (SELECT MAX(at) FROM da_reject x WHERE x.corp_code=d.corp_code AND x.bsns_year=d.bsns_year AND x.reprt_code=d.reprt_code AND x.fs_div=d.fs_div)
+                                    ORDER BY k.total_assets DESC"""):
+                key = f"{r[4]}:{_re.sub(r'[\d,.]+', 'N', r[6] or '')}"
+                cls[key] = cls.get(key, 0) + 1
+                if len(samp) < 30:
+                    samp.append(r)
+            for k_, v_ in sorted(cls.items(), key=lambda x: -x[1])[:20]:
+                print(f"[da_gap]   기각사유(빈 행 기준) {v_:5d}  {k_}", flush=True)
+            for r in samp:
+                print(f"[da_gap]     기각표본 {r[0]} {r[1]}/{r[2]}/{r[3]} {r[4]} 후보 {r[5]/1e8:,.2f}억 · 총자산 {(r[7] or 0)/1e8:,.0f}억 · 직전연간 {(r[8] or 0)/1e8:,.1f}억 — {r[6]}", flush=True)
             n_ai = con.execute("SELECT COUNT(*) FROM da_notes WHERE src='ai'").fetchone()[0]
             n_ai_null = con.execute("SELECT COUNT(*) FROM da_notes n JOIN fin_kpi k USING (corp_code, bsns_year, reprt_code, fs_div) WHERE n.src='ai' AND k.da IS NULL").fetchone()[0]
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
