@@ -716,7 +716,8 @@ def rating_status(ratings, today=None):
         same = [r for r in cancels if (_tkey(r) == _tkey(cur) or (_cls(r) == "issuer" and _cls(cur) == "issuer")) and (r.get("disc_dt") or "") >= (cur.get("disc_dt") or "")]
         if same:
             return {"kind": "cancel", "label": "등급 취소", "date": same[0]["disc_dt"], "tip": f"{same[0]['agency']} {same[0]['disc_dt']} {same[0].get('target_type') or ''} 등급 취소 공시"}
-        if cur.get("valid_to"):                     # 평가서에 기재된 유효기간이 있으면 그 날짜로 판단(2026-10-26 씨제이포디플렉스 CP 6개월)
+        if cur.get("valid_to") and (cur["valid_to"][:10] > (cur.get("disc_dt") or "")[:10]):   # 평가서에 기재된 유효기간이 있으면 그 날짜로 판단(2026-10-26 씨제이포디플렉스 CP 6개월)
+            # 2026-10-31 전수 점검: 롯데캐피탈 제509-1회 금융채(공시 10-29)의 valid_to가 10-27로 공시일보다 앞 → '만료'로 오판돼 CP A2+가 대표가 됨. 공시일 이전 유효기간은 무시
             try:
                 vt = datetime.strptime(cur["valid_to"][:10], "%Y-%m-%d").date()
                 if today > vt:
@@ -741,6 +742,16 @@ def rating_view(ratings, today=None):
     장기 등급이 만료·취소이고 유효한 단기 등급(CP·전단채)이 있으면 단기 등급을 대표로, 만료된 장기 등급은 보조 표시(aux)로."""
     cur = current_rating(ratings)
     st = rating_status(ratings, today)
+    # 2026-10-31 전수 점검: 콘텐트리중앙 — CP·전단채가 2026-06~07 B+→D(부도)인데 대표는 2026-01 일반사채 BBB-(장기 우선 규칙).
+    # 대표 등급보다 뒤에 공시된 무보증 등급이 D·C(부도·채무불이행 수준)이면 그 등급을 대표로 하고 상태를 '부도'로 표시 — 심사 DB에서 가장 먼저 보여야 할 정보
+    dflt = [r for r in ratings if not _is_cancel(r) and _cls(r) != "sub" and re.fullmatch(r"(D|C)", (r.get("grade") or "").strip())
+            and "정정" not in (r.get("eval_kind") or "")]
+    if dflt and (not cur or (dflt[0].get("disc_dt") or "") > (cur.get("disc_dt") or "")):
+        d0 = dflt[0]
+        aux = ({"grade": cur.get("grade"), "label": f"{re.sub(r'\s+', '', cur.get('target_type') or '')} {cur.get('disc_dt')}", "date": cur.get("disc_dt"), "kind": "pre_default",
+                "tip": f"부도 등급 전 마지막 대표 등급: {cur.get('agency')} {cur.get('disc_dt')} {cur.get('target_type') or ''} {cur.get('grade')}"} if cur else None)
+        return d0, {"kind": "default", "label": "부도·채무불이행", "date": d0.get("disc_dt"),
+                    "tip": f"{d0.get('agency')} {d0.get('disc_dt')} {d0.get('target_type') or ''} {d0.get('eval_kind') or ''} 등급 {d0.get('grade')}"}, aux
     if not cur:                                   # 본등급(선순위·단기) 공시가 없고 신종자본·후순위 등급만 있으면 → 대표 없음 + 참고 표시(본등급 아님)
         cancels = [r for r in ratings if _is_cancel(r)]
         subs = [r for r in ratings if _cls(r) == "sub" and not _is_cancel(r) and not _issue_cancelled(r, cancels)]
