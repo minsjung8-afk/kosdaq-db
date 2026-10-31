@@ -496,6 +496,26 @@ def main():
                  LEFT JOIN da_ai_log a ON a.corp_code=k.corp_code AND a.bsns_year=k.bsns_year AND a.reprt_code=k.reprt_code
                  WHERE k.da IS NULL AND k.op_income IS NOT NULL AND k.bsns_year>='2024' AND k.reprt_code IN ('11011','11012') GROUP BY 1 ORDER BY 1"""):
                 print(f"[da_gap] {r[0]}: 합계 {r[6]} · 미시도 {r[1]} · 수정전실패 {r[2]} · AI미처리 {r[3]} · AI실패 {r[4]} · 후보기각 {r[5]}", flush=True)
+            # 2026-10-31: '후보기각'(보고서에서 값은 나왔는데 이 행은 빈 경우) 분해 — 다른 구분(연결↔별도)에만 값이 있는지 / 상식 점검에 걸렸는지 / 둘 다 아닌지
+            for r in con.execute("""SELECT k.bsns_year||'/'||k.reprt_code AS p, k.fs_div,
+                        SUM(n2.corp_code IS NOT NULL AND n1.corp_code IS NULL) AS 다른구분만,
+                        SUM(j.corp_code IS NOT NULL) AS 상식점검기각,
+                        SUM(n1.corp_code IS NULL AND n2.corp_code IS NULL AND j.corp_code IS NULL) AS 후보없음, COUNT(*) AS 합계
+                 FROM fin_kpi k LEFT JOIN da_try t ON t.corp_code=k.corp_code AND t.bsns_year=k.bsns_year AND t.reprt_code=k.reprt_code
+                 LEFT JOIN da_ai_log a ON a.corp_code=k.corp_code AND a.bsns_year=k.bsns_year AND a.reprt_code=k.reprt_code
+                 LEFT JOIN da_notes n1 ON n1.corp_code=k.corp_code AND n1.bsns_year=k.bsns_year AND n1.reprt_code=k.reprt_code AND n1.fs_div=k.fs_div
+                 LEFT JOIN da_notes n2 ON n2.corp_code=k.corp_code AND n2.bsns_year=k.bsns_year AND n2.reprt_code=k.reprt_code AND n2.fs_div<>k.fs_div
+                 LEFT JOIN (SELECT DISTINCT corp_code, bsns_year, reprt_code, fs_div FROM da_reject) j ON j.corp_code=k.corp_code AND j.bsns_year=k.bsns_year AND j.reprt_code=k.reprt_code AND j.fs_div=k.fs_div
+                 WHERE k.da IS NULL AND k.op_income IS NOT NULL AND k.bsns_year>='2024' AND k.reprt_code IN ('11011','11012') AND (t.ok=1 OR a.ok=1)
+                 GROUP BY 1, 2 ORDER BY 1, 2"""):
+                print(f"[da_gap]   후보기각 {r[0]} {r[1]}: 합계 {r[5]} · 다른구분만 {r[2]} · 상식점검기각 {r[3]} · 후보없음 {r[4]}", flush=True)
+            for r in con.execute("""SELECT c.corp_name, k.bsns_year, k.reprt_code, k.fs_div, k.total_assets, n2.fs_div, n2.da, n2.src
+                 FROM fin_kpi k JOIN company c USING (corp_code)
+                 JOIN da_notes n2 ON n2.corp_code=k.corp_code AND n2.bsns_year=k.bsns_year AND n2.reprt_code=k.reprt_code AND n2.fs_div<>k.fs_div
+                 LEFT JOIN da_notes n1 ON n1.corp_code=k.corp_code AND n1.bsns_year=k.bsns_year AND n1.reprt_code=k.reprt_code AND n1.fs_div=k.fs_div
+                 WHERE k.da IS NULL AND k.op_income IS NOT NULL AND k.bsns_year>='2024' AND k.reprt_code IN ('11011','11012') AND n1.corp_code IS NULL
+                 ORDER BY k.total_assets DESC LIMIT 25"""):
+                print(f"[da_gap]     표본(다른구분만) {r[0]} {r[1]}/{r[2]} 빈행 {r[3]}(총자산 {(r[4] or 0)/1e8:,.0f}억) ← {r[5]} {r[6]/1e8:,.1f}억 {r[7]}", flush=True)
             n_ai = con.execute("SELECT COUNT(*) FROM da_notes WHERE src='ai'").fetchone()[0]
             n_ai_null = con.execute("SELECT COUNT(*) FROM da_notes n JOIN fin_kpi k USING (corp_code, bsns_year, reprt_code, fs_div) WHERE n.src='ai' AND k.da IS NULL").fetchone()[0]
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
