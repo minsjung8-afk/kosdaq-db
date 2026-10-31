@@ -547,14 +547,18 @@ def main():
     elif a.job == "rawdump" and a.type == "사업진단":   # 2026-11-01 전수 점검: 상장사 159곳 사업내용 미수집(3S·KB금융·경동나비엔) — 재수집해도 빈 채로 남아 원문 구조를 직접 본다
         import business, common, re as _re
         for cc, sc in pairs:
-            rn = business.latest_annual_report(cc, a.year - 1)
-            print(f"=== {sc} {cc} 사업보고서({a.year - 1}) 접수번호: {rn}", flush=True)
+            cands = business.annual_report_candidates(cc, a.year - 1)
+            rn = cands[0] if cands else None
+            print(f"=== {sc} {cc} 사업보고서({a.year - 1}) 접수번호 후보: {cands}", flush=True)
             if not rn:
                 js = common.dart_get("list", corp_code=cc, bgn_de=f"{a.year}0101", end_de=f"{a.year}1231", pblntf_ty="A", page_count=100)
                 print("    정기공시 목록:", [(r["report_nm"], r["rcept_dt"]) for r in js.get("list", [])][:10], flush=True)
                 continue
-            xml = business.fetch_document_xml(rn)
-            print(f"    XML 길이 {len(xml):,}", flush=True)
+            try:
+                rn, xml = business.prefetch_report(cc, a.year - 1)
+            except Exception as e:  # noqa
+                print(f"    원문 다운로드 실패(후보 전부): {type(e).__name__}: {e}", flush=True); continue
+            print(f"    사용 접수번호 {rn} · XML 길이 {len(xml):,}", flush=True)
             for lv in ("1", "2"):
                 ts = [business._strip(m.group(1))[:50] for m in _re.finditer(rf"<SECTION-{lv}[^>]*>\s*<TITLE[^>]*>(.*?)</TITLE>", xml, flags=_re.S | _re.I)]
                 print(f"    SECTION-{lv} 제목 {len(ts)}개:", ts[:30], flush=True)
