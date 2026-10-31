@@ -269,6 +269,7 @@ table.ft th.fcur{box-shadow:inset 0 -2px 0 var(--gold)}
 .twrap.stick table.ft tr>th:first-child{background:#f3f5f9}.twrap.stick table.ft tr>td:first-child,.twrap.stick table.ft tr:nth-child(even)>td:first-child{background:var(--panel)}
 .fai{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--nbg2);font-size:12.5px;line-height:1.6}.fai-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:3px}.fai-h b{color:var(--navy)}.fcause{color:var(--navy2)}
 .ft1{font-weight:700;font-size:13px}.ft2{grid-column:2;font-size:12.5px}.ft3{grid-column:2;font-size:11px;color:var(--mute)}
+sup.est{font-size:9px;color:var(--warn);margin-left:2px;cursor:help;font-weight:600}
 </style>
 </head>
 <body>
@@ -598,18 +599,21 @@ async function open(code){
       const bbOf=(fs,lab)=>((d.borrow_bd||{})[fs]||[]).find(c=>c.label===lab);
       const bsum=(col,k,cs)=>col&&col.k&&col.k[k]?cs.reduce((a,c)=>a+(col.k[k][c]||0),0):null;
       const ALL=['유동','비유동','미구분'];
-      const R=[['g','손익'],['매출액',r=>r.revenue],['영업이익',r=>r.op_income],['영업이익률',r=>r.op_margin,pct],['당기순이익',r=>r.net_income],['당기순이익률',r=>r.net_margin,pct],['EBITDA',r=>r.ebitda],
+      // 2026-10-31 사용자 결정(A안): 상각비가 현금흐름표 원천값이 아니면(주석 파서·AI 추출) EBITDA 계열에 '추정' 표시 — 대조 검증에서 이런 출처의 약 1/4이 2배 이상 오차
+      const DASRC={'da_xbrl':'XBRL 주석','da_notes:backfill':'주석 표 규칙 추출','da_notes:latest':'주석 표 규칙 추출','da_notes:annual':'주석 표 규칙 추출','da_notes:ai':'AI 추출(Sonnet)','da_notes':'주석 표 추출'};
+      const daMark=r=>(r.ebitda!=null&&r.da_src&&r.da_src!=='본문')?`<sup class="est" title="상각비 출처: ${DASRC[r.da_src]||r.da_src} — 현금흐름표 원천값이 아닌 추정치. 2배 이상 틀릴 수 있음(검증 표본의 약 25%)">추정</sup>`:'';
+      const R=[['g','손익'],['매출액',r=>r.revenue],['영업이익',r=>r.op_income],['영업이익률',r=>r.op_margin,pct],['당기순이익',r=>r.net_income],['당기순이익률',r=>r.net_margin,pct],['EBITDA',r=>r.ebitda,null,null,null,daMark],
         ['g','재무상태'],['자산총계',r=>r.total_assets],['부채총계',r=>r.total_liab],['자본총계',r=>r.equity],['현금성자산',r=>r.cash],
         ['g','차입금'],['총차입금',r=>r.borrowings,null,'sum','세부 구성(차입금·사채·리스 × 유동/비유동)은 3-1. 차입금 현황'],['순차입금',r=>r.net_borrowings,null,'sum'],
         ['g','현금흐름'],['영업활동CF',r=>r.cfo],['투자활동CF',r=>r.cfi],['Capex 순액',r=>r.capex_cf,null,'s2','(−) 순투자 유출 · (+) 처분 우위'],['재무활동CF',r=>r.cff],['FCF',r=>r.fcf,null,null,'영업활동CF + Capex 순액'],
-        ['g','안정성'],['부채비율',r=>r.debt_ratio,pct],['차입금의존도',r=>r.borrow_dep,pct],['유동비율',r=>r.cur_ratio,pct],['EBITDA/이자비용',r=>r.interest_cover,x],['순차입금/EBITDA',r=>r.nd_ebitda,x,null,'반기·분기는 LTM EBITDA 기준'],
+        ['g','안정성'],['부채비율',r=>r.debt_ratio,pct],['차입금의존도',r=>r.borrow_dep,pct],['유동비율',r=>r.cur_ratio,pct],['EBITDA/이자비용',r=>r.interest_cover,x,null,null,daMark],['순차입금/EBITDA',r=>r.nd_ebitda,x,null,'반기·분기는 LTM EBITDA 기준',daMark],
         ['g','활동성·운전자본'],['매출채권회전율',r=>r.recv_turn,x],['재고자산회전율',r=>r.inv_turn,x],...(isProj?[['순운전자본(수주형)',r=>r.nwc_proj,null,null,'매출채권+미청구공사+재고−매입채무−초과청구−선수금'],['미청구공사',r=>r.contract_assets,null,'s2'],['초과청구공사',r=>r.contract_liab,null,'s2'],['선수금',r=>r.advances,null,'s2']]:isFin?[]:[['순운전자본',r=>r.nwc,null,null,'매출채권+재고−매입채무']])];
       const plink=r=>r.rcept_no?`<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener" title="DART 보고서 열기">${r.label||r.bsns_year}</a>`:(r.label||r.bsns_year);
       const tbl=(fs,nm)=>{const rows=d.kpi[fs]; let body='',grp=null,buf='';
         const flush=()=>{if(grp&&buf) body+=`<tr class="fg"><td colspan="${rows.length+1}">${grp}</td></tr>`+buf; buf='';};
-        for(const [lab,fn,fmt,cls,tip] of R){ if(lab==='g'){flush(); grp=fn; continue;}
+        for(const [lab,fn,fmt,cls,tip,mk] of R){ if(lab==='g'){flush(); grp=fn; continue;}
           const vals=rows.map(r=>{try{return fn(r,fs)}catch(e){return null}}); if(vals.every(v=>v==null)) continue; const f=fmt||억;
-          buf+=`<tr class="${cls==='sum'?'fsum':''}"><td class="${cls==='s2'?'fsub':''}"${tip?` title="${esc(tip)}"`:''}>${lab}${tip?' <small>ⓘ</small>':''}</td>${vals.map((v,i)=>`<td class="n${rows[i].kind==='interim'?' fcur':''}${v!=null&&v<0?' neg':''}">${f(v)}</td>`).join('')}</tr>`; }
+          buf+=`<tr class="${cls==='sum'?'fsum':''}"><td class="${cls==='s2'?'fsub':''}"${tip?` title="${esc(tip)}"`:''}>${lab}${tip?' <small>ⓘ</small>':''}</td>${vals.map((v,i)=>`<td class="n${rows[i].kind==='interim'?' fcur':''}${v!=null&&v<0?' neg':''}">${f(v)}${mk?mk(rows[i]):''}</td>`).join('')}</tr>`; }
         flush();
         return `<div class="fsv" data-fs="${fs}"><div class="twrap"><table class="ft"><tr><th>${nm}</th>${rows.map(r=>`<th class="n${r.kind==='interim'?' fcur':''}">${plink(r)}${r.kind!=='annual'?'<span class="fcol">누적</span>':''}</th>`).join('')}</tr>${body}</table></div></div>`;};
       const fn=d.fin_notes||[]; const SV={bad:'위험',warn:'주의',info:'참고',good:'양호',fact:'현황'};
