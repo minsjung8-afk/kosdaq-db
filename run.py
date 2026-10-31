@@ -539,6 +539,25 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "자산":   # 2026-10-31: 총자산 100만 배 이상(이큐셀 1,486,253,622억·다원넥스뷰) 진단 — BS '자산' 행 전부와 KPI 값
+        for cc, sc in pairs:
+            for r in con.execute("SELECT bsns_year, reprt_code, fs_div, total_assets, equity, revenue FROM fin_kpi WHERE corp_code=? ORDER BY bsns_year DESC, reprt_code LIMIT 8", (cc,)):
+                print(f"=== {sc} KPI {r[0]}/{r[1]}/{r[2]} 총자산 {r[3]} 자본 {r[4]} 매출 {r[5]}", flush=True)
+            for r in con.execute("""SELECT bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm, thstrm_amount, ord FROM fin_raw
+                                    WHERE corp_code=? AND sj_div='BS' AND (account_nm LIKE '%자산%총계%' OR account_nm LIKE '%자산총계%' OR account_id='ifrs-full_Assets' OR account_nm LIKE '%자산%합계%')
+                                    ORDER BY bsns_year DESC, reprt_code, fs_div LIMIT 30""", (cc,)):
+                print("   ", tuple(r), flush=True)
+        # 전수: 총자산이 시가총액의 10,000배 초과이거나 직전 연간 대비 100배 이상 튀는 행
+        n = 0
+        for r in con.execute("""SELECT c.corp_name, k.bsns_year, k.reprt_code, k.fs_div, k.total_assets, p.total_assets
+                                FROM fin_kpi k JOIN company c USING (corp_code)
+                                LEFT JOIN fin_kpi p ON p.corp_code=k.corp_code AND p.fs_div=k.fs_div AND p.reprt_code='11011' AND p.bsns_year=CAST(CAST(k.bsns_year AS INTEGER)-1 AS TEXT)
+                                WHERE k.total_assets IS NOT NULL AND p.total_assets IS NOT NULL AND (k.total_assets > p.total_assets*100 OR k.total_assets*100 < p.total_assets)
+                                ORDER BY k.total_assets DESC LIMIT 60"""):
+            n += 1
+            print(f"[ta_anom] {r[0]} {r[1]}/{r[2]}/{r[3]} 총자산 {r[4]/1e8:,.0f}억 (직전 연간 {r[5]/1e8:,.0f}억)", flush=True)
+        print(f"[ta_anom] 직전 연간 대비 100배 이상 차이 행(상위 60 표시): {n}", flush=True)
+        pairs = []
     elif a.job == "rawdump" and a.type == "차입":   # 2026-10-30: 차입금 '구분불명' 진단 — 지정 종목의 재무상태표 차입성 행(ord·유동/비유동 소계 위치)
         from financials import borrow_items, _norm_nm
         for cc, sc in pairs:
