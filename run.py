@@ -534,6 +534,11 @@ def main():
                 print(f"[da_gap]   기각사유(빈 행 기준) {v_:5d}  {k_}", flush=True)
             for r in samp:
                 print(f"[da_gap]     기각표본 {r[0]} {r[1]}/{r[2]}/{r[3]} {r[4]} 후보 {r[5]/1e8:,.2f}억 · 총자산 {(r[7] or 0)/1e8:,.0f}억 · 직전연간 {(r[8] or 0)/1e8:,.1f}억 — {r[6]}", flush=True)
+            try:   # 2026-10-31 A안: 상각비 출처별 행 수(사이트에 '추정' 표시되는 비중)
+                for r in con.execute("SELECT COALESCE(da_src,'(없음)'), COUNT(*) FROM fin_kpi WHERE da IS NOT NULL AND bsns_year>='2024' GROUP BY 1 ORDER BY 2 DESC"):
+                    print(f"[da_src] {r[1]:6d}  {r[0]}", flush=True)
+            except Exception as e:  # noqa
+                print("[da_src] 조회 실패:", e, flush=True)
             n_ai = con.execute("SELECT COUNT(*) FROM da_notes WHERE src='ai'").fetchone()[0]
             n_ai_null = con.execute("SELECT COUNT(*) FROM da_notes n JOIN fin_kpi k USING (corp_code, bsns_year, reprt_code, fs_div) WHERE n.src='ai' AND k.da IS NULL").fetchone()[0]
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
