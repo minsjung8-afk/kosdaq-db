@@ -149,6 +149,7 @@ def extract_notes_v2(xml_text):
                 break
         return cur
     others = []
+    found_notes = set()
     for lv in ("1", "2", "3", "4", "5"):
         for m in re.finditer(rf"<SECTION-{lv}[^>]*>(.*?)</SECTION-{lv}>", xml_text, flags=re.S | re.I):
             sec = m.group(1)
@@ -162,6 +163,7 @@ def extract_notes_v2(xml_text):
             body = re.sub(r"<TITLE[^>]*>.*?</TITLE>", "", sec, count=1, flags=re.S | re.I)
             if _NOTES_TITLE_RE.search(tt):
                 fs = "CFS" if "연결" in tt else "OFS"
+                found_notes.add(fs)
                 for s in _split_notes(body, fs):
                     if any(k in s["t"].replace(" ", "") for k in NOTE_KEYS_V2) and _sec_size(s["blocks"]) >= 60:
                         secs.append(s)
@@ -170,6 +172,28 @@ def extract_notes_v2(xml_text):
                 blocks = _blocks(body)
                 if _sec_size(blocks) >= 60:
                     others.append({"t": title, "fs": None, "blocks": blocks})          # 재무에 관한 사항 등 — 연결·별도 구분 없음
+    # 2026-10-31: 주석이 자기 SECTION 없이 상위 절(III. 재무에 관한 사항) 안에 TITLE로만 들어 있는 원문(우진비앤지 등 '절있음_상각없음' 2,400여 건)
+    # → SECTION 단위로는 절대 안 잡힘. '…재무제표 주석' TITLE부터 다음 TITLE(또는 SECTION 끝)까지를 주석 본문으로 보고 같은 방식으로 분할
+    if len(found_notes) < 2:
+        tms = list(re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml_text, flags=re.S | re.I))
+        for i, m in enumerate(tms):
+            tt = _strip(m.group(1)).replace(" ", "")
+            if not _NOTES_TITLE_RE.search(tt):
+                continue
+            fs = "CFS" if "연결" in tt else "OFS"
+            if fs in found_notes:
+                continue
+            end = tms[i + 1].start() if i + 1 < len(tms) else len(xml_text)
+            mend = re.search(r"</SECTION-\d>", xml_text[m.end():end], flags=re.I)
+            if mend:
+                end = m.end() + mend.start()
+            body = xml_text[m.end():end]
+            if len(body) < 800:
+                continue
+            found_notes.add(fs)
+            for s in _split_notes(body, fs):
+                if any(k in s["t"].replace(" ", "") for k in NOTE_KEYS_V2) and _sec_size(s["blocks"]) >= 60:
+                    secs.append(s)
     secs += others
     return secs[:MAX_SEC]
 
@@ -516,7 +540,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
     ensure(con)
     con.execute("CREATE TABLE IF NOT EXISTS da_try (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, rcept_no TEXT, ok INTEGER, at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code, rcept_no))")
     y0 = str(date.today().year - years)
-    tried = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_try WHERE ok=0 AND at >= date('now','-30 day') AND at >= '2026-10-30 23:30'")}   # <BR> 줄바꿈 수정(10-31 08:30 KST) 전 실패 기록은 무효(그 전: 단위 수정 patch219 10-30 07:30)
+    tried = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_try WHERE ok=0 AND at >= date('now','-30 day') AND at >= '2026-10-31 01:00'")}   # 주석 TITLE 폴백 추가(10-31 10:00 KST) 전 실패 기록은 무효(그 전: 단위 수정 patch219 10-30 07:30)
     rows = con.execute("""SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no FROM fin_kpi
                           WHERE da IS NULL AND op_income IS NOT NULL AND bsns_year >= ? ORDER BY bsns_year, reprt_code""", (y0,)).fetchall()
     own = {}                                               # (cc,y,rc) → {fs: 접수번호}
@@ -559,7 +583,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
         if codes:                                          # --codes(소수 진단) 실행이면 못 찾은 원인 파악용 구조 요약
             DIAG[(cc, y, rc, rn)] = (f"TITLE {len(re.findall(r'<TITLE', xml, flags=re.I))} · SECTION {len(re.findall(r'<SECTION-', xml, flags=re.I))} · "
                                      f"{len(xml) // 1000}KB · 절 {len(secs)}: " + " / ".join(f"{s['t'][:20]}({s.get('fs')})" for s in secs[:25])
-                                     + " · 성격별 문구 " + str(len(re.findall(r'성격별', xml))))
+                                     + " · 성격별 문구 " + str(len(re.findall(r'성격별', xml))) + " · " + _diag_notes_struct(xml))
         return t, rn, secs
 
     got = i = 0
@@ -634,6 +658,32 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
         for ex_ in stat[k].get("_ex", []):
             print(f"[da_backfill]     표본 {ex_}", flush=True)
     return got
+
+
+def _diag_notes_struct(xml):
+    """진단용(2026-10-31): '주석' TITLE이 어떤 SECTION 안에 있고, 그 SECTION에 하위 SECTION·TITLE이 몇 개인지 + 주석 본문 첫 600자의 태그 모양.
+    우진비앤지 등 '절있음_상각없음' 보고서는 TITLE 70개·SECTION 52개로 주석 TITLE이 자기 SECTION 없이 상위 절 안에 묻혀 있을 가능성 점검"""
+    out = []
+    try:
+        for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml, flags=re.S | re.I):
+            t = _strip(m.group(1)).replace(" ", "")
+            if not re.search(r"재무제표주석", t) or len(out) >= 2:
+                continue
+            opens = [(mm.start(), mm.group(1)) for mm in re.finditer(r"<SECTION-(\d)[^>]*>", xml[:m.start()], flags=re.I)]
+            closes = [(mm.start(), mm.group(1)) for mm in re.finditer(r"</SECTION-(\d)>", xml[:m.start()], flags=re.I)]
+            depth = {}
+            for _, lv in opens:
+                depth[lv] = depth.get(lv, 0) + 1
+            for _, lv in closes:
+                depth[lv] = depth.get(lv, 0) - 1
+            enclosing = sorted(lv for lv, n in depth.items() if n > 0)
+            nxt = re.search(r"<(SECTION-\d|TITLE)[^>]*>", xml[m.end():m.end() + 400000], flags=re.I)
+            body = xml[m.end():m.end() + 700]
+            tags = re.findall(r"<([A-Z][A-Z0-9-]*)", body, flags=re.I)[:14]
+            out.append(f"{t[:14]}: 감싼 SECTION 레벨 {enclosing or '없음'} · 다음 태그 {nxt.group(1) if nxt else '없음'}@{nxt.start() if nxt else -1} · 본문 태그 {','.join(tags)} · {_strip(body)[:120]!r}")
+    except Exception as e:  # noqa
+        out.append(f"진단 오류 {e}")
+    return " ‖ ".join(out) or "주석 TITLE 없음"
 
 
 def _safe(fn, t):
