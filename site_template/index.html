@@ -217,6 +217,7 @@ a{color:var(--navy2)}
   .fin2col .twrap{border:0;border-radius:0}
   table.ft{font-size:11px;line-height:1.25}
   table.ft th,table.ft td{padding:2.5px 3px}
+  .flh,.danote,.fsrc{padding-left:3px}
   table.ft th{font-size:10px}
   table.ft td:first-child{white-space:normal;font-size:10.5px;letter-spacing:-.03em;min-width:62px}
   table.ft td:first-child small{display:none}
@@ -247,7 +248,7 @@ a{color:var(--navy2)}
 .fch{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.fcard .ft2,.fcard .ft3{grid-column:auto;font-size:12px}.fcard .ft1{font-size:12.5px}.fcard .fbasis{margin-left:0}
 .fin3{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(300px,1fr);gap:14px;align-items:start}
 @media (max-width:1250px){.fin3{grid-template-columns:minmax(0,1fr)}}
-.fin3 .fl{min-width:0}.flh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 6px}
+.fin3 .fl{min-width:0}.flh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;padding-left:9px}.danote,.fsrc{padding-left:9px}
 .fseg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--nbg2)}
 .fseg button{font:600 12px var(--font);border:0;background:transparent;color:var(--mute);padding:4px 14px;border-radius:999px;cursor:pointer}
 .fseg button[aria-pressed="true"]{background:var(--panel);color:var(--navy);box-shadow:0 1px 2px rgba(0,0,0,.12)}
@@ -601,7 +602,11 @@ async function open(code){
       const ALL=['유동','비유동','미구분'];
       // 2026-10-31 사용자 결정(A안): 상각비가 현금흐름표 원천값이 아니면(주석 파서·AI 추출) EBITDA 계열에 '추정' 표시 — 대조 검증에서 이런 출처의 약 1/4이 2배 이상 오차
       const DASRC={'da_xbrl':'XBRL 주석','da_notes:backfill':'주석 표 규칙 추출','da_notes:latest':'주석 표 규칙 추출','da_notes:annual':'주석 표 규칙 추출','da_notes:ai':'AI 추출(Sonnet)','da_notes':'주석 표 추출'};
-      const daMark=r=>(r.ebitda!=null&&r.da_src&&r.da_src!=='본문')?`<sup class="est" title="상각비 출처: ${DASRC[r.da_src]||r.da_src} — 이 회사는 현금흐름표 본문에 상각비 줄이 없어 보고서 주석 표(비용의 성격별 분류·자산 변동표 등)에서 읽은 값. 교차검증 예정">주석</sup>`:'';
+      const RN2={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'};
+      const SRCTXT={'da_xbrl':'XBRL 주석 데이터(DART 구조화 주석)','da_notes:backfill':'주석 표(비용의 성격별 분류·자산 변동표) 자동추출','da_notes:latest':'주석 표(비용의 성격별 분류·자산 변동표) 자동추출','da_notes:annual':'주석 표(비용의 성격별 분류·자산 변동표) 자동추출','da_notes:ai':'주석 표 AI 판독(Sonnet)','da_notes':'주석 표 자동추출'};
+      // 2026-10-31 사용자: 라벨만으로는 뜻을 알 수 없음 → 툴팁에 계산식(영업이익+상각비)과 상각비 출처·근거 보고서를 그대로 적는다
+      const daMark=r=>(r.ebitda!=null&&r.da_src&&r.da_src!=='본문')?`<sup class="est" title="EBITDA ${억(r.ebitda)}억 = 영업이익 ${억(r.op_income)}억 + 상각비 ${억(r.da)}억\n상각비 출처: ${r.bsns_year} ${RN2[r.reprt_code]||''} ${SRCTXT[r.da_src]||r.da_src} — 현금흐름표 본문에 상각비 줄이 없는 회사">주석</sup>`:'';
+      const daNote=(fsList)=>fsList.some(fs=>(d.kpi[fs]||[]).some(r=>r.ebitda!=null&&r.da_src&&r.da_src!=='본문'))?`<div class="src danote" style="margin-top:6px;margin-bottom:2px;line-height:1.5"><b>EBITDA</b> = 영업이익 + 유·무형자산 상각비. 상각비 출처 — 표시 없음: 현금흐름표 본문 금액 / <b>주석</b>: 현금흐름표에 상각비 줄이 없어 같은 보고서 주석 표(비용의 성격별 분류·자산 변동표)에서 읽은 금액(XBRL 주석 데이터·표 자동추출·일부 AI 판독). 자동추출 금액은 원문 대조 전이므로 심사 자료로 쓰기 전 해당 보고서 주석을 확인하십시오. 칸의 <b>주석</b>에 마우스를 올리면 계산식과 출처가 보입니다.</div>`:'';
       const R=[['g','손익'],['매출액',r=>r.revenue],['영업이익',r=>r.op_income],['영업이익률',r=>r.op_margin,pct],['당기순이익',r=>r.net_income],['당기순이익률',r=>r.net_margin,pct],['EBITDA',r=>r.ebitda,null,null,null,daMark],
         ['g','재무상태'],['자산총계',r=>r.total_assets],['부채총계',r=>r.total_liab],['자본총계',r=>r.equity],['현금성자산',r=>r.cash],
         ['g','차입금'],['총차입금',r=>r.borrowings,null,'sum','세부 구성(차입금·사채·리스 × 유동/비유동)은 3-1. 차입금 현황'],['순차입금',r=>r.net_borrowings,null,'sum'],
@@ -623,10 +628,10 @@ async function open(code){
       const notes=`<div class="fnp"><div class="fnh"><b>재무 특이사항</b><span class="src">규칙 기반 자동 판정 · 카드마다 연결/별도 기준 표시 · 제목에 마우스를 올리면 판정 규칙</span><span class="fcnt">${cnt}</span></div>${d.fin_ai&&d.fin_ai.summary?`<div class="fai"><div class="fai-h"><b>AI 종합 의견</b><span class="src">Haiku · 표의 숫자와 손익계산서 계정만 근거 · ${esc((d.fin_ai.at||'').slice(0,10))}</span></div>${esc(d.fin_ai.summary)}</div>`:''}${fn.length?`<div class="fcards${fn.length>3?' mclip':''}">${fn.map(card).join('')}</div>${fn.length>3?`<button type="button" class="fmore monly">특이사항 ${fn.length-3}개 더 보기</button>`:''}`:'<div class="src" style="padding:12px 14px">재무 수치가 부족해 특이사항을 판정하지 못했습니다.</div>'}</div>`;
       // 2026-10-28 사용자 결정: 왼쪽 별도 · 오른쪽 연결 표 나란히(버튼 없음), 재무 특이사항은 표 아래 카드
       const order=[...bases].sort((a,b)=>a[0]==='OFS'?-1:1);
-      h+=`<div class="flh"><span class="src">단위 억원 · 최근 분기 열은 누적 · 연도 클릭 → DART 보고서 · 반기·분기 순차입금/EBITDA는 LTM EBITDA 기준${bases.length<2?` · ${bases[0][0]==='CFS'?'별도':'연결'} 재무 없음`:''}</span></div>${bases.length>1?`<div class="mseg fseg" role="group" aria-label="재무 기준">${order.map(([fs,nm],i)=>`<button type="button" data-mfs="${fs}" aria-pressed="${i?'false':'true'}">${nm}</button>`).join('')}</div>`:''}<div class="fin2col${bases.length<2?' one':' m2'}" data-m="${order[0][0]}">${order.map(([fs,nm])=>tbl(fs,nm)).join('')}</div>${notes}`;
+      h+=`<div class="flh"><span class="src">단위 억원 · 최근 분기 열은 누적 · 연도 클릭 → DART 보고서 · 반기·분기 순차입금/EBITDA는 LTM EBITDA 기준${bases.length<2?` · ${bases[0][0]==='CFS'?'별도':'연결'} 재무 없음`:''}</span></div>${bases.length>1?`<div class="mseg fseg" role="group" aria-label="재무 기준">${order.map(([fs,nm],i)=>`<button type="button" data-mfs="${fs}" aria-pressed="${i?'false':'true'}">${nm}</button>`).join('')}</div>`:''}<div class="fin2col${bases.length<2?' one':' m2'}" data-m="${order[0][0]}">${order.map(([fs,nm])=>tbl(fs,nm)).join('')}</div>${daNote(order.map(o=>o[0]))}${notes}`;
       {const RN={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const rows=d.kpi[FS0]||[];
        const srcs=rows.map(r=>`${r.label||r.bsns_year} ${RN[r.reprt_code]||''}${r.kind!=='annual'?'(누적)':''}${r.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">${r.rcept_no}</a>`:''}`);
-       if(srcs.length) h+=`<div class="src" style="margin:4px 0 2px"><b>기준 보고서</b> · ${srcs.join(' · ')}</div>`;}
+       if(srcs.length) h+=`<div class="src fsrc" style="margin-top:4px;margin-bottom:2px"><b>기준 보고서</b> · ${srcs.join(' · ')}</div>`;}
     }
   }
   h+=`</section>`;
@@ -634,7 +639,7 @@ async function open(code){
   {
   // 3-1 차입금·우발채무·계열 (사업보고서 주석·DART 공시 — 수집 전까지 안내)
   {const ns=d.notes_struct;
-   h+=`<section data-sec="3-1"><h3>3-1. 차입금 현황 · 우발채무 <small>재무상태표 재분류 · 주석 원문은 접힘</small></h3>`;
+   h+=`<section data-sec="3-1"><h3>3-1. 차입금 현황 · 우발채무 <small>재무상태표 재분류</small></h3>`;
    const nr=d.notes_raw;
    const bb=d.borrow_bd;
    if(bb&&(bb.CFS||bb.OFS)){   // 차입금 현황: 차입금·사채·리스 × 유동/비유동, 연간 3개년 + 최근 분기 (사용자 요청 2026-10-24 — 주석 원문보다 요약표)
@@ -686,13 +691,7 @@ async function open(code){
      if(ns.other_commitments&&ns.other_commitments.length) h+=`<div class="src" style="margin:8px 0 2px"><b>기타 약정·우발</b></div><ul style="margin:0 0 0 18px;padding:0;font-size:12.5px">${ns.other_commitments.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
      if(ns.summary_md) h+=`<div style="margin:10px 0 0;padding:8px 12px;border:1px solid var(--line);background:var(--panel);border-radius:6px;font-size:12.5px;white-space:pre-wrap">${esc(ns.summary_md)}</div>`;
    }
-   const nrDebt=nr&&nr.sections?nr.sections.filter(x=>x.g!=='mezz'):[];
-   if(nrDebt.length){   // 주석 원문 발췌(비용 0): 기본 접힘 — 차입처·이자율·만기·담보·보증·소송이 필요할 때만 펼침(사용자 요청 2026-10-24: 정보 과다 방지)
-     const KW=/(차입금|사채|우발|담보|보증|약정|소송|리스|파생|만기|한도|연체|기한의 이익)/g;
-     h+=`<details style="margin:10px 0 0"><summary class="src" style="cursor:pointer;list-style:revert"><b>▸ 주석 원문 보기</b> — 차입처·이자율·만기·담보·보증·약정·소송 (${esc(nr.report_nm||'')}${nr.rcept_no?` · <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${nr.rcept_no}" target="_blank" rel="noopener">원문</a>`:''} · ${nrDebt.length}개 절${nr.truncated?' · 일부 절은 길이 제한으로 잘림':''})</summary>`;
-     h+=nrDebt.map(sec=>notesSec(sec,KW)).join('');
-     h+=`</details>`;
-   }
+   // 2026-10-31 사용자 지시: '주석 원문 보기'(정리 안 된 원문 발췌) 섹션 삭제
    h+=`</section>`;}
     const mo=d.mezz_out||[], mi=d.mezz_issue||[];
     h+=`<section><h3>3-2. 기발행 메자닌 (CB · BW · EB · 종류주식)</h3>`;
