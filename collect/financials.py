@@ -489,8 +489,10 @@ def _ta_outlier(con, corp_code, fs_div, bsns_year, reprt_code, ta):
     nb = [p[1] for p in (prev, nxt) if p]
     if not nb:
         return None
-    if not ta:
-        return f"총자산 0/없음(이웃 {nb[0]:.0f})"
+    if ta is None:
+        return None                                    # 재무상태표가 아직 안 받아진 행(총자산 없음)은 오류가 아님 — 손익 등 다른 값은 그대로 둔다(2026-10-31 다원넥스뷰 2025 1Q가 통째로 지워진 뒤 수정)
+    if ta == 0:
+        return f"총자산 0(이웃 {nb[0]:.0f})"
     if all(ta >= v * 50 or ta * 50 <= v for v in nb):
         return f"총자산 이웃 기간 대비 50배 이상 차이({ta:.0f} vs {','.join(f'{v:.0f}' for v in nb)})"
     return None
