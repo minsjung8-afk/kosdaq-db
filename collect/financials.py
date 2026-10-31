@@ -484,6 +484,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         # 2026-10-31 보고서 자체의 단위 오류(이큐셀 2025 반기 총자산 1,486,253,622억 = 100만 배, 디와이에이·CMG제약·이트론·에프알텍·진코스텍·다원넥스뷰·대산FB·신영스팩11호 등 26행):
         # DART가 제출된 XBRL 값을 그대로 주므로 우리 쪽 파싱 문제가 아님. 앞뒤 기간 총자산과 50배 이상 차이(또는 0)면 그 기간 KPI 숫자를 전부 비우고 kpi_flag에 기록 — 틀린 숫자보다 빈칸
         bad = _ta_outlier(con, corp_code, fs_div, bsns_year, reprt_code, k.get("total_assets"))
+        if not bad:
+            bad = _ta_identity(k.get("total_assets"), k.get("total_liab"), k.get("equity"))
         if bad:
             con.execute("CREATE TABLE IF NOT EXISTS kpi_flag (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, reason TEXT, at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))")
             con.execute("INSERT OR REPLACE INTO kpi_flag VALUES (?,?,?,?,?,datetime('now'))", (corp_code, bsns_year, reprt_code, fs_div, bad))
@@ -520,6 +522,20 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
 
 
 _PORD = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}
+
+
+def _ta_identity(ta, tl, eq):
+    """회계 항등식 점검(2026-10-31 전수 점검): 자산총계와 부채+자본이 5% 넘게 다르면 한쪽이 단위·전기값 오류 —
+    우리기술투자 2025 별도 자산총계가 정확히 1/10(934억 vs 부채+자본 9,346억), 900250 반기 5배.
+    값을 바꿔 넣지 않고(어느 쪽이 틀렸는지 확정 불가) 사유만 돌려줘 그 기간을 비운다. 1~2% 차이(비지배지분 표시 차이)는 통과"""
+    if ta is None or tl is None or eq is None:
+        return None
+    le = tl + eq
+    if le == 0 or ta == 0:
+        return None
+    if abs(ta - le) > abs(le) * 0.05:
+        return f"자산총계≠부채+자본 ({ta:.0f} vs {le:.0f}, {ta / le:.2f}배)"
+    return None
 
 
 def _ta_outlier(con, corp_code, fs_div, bsns_year, reprt_code, ta):
