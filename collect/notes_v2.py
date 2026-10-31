@@ -79,6 +79,7 @@ def _blocks(sec_xml, cap=True):
 # 주석 항목 제목: 'N. 제목' 한 줄(문장 아님) — DART 원문에서 주석 항목(1. 회사의 개요 … 15. 유형자산 …)은 별도 SECTION이 아니라
 # '재무제표 주석' 절 본문의 <P> 제목으로만 구분된다(2026-10-24 확인: SECTION 제목만 보면 주석 항목이 하나도 안 잡힘).
 _HEAD_RE = re.compile(r"^\s*(\d{1,2})\s*[.．]\s*(?![\d.)])(\S.{0,70}?)\s*$")
+_HEAD_FUSED = re.compile(r"^\s*(\d{1,2})\s*[.．]\s*((?:유형자산|무형자산|사용권자산|투자부동산|비용의\s*성격별\s*분류|현금흐름표?)(?:\s*(?:및|과|와)\s*[가-힣]{2,10})?)")
 _NOTES_TITLE_RE = re.compile(r"((연결|별도)?재무제표(에대한)?주석|^(\d+\.)?주석)$")
 
 
@@ -107,12 +108,22 @@ def _split_notes(sec_xml, fs):
         for line in b["p"].split("\n"):
             m = _HEAD_RE.match(line)
             n = int(m.group(1)) if m else None
-            if m and last < n <= last + 2 and not re.search(r"(니다|습니다|음|함|임)\s*[.．]?$", m.group(2)):
+            rest = None
+            if not (m and last < n <= last + 2 and not re.search(r"(니다|습니다|음|함|임)\s*[.．]?$", m.group(2))):
+                # 2026-10-31 우진비앤지 등 ~600사: 원문 <P>가 "13. 유형자산(1) 당반기말과 전기말 현재 …" 처럼 제목과 본문이 줄바꿈 없이 한 덩어리
+                # (DART 뷰어에는 <br>이 있으나 공시 API XML에는 없음) → 제목 줄 패턴이 영영 안 맞아 절이 통째로 사라짐.
+                # 상각비에 필요한 항목(유형·무형·사용권·투자부동산·성격별·현금흐름)만이라도 줄 머리의 'N. 키워드'로 잘라내고 나머지는 본문으로
+                mf = _HEAD_FUSED.match(line)
+                if mf and int(mf.group(1)) > last:
+                    m, n, rest = mf, int(mf.group(1)), line[mf.end():].strip()
+                else:
+                    m = None
+            if m:
                 if cur is not None:
                     if buf:
                         cur["blocks"].append({"p": "\n".join(buf)[:MAX_P]})
                     secs.append(cur)
-                buf = []
+                buf = [rest] if rest else []
                 cur = {"t": f"{n}. {m.group(2).strip()}", "fs": fs, "blocks": []}
                 last = n
             else:
@@ -540,7 +551,7 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
     ensure(con)
     con.execute("CREATE TABLE IF NOT EXISTS da_try (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, rcept_no TEXT, ok INTEGER, at TEXT, PRIMARY KEY (corp_code, bsns_year, reprt_code, rcept_no))")
     y0 = str(date.today().year - years)
-    tried = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_try WHERE ok=0 AND at >= date('now','-30 day') AND at >= '2026-10-31 01:00'")}   # 주석 TITLE 폴백 추가(10-31 10:00 KST) 전 실패 기록은 무효(그 전: 단위 수정 patch219 10-30 07:30)
+    tried = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_try WHERE ok=0 AND at >= date('now','-30 day') AND at >= '2026-10-31 03:30'")}   # 붙은 제목 분리(10-31 12:40 KST) 전 실패 기록은 무효(그 전: 단위 수정 patch219 10-30 07:30)
     rows = con.execute("""SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no FROM fin_kpi
                           WHERE da IS NULL AND op_income IS NOT NULL AND bsns_year >= ? ORDER BY bsns_year, reprt_code""", (y0,)).fetchall()
     own = {}                                               # (cc,y,rc) → {fs: 접수번호}
