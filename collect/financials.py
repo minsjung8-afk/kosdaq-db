@@ -179,7 +179,7 @@ def _bor_kind(nm):
 
 
 _BOR_SUB = _re.compile(r"(차입부채|합계|총계|및)")
-_BOR_BARE = _re.compile(r"(차입금|사채|리스부채|금융부채|차입금및사채)")   # 수식어 없는 이름 — 유동/비유동 세부와 함께 적히면 소계
+_BOR_BARE = _re.compile(r"(유동|비유동)?(차입금|사채|리스부채|금융부채|차입금및사채)")   # 수식어 없는(또는 유동/비유동만 붙은) 이름 — 세부와 함께 적히면 소계. 조일알미늄 2023 '유동차입금'=단기차입금+유동성장기차입금(2026-11-01). 단기·장기 접두는 실제 계정이라 제외
 
 
 def _drop_subtotals(cand):
@@ -197,7 +197,7 @@ def _drop_subtotals(cand):
         if not v or not (_BOR_SUB.search(nm) or _BOR_BARE.fullmatch(nm)):
             continue      # 소계일 수 있는 이름에만 적용 — 네패스 '단기차입금'이 다른 세 줄 합과 우연히 일치해 지워진 사례(2026-10-31 사전검증)
         others = [(j, c[1]) for j, c in enumerate(cand) if j != i and j not in drop and c[1]]
-        tol = abs(v) * 0.0001 + 1
+        tol = abs(v) * (0.005 if nm == "차입부채" else 0.0001) + 1   # 이름이 정확히 '차입부채'인 줄만 ±0.5%('단기차입부채' 같은 실제 계정이 우연히 맞는 것 방지): DB캐피탈·RCI파이낸셜 '차입부채'가 사채+차입금과 0.06% 차이(발행비용 차감)로 안 지워짐(2026-11-01 배포 후 검증)
         # ② 같은 금액·다른 이름
         same = [j for j, w in others if abs(w - v) <= tol and cand[j][0] != nm]
         if same and _BOR_SUB.search(nm) and not all(_BOR_SUB.search(cand[j][0]) for j in same):
