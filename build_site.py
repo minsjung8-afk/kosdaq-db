@@ -216,13 +216,21 @@ def _eb_target(con, c, rows):
             continue
         tgt = r.get("stock_knd") or ""
         r["ex_tgt"] = tgt
-        if "자기주식" in tgt or "자사주" in tgt or (_norm_name(c["corp_name"]) and _norm_name(c["corp_name"]) in _norm_name(tgt)):
+        key = _norm_name(re.sub(r"보통주식|보통주|우선주|기명식|무기명식|주권|주식|발행|\d+주|자기주식|자사주|\(\s*\)", "", re.sub(r"주식회사|\(주\)|㈜|\(유\)", "", tgt)))
+        # 2026-11-01: '포함' 판정이던 것을 '일치'로 — HD현대의 EB(교환대상 HD현대마린솔루션·HD현대일렉트릭)가 발행사명 'HD현대'를 포함한다는 이유로 자기주식 처리되던 오류
+        if "자기주식" in tgt or "자사주" in tgt or (key and key == _norm_name(c["corp_name"])):
             r["ex_self"] = 1
             continue
         if _NAME_IDX is None:
             _NAME_IDX = {_norm_name(x["corp_name"]): x["stock_code"] for x in q(con, "SELECT corp_name, stock_code FROM company")}
-        key = _norm_name(re.sub(r"보통주|우선주|기명식|주권|\d+주", "", tgt))
-        sc2 = _NAME_IDX.get(key) or next((v for k, v in _NAME_IDX.items() if len(k) >= 2 and (k in key or key in k)), None)
+        sc2 = _NAME_IDX.get(key)
+        if not sc2 and len(key) >= 3:              # 부분일치는 '가장 긴 이름' 우선 — 'HD현대마린솔루션'이 'HD현대'에 먼저 걸리지 않게(2026-11-01)
+            ks = [k for k in _NAME_IDX if len(k) >= 3 and k in key]
+            if ks:
+                sc2 = _NAME_IDX[max(ks, key=len)]
+            else:
+                ks = [k for k in _NAME_IDX if key in k]
+                sc2 = _NAME_IDX[min(ks, key=len)] if ks else None
         if sc2:
             px = q(con, "SELECT dt, close FROM price_daily WHERE stock_code=? AND close>0 ORDER BY dt DESC LIMIT 1", sc2)
             if px:
