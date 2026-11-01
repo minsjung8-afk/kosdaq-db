@@ -560,7 +560,7 @@ def main():
                 if v >= 1000:
                     out.append(v)
             return out
-        ccs_m = [r[0] for r in con.execute("SELECT DISTINCT corp_code FROM mezz_outstanding WHERE remndr_amt IS NOT NULL ORDER BY corp_code")]
+        ccs_m = [r[0] for r in con.execute("SELECT DISTINCT corp_code FROM mezz_outstanding WHERE remndr_amt > 0 ORDER BY corp_code")]
         if a.codes:
             ccs_m = [c for c in ccs_m if c in ccs]
         lim = a.limit or 30
@@ -578,17 +578,33 @@ def main():
                 st["no_mz_sec"] += 1; print(f"=== {nm} {cc}: 메자닌 주석 절 없음 ({r['report_nm']})", flush=True); continue
             # 주석 표 행 → (회차, 금액들×단위, 원문)
             rows = []
+            _AMT_LBL = _re.compile(r"액면|권면|발행금액|발행가액|사채금액|장부|미상환|잔액|합계")
             for s_ in secs:
                 for b in s_.get("blocks", []):
                     if "tbl" not in b:
                         continue
                     u = b["tbl"].get("unit") or 1
-                    for row in b["tbl"]["rows"]:
+                    trs = b["tbl"]["rows"]
+                    # ① 행 방향: 회차가 행 안에 있고 금액이 같은 행
+                    for row in trs:
                         txt = " | ".join(row)
                         m = _RND.search(txt)
-                        if m:
+                        if m and any(nums(c) for c in row):
                             rows.append((int(m.group(1)), [v * u for c in row for v in nums(c)], u, txt[:160], s_.get("fs")))
-            outs = con.execute("SELECT kind, name, face_amt, remndr_amt, report_nm FROM mezz_outstanding WHERE corp_code=? AND remndr_amt IS NOT NULL", (cc,)).fetchall()
+                    # ② 열 방향(2026-11-01 표본에서 확인: '구분 | 제35회 전환사채 | 제37회 전환사채' 머리 + 아래 행에 액면금액·전환가액): 머리 행의 회차 열 → 아래 행의 같은 열 금액
+                    for hi, hrow in enumerate(trs[:3]):
+                        cols = {ci: int(m.group(1)) for ci, c in enumerate(hrow) for m in [_RND.search(c or "")] if m}
+                        if len(cols) < 1 or len(cols) < sum(1 for c in hrow if (c or "").strip()) - 1 and len(cols) < 2:
+                            continue
+                        for row in trs[hi + 1:]:
+                            lbl = (row[0] or "") if row else ""
+                            for ci, rn in cols.items():
+                                if ci < len(row):
+                                    vs = [v * u for v in nums(row[ci])]
+                                    if vs:
+                                        rows.append((rn, vs, u, (lbl + " | " + row[ci])[:160], s_.get("fs")))
+                        break
+            outs = con.execute("SELECT kind, name, face_amt, remndr_amt, report_nm FROM mezz_outstanding WHERE corp_code=? AND remndr_amt > 0", (cc,)).fetchall()
             print(f"=== {nm} {cc} · 본문표 {len(outs)}건 · 주석 {r['report_nm']} 메자닌 절 {len(secs)}개 · 회차 행 {len(rows)}개", flush=True)
             for o in outs:
                 st["rounds"] += 1
