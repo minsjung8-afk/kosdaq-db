@@ -174,19 +174,39 @@ def run(corp_codes=None, years=3, resume=True):
             cs = [c for c in cs if c["corp_code"] not in done]
             print(f"[rating] 최근 {RESUME_DAYS}일 내 완료 {len(done)}사 제외 → {len(cs)}사", flush=True)
     hit = 0
-    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        futs = [(c, ex.submit(fetch_company_rows, c, years)) for c in cs]   # 네트워크는 병렬, DB 쓰기는 순차
-        for i, (c, f) in enumerate(futs, 1):
-            try:
-                n = store_rows(con, c, f.result())
-                log(con, c["corp_code"], "rating", "ok", n)
-                if n:
-                    hit += 1
-            except Exception as e:  # noqa
-                log(con, c["corp_code"], "rating", "fail", e)
-            if i % 100 == 0:
-                print(f"[rating] {i}/{len(cs)}, 등급 보유 {hit}", flush=True)
-    log(con, "-", "rating", "ok", f"{len(cs)} checked / {hit} rated")
+    # 2026-11-01 사고: 2,753사 × 약 4.3초 ≈ 3.3시간 → 170분 INT가 와도 미리 넣어둔 futures가 다 끝날 때까지 풀 종료를 기다리다
+    # 180분 job 제한에 걸려 취소 → 저장·업로드 전부 건너뜀(2,500사 진행분 유실). 200사 묶음으로 넣고, 예산(기본 150분) 초과나 INT면
+    # 남은 작업을 취소하고 커밋 후 정상 종료 — 다음 run이 '최근 10일 완료분 제외'로 이어받는다
+    import os, signal
+    budget = float(os.environ.get("RATING_BUDGET_MIN", "150")) * 60
+    t0 = time.time()
+    stop = {"v": False}
+    prev = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, lambda *_: stop.__setitem__("v", True))
+    i = 0
+    try:
+        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            for b0 in range(0, len(cs), 200):
+                if stop["v"] or time.time() - t0 > budget:
+                    print(f"[rating] {'INT' if stop['v'] else '시간 예산 초과'} — {i}/{len(cs)}에서 정상 종료(진행분 저장, 다음 실행이 이어받음)", flush=True)
+                    break
+                futs = [(c, ex.submit(fetch_company_rows, c, years)) for c in cs[b0:b0 + 200]]   # 네트워크는 병렬, DB 쓰기는 순차
+                for c, f in futs:
+                    i += 1
+                    try:
+                        n = store_rows(con, c, f.result())
+                        log(con, c["corp_code"], "rating", "ok", n)
+                        if n:
+                            hit += 1
+                    except Exception as e:  # noqa
+                        log(con, c["corp_code"], "rating", "fail", e)
+                    if i % 100 == 0:
+                        print(f"[rating] {i}/{len(cs)}, 등급 보유 {hit} · {int(time.time() - t0) // 60}분", flush=True)
+                con.commit()
+    finally:
+        signal.signal(signal.SIGINT, prev)
+    con.commit()
+    log(con, "-", "rating", "ok", f"{i}/{len(cs)} checked / {hit} rated")
     return con
 
 
