@@ -21,7 +21,7 @@ def annual_report_candidates(corp_code, bsns_year):
     """해당 사업연도 사업보고서 접수번호 후보(최신순: 정정본 → 원본).
     2026-11-01 전수 점검(상장사 159곳 사업내용 없음) 원인 ①: 3월 결산(3S 등)은 2025 사업연도 보고서 제목이 '사업보고서 (2026.03)'라
     '(2025.xx)'만 찾던 패턴에 안 걸림 → 결산월이 12월이 아니면 '(다음해.MM)'도 허용(접수 기간은 어차피 다음 해 1년으로 제한)"""
-    bgn = f"{int(bsns_year) + 1}0101"
+    bgn = f"{bsns_year}0701"       # 2026-11-01 원인 ④: 9월 결산(금비)은 '(2025.09)' 보고서가 2025-12에 접수돼 다음 해 창 밖 → 당해 7월부터
     end = f"{int(bsns_year) + 1}1231"
     js = dart_get("list", corp_code=corp_code, bgn_de=bgn, end_de=end, pblntf_ty="A", page_count=100)
     pat = re.compile(rf"사업보고서.*\(({bsns_year}\.\d{{2}}|{int(bsns_year) + 1}\.(0[1-9]|1[01]))\)")
@@ -161,12 +161,21 @@ def prefetch_report(corp_code, bsns_year):
     if not cands:
         return None, None
     last = None
+    first = None
     for rn in cands[:3]:
         try:
-            return rn, fetch_document_xml(rn)
+            xml = fetch_document_xml(rn)
         except Exception as e:  # noqa
-            last = e
-    raise last
+            last = e; continue
+        # 2026-11-01 원인 ③(HS화성·PKC·동성화인텍): 최신 접수건이 '[첨부추가/첨부정정] 사업보고서'(감사보고서만 든 첨부 건)라 본문이 없음 → 본문이 있는 후보로
+        if re.search(r"<TITLE[^>]*>[^<]*사업의\s*내용", xml):
+            return rn, xml
+        first = first or (rn, xml)
+    if first:
+        return first
+    if last:
+        raise last
+    return None, None
 
 
 NOTE_KEYS = ("차입금", "사채", "우발", "약정", "담보", "보증", "특수관계자", "소송", "리스", "금융부채", "매입채무", "파생", "계열회사", "제재")
