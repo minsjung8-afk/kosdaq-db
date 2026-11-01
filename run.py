@@ -544,6 +544,72 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "메자닌검증":   # 2026-11-01 사용자: 주석으로 메자닌 잔액 교차검증 가능한지 — 표본으로 일치율부터(DART 0콜, 저장된 notes_j 사용)
+        import json as _json, re as _re
+        from common import ztext
+        _MZ = _re.compile(r"전환사채|신주인수권|교환사채|전환우선주|상환전환|복합금융")
+        _RND = _re.compile(r"제\s*(\d{1,3})\s*(?:-\s*\d+\s*)?회")
+        def nums(cell):
+            out = []
+            for m in _re.finditer(r"\(?-?\d[\d,]*(?:\.\d+)?\)?", cell or ""):
+                t = m.group(0).strip("()").replace(",", "")
+                try:
+                    v = float(t)
+                except ValueError:
+                    continue
+                if v >= 1000:
+                    out.append(v)
+            return out
+        ccs_m = [r[0] for r in con.execute("SELECT DISTINCT corp_code FROM mezz_outstanding WHERE remndr_amt IS NOT NULL ORDER BY corp_code")]
+        if a.codes:
+            ccs_m = [c for c in ccs_m if c in ccs]
+        lim = a.limit or 30
+        st = {"co": 0, "no_notes": 0, "no_mz_sec": 0, "rounds": 0, "round_row": 0, "rem_match": 0, "face_match": 0, "rem_only_face": 0}
+        shown = 0
+        for cc in ccs_m[:lim]:
+            st["co"] += 1
+            nmr = con.execute("SELECT corp_name FROM company WHERE corp_code=?", (cc,)).fetchone()
+            nm = nmr[0] if nmr else "?"
+            r = con.execute("SELECT rcept_no, report_nm, notes_j FROM notes_latest WHERE corp_code=?", (cc,)).fetchone()
+            if not r or not r["notes_j"]:
+                st["no_notes"] += 1; print(f"=== {nm} {cc}: notes_j 없음", flush=True); continue
+            secs = [s_ for s_ in _json.loads(ztext(r["notes_j"]) or "[]") if _MZ.search((s_.get("t") or "").replace(" ", ""))]
+            if not secs:
+                st["no_mz_sec"] += 1; print(f"=== {nm} {cc}: 메자닌 주석 절 없음 ({r['report_nm']})", flush=True); continue
+            # 주석 표 행 → (회차, 금액들×단위, 원문)
+            rows = []
+            for s_ in secs:
+                for b in s_.get("blocks", []):
+                    if "tbl" not in b:
+                        continue
+                    u = b["tbl"].get("unit") or 1
+                    for row in b["tbl"]["rows"]:
+                        txt = " | ".join(row)
+                        m = _RND.search(txt)
+                        if m:
+                            rows.append((int(m.group(1)), [v * u for c in row for v in nums(c)], u, txt[:160], s_.get("fs")))
+            outs = con.execute("SELECT kind, name, face_amt, remndr_amt, report_nm FROM mezz_outstanding WHERE corp_code=? AND remndr_amt IS NOT NULL", (cc,)).fetchall()
+            print(f"=== {nm} {cc} · 본문표 {len(outs)}건 · 주석 {r['report_nm']} 메자닌 절 {len(secs)}개 · 회차 행 {len(rows)}개", flush=True)
+            for o in outs:
+                st["rounds"] += 1
+                mo = _RND.search(o["name"] or "")
+                rn = int(mo.group(1)) if mo else None
+                cand = [x for x in rows if rn is not None and x[0] == rn]
+                if cand:
+                    st["round_row"] += 1
+                rem, face = o["remndr_amt"], o["face_amt"]
+                near = lambda v, t: t and abs(v - t) <= max(1e4, abs(t) * 0.01)
+                rm = any(near(v, rem) for x in cand for v in x[1])
+                fm = any(near(v, face) for x in cand for v in x[1])
+                st["rem_match"] += rm; st["face_match"] += fm; st["rem_only_face"] += (not rm and fm)
+                print(f"    [{o['kind']}] {(o['name'] or '')[:28]:<28} 액면 {(face or 0)/1e8:>8,.1f}억 잔액 {(rem or 0)/1e8:>8,.1f}억 → 주석 회차행 {len(cand)} · 잔액일치 {'O' if rm else '-'} · 액면일치 {'O' if fm else '-'}", flush=True)
+            if shown < 12:
+                shown += 1
+                for x in rows[:6]:
+                    print(f"      주석행(제{x[0]}회, 단위×{x[2]:g}, {x[4]}): {x[3]}", flush=True)
+        n = st["rounds"] or 1
+        print(f"[mezz_audit] 회사 {st['co']} · 주석없음 {st['no_notes']} · 메자닌절없음 {st['no_mz_sec']} · 본문표 회차 {st['rounds']} · 주석에 같은 회차 행 있음 {st['round_row']}({st['round_row']/n:.0%}) · 잔액 일치 {st['rem_match']}({st['rem_match']/n:.0%}) · 액면 일치 {st['face_match']}({st['face_match']/n:.0%}) · 액면만 일치(잔액 불일치) {st['rem_only_face']}", flush=True)
+        pairs = []
     elif a.job == "rawdump" and a.type == "사업진단":   # 2026-11-01 전수 점검: 상장사 159곳 사업내용 미수집(3S·KB금융·경동나비엔) — 재수집해도 빈 채로 남아 원문 구조를 직접 본다
         import business, common, re as _re
         for cc, sc in pairs:
