@@ -95,6 +95,25 @@ def _worker(cc, plan, fs):
     return out
 
 
+def reversal_stale(con, cc, fs):
+    """2026-11-02 품질진단: 분기 누적 역전(235건·130사)의 대부분은 한쪽 값이 '다음 해 보고서의 전기 열'(접수번호 끝 ':전기')에서 채워진 것 —
+    전기 열은 재작성(중단영업·계정 재분류) 기준이거나, 누적 열이 없을 때 3개월치라 원 보고서 값과 기준이 다르다(광림 2024 반기 651억 vs 3Q 536억[2025 3Q 보고서 전기 열]).
+    역전 쌍에서 ':전기'·접수번호 없음 쪽 (연도, 보고서)를 돌려준다 → 그 보고서 원본을 다시 받는다."""
+    rows = con.execute("SELECT bsns_year, reprt_code, revenue, rcept_no FROM fin_kpi WHERE corp_code=? AND fs_div=? AND revenue IS NOT NULL", (cc, fs)).fetchall()
+    by = {}
+    for y, rc, v, rn in rows:
+        by.setdefault(y, {})[rc] = (v, rn or "")
+    out = set()
+    for y, m in by.items():
+        seq = [(rc, m[rc]) for rc in ORDER if rc in m]
+        for (rc0, (v0, n0)), (rc1, (v1, n1)) in zip(seq, seq[1:]):
+            if v0 and v1 and v1 < v0 * 0.98:
+                for rc, n in ((rc0, n0), (rc1, n1)):
+                    if not n or n.endswith(":전기"):
+                        out.add((y, rc))
+    return out
+
+
 def plan_for(con, cc, reports, fs="CFS"):
     """fs 기준으로 아직 받지 않은 (year, rc). 완료 = fin_raw에 그 fs 행이 있음(연간·분기 모두). 'empty'(해당 fs 보고서 없음) 표시는 fs별로 관리"""
     from financials import ensure_cum_table
@@ -104,6 +123,7 @@ def plan_for(con, cc, reports, fs="CFS"):
     stale = {(r[0], r[1]) for r in con.execute("""SELECT DISTINCT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND fs_div=? AND reprt_code<>'11011'
                                                     AND sj_div IN ('IS','CIS') AND rcept_no IS NULL""", (cc, fs))}
     have -= stale
+    have -= reversal_stale(con, cc, fs)
     empty = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM quarters_done WHERE corp_code=? AND fs_div=? AND status='empty'", (cc, fs))}
     return [(y, rc) for (y, rc) in reports if (y, rc) not in have and (y, rc) not in empty]
 

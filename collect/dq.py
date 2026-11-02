@@ -94,7 +94,7 @@ def run(con=None, sample=12):
             if cc not in ps:
                 add("시세 없음", cc)
             elif cc not in sub:
-                add("대용가 없음", cc)
+                add("대용가 KRX 미산정(목록에 없음)", cc)   # 2026-11-02 품질진단: 191사 전부 KRX 대용가 목록(2,665종목) 자체에 없음 — 수집 누락 아님
     except Exception as e:  # noqa
         print("[dq] 모듈 점검 일부 실패:", e)
     # 전년동기 BS
