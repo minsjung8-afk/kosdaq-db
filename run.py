@@ -544,6 +544,12 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type in ("동명등급점검", "동명등급정리"):   # 2026-11-02: 동명 회사(SKC↔비상장 '에스케이씨')에 잘못 붙은 등급·요약 — 점검(목록만)/정리(삭제), DART 0콜
+        import fss_rating as _fr
+        bad = _fr.fix_homonyms(con, apply=(a.type == "동명등급정리"))
+        for cc in sorted({b[0] for b in bad}):
+            r = con.execute("SELECT summary_json IS NOT NULL, substr(COALESCE(rating_text,''),1,80) FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", (cc,)).fetchone()
+            print(f"  [사업요약] {cc}: 요약 있음={r and r[0]} · rating_text 앞부분={r and r[1]!r}", flush=True)
     elif a.job == "rawdump" and a.type == "유효기간샘플":   # 2026-11-02 품질진단: CP·전단채 유효기간 미확인이 한기평 40%·한신평 44%(나이스 0.4%) — 원문 글자 배치 확인용
         import re as _re, requests as _rq, rating_valid as _rv
         _rv.ensure(con)
