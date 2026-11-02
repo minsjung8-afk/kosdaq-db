@@ -890,10 +890,10 @@ def build():
             shutil.copy(TEMPLATE.parent / "dq.html", SITE / "dq.html")
     except Exception as e:  # noqa
         print("[site] 품질 점검 실패:", e)
-    n_fix = sum(1 for _, l in UNIT_FIX for x in l if x["to"]); n_chk = sum(1 for _, l in UNIT_FIX for x in l if not x["to"])
-    print(f"[site] AI 요약 단위 검증: 보정 {n_fix}건 · 확인 필요 {n_chk}건 · {len(UNIT_FIX)}사", flush=True)
-    for nm, l in UNIT_FIX:          # 2026-11-02: 전수 출력(교정 규칙 설계용) — 키워드·DB 후보(억)·상한 함께
-        print(f"[unit] {nm}: " + " / ".join(f"{x['ctx']} {x['from']}→{x.get('guess') or '확인 필요'} [kw={x.get('kw')} ref={x.get('ref')} cap={x.get('cap')}]" for x in l), flush=True)
+    n_fix = sum(1 for _, l in UNIT_FIX for x in l if x["to"] and x["to"] != "삭제"); n_del = sum(1 for _, l in UNIT_FIX for x in l if x["to"] == "삭제")
+    print(f"[site] AI 요약 단위 검증: 정정 {n_fix}건 · 삭제 {n_del}건 · {len(UNIT_FIX)}사", flush=True)
+    for nm, l in UNIT_FIX:          # 2026-11-02: 전수 출력(교정 규칙 검증용) — 키워드·연도·부분금액 여부·DB 후보(억)·상한 함께
+        print(f"[unit] {nm}: " + " / ".join(f"{x['ctx']} {x['from']}→{x.get('to')} [kw={x.get('kw')} yr={x.get('yr')} part={int(bool(x.get('part')))} ref={x.get('ref')} cap={x.get('cap')}]" for x in l), flush=True)
     print(f"site/ 생성: {len(index)}개사")
 
 
