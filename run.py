@@ -544,6 +544,89 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "품질진단":   # 2026-11-02 사용자 지시 2·4·5번: 분기 누적 역전·대용가 없음·등급 유효기간 미확인 원인 진단(DART 0콜)
+        import re as _re, collections as _co
+        # ── ① 분기 누적 역전
+        q = _co.defaultdict(dict)
+        for r in con.execute("SELECT corp_code, fs_div, bsns_year, reprt_code, revenue, rcept_no FROM fin_kpi WHERE revenue IS NOT NULL"):
+            q[(r[0], r[1], r[2])][r[3]] = (r[4], r[5])
+        acc = {r[0]: r[1] for r in con.execute("SELECT corp_code, acc_mt FROM company")}
+        nm_ = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        rev = []
+        for (cc, fs, y), m in q.items():
+            if "스팩" in (nm_.get(cc) or ""):
+                continue
+            g = lambda rc: (m.get(rc) or (None, None))[0]
+            q1, h, q3, an = g("11013"), g("11012"), g("11014"), g("11011")
+            for p_, c_, lab in ((q1, h, "1Q>반기"), (h, q3, "반기>3Q"), (q3, an, "3Q>연간")):
+                if p_ and c_ and c_ < p_ * 0.98:
+                    rev.append((cc, fs, y, lab, p_, c_, m))
+        cls = _co.Counter()
+        print(f"[누적역전] {len(rev)}건 · {len({r[0] for r in rev})}사", flush=True)
+        shown = 0
+        for cc, fs, y, lab, p_, c_, m in rev:
+            pr, cr = {"1Q>반기": ("11013", "11012"), "반기>3Q": ("11012", "11014"), "3Q>연간": ("11014", "11011")}[lab]
+            # 원인 분류: 결산월, 원문 행·접수번호 유무, 감소 폭(약 절반 = 3개월치로 저장된 의심). 출력 튜플 = (계정, 당기, 전기, 접수번호)
+            raw = {rc: con.execute("SELECT account_nm, thstrm_amount, frmtrm_amount, rcept_no FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND sj_div IN ('IS','CIS') AND (account_nm LIKE '%매출액%' OR account_nm LIKE '%영업수익%' OR account_nm LIKE '%수익(매출액)%' OR account_id LIKE '%Revenue%') ORDER BY ord LIMIT 3", (cc, y, rc, fs)).fetchall() for rc in (pr, cr)}
+            ratio = c_ / p_
+            if acc.get(cc) not in (None, "12"):
+                k = "비12월 결산"
+            elif not raw[pr] or not raw[cr]:
+                k = "원문 행 없음(요약행)"
+            elif any(r_[3] is None for r_ in raw[pr] + raw[cr]):
+                k = "접수번호 없는 옛 행"
+            elif 0.4 < ratio < 0.7 and cr in ("11012", "11014"):
+                k = "약 절반(3개월치 의심)"
+            elif ratio < 0.4:
+                k = "큰 감소(단위·계정 상이 의심)"
+            else:
+                k = "소폭 감소(실제 역성장·정정 가능)"
+            cls[k] += 1
+            if shown < 40:
+                shown += 1
+                print(f"  {nm_.get(cc)} {fs} {y} {lab}: {p_/1e8:,.1f}억 → {c_/1e8:,.1f}억 ({ratio:.2f}) [{k}] 결산{acc.get(cc)} · {pr}:{[(r_[0][:12], r_[1] and round(r_[1]/1e8,1), r_[2] and round(r_[2]/1e8,1), r_[3]) for r_ in raw[pr]][:2]} · {cr}:{[(r_[0][:12], r_[1] and round(r_[1]/1e8,1), r_[2] and round(r_[2]/1e8,1), r_[3]) for r_ in raw[cr]][:2]}", flush=True)
+        print(f"[누적역전] 분류 {dict(cls)}", flush=True)
+        # ── ② 대용가 없음
+        lst = con.execute("""SELECT c.corp_code, c.corp_name, c.stock_code, c.market, c.listed_dt, p.asof, p.close, p.subst_price
+                             FROM company c JOIN price_summary p ON p.stock_code=c.stock_code AND p.asof=(SELECT MAX(asof) FROM price_summary z WHERE z.stock_code=c.stock_code)
+                             WHERE c.market IN ('KOSPI','KOSDAQ','KONEX') AND p.close IS NOT NULL AND p.subst_price IS NULL""").fetchall()
+        last_dd = con.execute("SELECT MAX(trd_dd) FROM subst_price").fetchone()[0]
+        n_last = con.execute("SELECT COUNT(*) FROM subst_price WHERE trd_dd=?", (last_dd,)).fetchone()[0]
+        c2 = _co.Counter()
+        print(f"[대용가] 시세 있는데 대용가 없음 {len(lst)}사 · subst_price 최신 {last_dd} {n_last:,}종목", flush=True)
+        for i_, r in enumerate(lst):
+            sp = con.execute("SELECT MAX(trd_dd), COUNT(*) FROM subst_price WHERE stock_code=?", (r[2],)).fetchone()
+            prev = con.execute("SELECT asof, subst_price FROM price_summary WHERE stock_code=? AND subst_price IS NOT NULL ORDER BY asof DESC LIMIT 1", (r[2],)).fetchone()
+            if not sp[0]:
+                k = "KRX 대용가 목록에 없음"
+            elif sp[0] == last_dd:
+                k = "최신 대용가 있는데 반영 안 됨"
+            else:
+                k = f"과거엔 있었음(최근 {sp[0]})"
+            if "스팩" in (r[1] or ""):
+                k += "·스팩"
+            c2[k.split("(")[0]] += 1
+            if i_ < 30:
+                print(f"  {r[1]} {r[2]} {r[3]} 상장{r[4]} · 시세기준 {r[5]} · subst행 {sp[1]} 최근 {sp[0]} · 직전 반영 {prev} → [{k}]", flush=True)
+        print(f"[대용가] 분류 {dict(c2)}", flush=True)
+        # ── ③ 등급 유효기간 미확인
+        rows = con.execute("""SELECT v.valid_to, v.snip, r.agency, r.target_type, r.eval_kind, r.disc_dt, c.corp_name FROM rating_valid v
+                              JOIN credit_rating r ON r.file_url=v.file_url JOIN company c ON c.corp_code=r.corp_code""").fetchall()
+        c3 = _co.Counter(); seen = set()
+        for vt, sn, ag, tt, ek, dd, cn in rows:
+            k = "S" if _re.search(r"기업어음|단기사채|전자단기|CP", tt or "") else ("기업" if "기업신용" in (tt or "") else "L")
+            key = (cn, ag, tt, dd)
+            if key in seen:
+                continue
+            seen.add(key)
+            c3[(ag, k, "찾음" if vt else "못찾음")] += 1
+        print("[유효기간] 평가사×구분(S=CP·전단채, L=회사채, 기업=기업신용평가)×결과:", flush=True)
+        for (ag, k, res), n in sorted(c3.items()):
+            print(f"    {ag} {k} {res}: {n}", flush=True)
+        miss = [r for r in rows if not r[0] and _re.search(r"기업어음|단기사채|전자단기", r[3] or "")][:12]
+        for r in miss:
+            print(f"  [S 못찾음] {r[6]} {r[2]} {r[3]} {r[5]} | {r[1] or ''}", flush=True)
+        pairs = []
     elif a.job == "rawdump" and a.type == "메자닌검증":   # 2026-11-01 사용자: 주석으로 메자닌 잔액 교차검증 가능한지 — 표본으로 일치율부터(DART 0콜, 저장된 notes_j 사용)
         import json as _json, re as _re
         from common import ztext

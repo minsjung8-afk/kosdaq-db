@@ -838,9 +838,9 @@ def build():
     UNIT_FIX = []
     index = []
     try:
-        MANUAL = {r[0] for r in con.execute("SELECT corp_code FROM manual_company")}   # 사이트 '회사 추가'로 넣은 회사(2026-10-26)
+        MANUAL = {r[0]: i for i, r in enumerate(con.execute("SELECT corp_code FROM manual_company ORDER BY added_at, rowid"), 1)}   # 사이트 '회사 추가'로 넣은 회사(2026-10-26) — 값 = 추가 순번(2026-11-02 사용자: 추가한 순서대로 보기)
     except Exception:  # noqa
-        MANUAL = set()
+        MANUAL = {}
     for c in q(con, "SELECT * FROM company ORDER BY corp_name"):
         d = company_detail(con, c)
         try:                                   # 재무 특이사항(규칙 기반) + 반기·분기 순차입금/EBITDA LTM 보정(2026-10-28)
@@ -871,7 +871,7 @@ def build():
                       "mcap": ps.get("mcap"), "opinion": ao.get("adt_opinion"), "year": k.get("bsns_year"),
                       "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None,
                       "rating": cur_rt["grade"] if cur_rt else None, "rt_st": (d.get("rating_status") or {}).get("label"), "rt_aux": (f"{d['rating_aux']['grade']} {d['rating_aux']['label'].replace('유효기간 ', '').replace('등급 ', '')}" if d.get("rating_aux") and d["rating_aux"].get("kind") != "sub" else None),
-                      "rt_sub": (d["rating_aux"]["grade"] if d.get("rating_aux") and d["rating_aux"].get("kind") == "sub" else None), "manual": 1 if c["corp_code"] in MANUAL else None,
+                      "rt_sub": (d["rating_aux"]["grade"] if d.get("rating_aux") and d["rating_aux"].get("kind") == "sub" else None), "manual": MANUAL.get(c["corp_code"]),
                       "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"),
                       "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber")})
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
@@ -888,8 +888,8 @@ def build():
         print("[site] 품질 점검 실패:", e)
     n_fix = sum(1 for _, l in UNIT_FIX for x in l if x["to"]); n_chk = sum(1 for _, l in UNIT_FIX for x in l if not x["to"])
     print(f"[site] AI 요약 단위 검증: 보정 {n_fix}건 · 확인 필요 {n_chk}건 · {len(UNIT_FIX)}사", flush=True)
-    for nm, l in UNIT_FIX[:40]:
-        print(f"[unit] {nm}: " + " / ".join(f"{x['ctx']} {x['from']}→{x['to'] or '확인 필요'}" for x in l), flush=True)
+    for nm, l in UNIT_FIX:          # 2026-11-02: 전수 출력(교정 규칙 설계용) — 키워드·DB 후보(억)·상한 함께
+        print(f"[unit] {nm}: " + " / ".join(f"{x['ctx']} {x['from']}→{x.get('guess') or '확인 필요'} [kw={x.get('kw')} ref={x.get('ref')} cap={x.get('cap')}]" for x in l), flush=True)
     print(f"site/ 생성: {len(index)}개사")
 
 

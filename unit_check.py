@@ -48,6 +48,7 @@ def _fix_text(s, by, cap, nn, log):
         if _OTHER.search(s[max(0, m.start() - 40):m.start()]):
             return m.group(0)                    # 2026-10-30: 운용자산(AUM)·시장규모·계열사(SK스퀘어의 SK하이닉스 매출 등) 금액은 이 회사 재무와 대조할 대상이 아님 — 오탐 제외
         cands = []
+        kw = None
         # 금액 바로 앞에 가장 가까이 나온 계정 키워드 하나만 씀('현금성자산'은 현금 — '자산'으로 읽으면 자산총계와 맞춰져 오보정, 2026-10-29 대한항공 5.4조→54조 사례)
         hits = [(ctx.rfind(kw) + len(kw), len(kw), kw, fields) for kw, fields in KW if kw in ctx]   # 금액에 가장 가까이 끝나는 키워드, 같으면 긴 것('현금성자산' > '자산')
         if hits:
@@ -66,10 +67,10 @@ def _fix_text(s, by, cap, nn, log):
             x = v / f
             if cands and near(x, 0.03) and (not cap or x <= cap):
                 # 2026-10-29: 자동으로 숫자를 바꾸지 않음 — 후보 대조가 다른 기간·다른 계정과 우연히 맞는 오보정이 확인됨(HL만도 EBITDA·GS리테일 영업현금흐름 등). 표시만
-                log.append({"from": m.group(0).strip(), "to": None, "ctx": ctx.strip(), "guess": f"{_fmt(x, unit, raw)}{unit}"})
+                log.append({"from": m.group(0).strip(), "to": None, "ctx": ctx.strip(), "guess": f"{_fmt(x, unit, raw)}{unit}", "kw": kw, "ref": sorted({round(c) for c in cands if c})[-4:], "cap": round(cap)})
                 return f"{m.group(0)} ⚠ 단위 확인 필요"
         if over:
-            log.append({"from": m.group(0).strip(), "to": None, "ctx": ctx.strip()})
+            log.append({"from": m.group(0).strip(), "to": None, "ctx": ctx.strip(), "kw": kw, "ref": sorted({round(c) for c in cands if c})[-4:], "cap": round(cap)})
             return f"{m.group(0)} ⚠ 단위 확인 필요"
         return m.group(0)
     return AMT.sub(rep, s)
