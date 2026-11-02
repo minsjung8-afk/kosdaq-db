@@ -109,7 +109,7 @@ def _quarters(con, cc):
     1Q=1Q누적, 2Q=반기−1Q, 3Q=3Q누적−반기, 4Q=연간−3Q누적. 누락 분기는 None. LTM은 연속 4분기 합(없으면 None)."""
     out = {}
     for fs in ("CFS", "OFS"):
-        rows = q(con, "SELECT bsns_year, reprt_code, revenue, op_income, ebitda, net_borrowings, cogs FROM fin_kpi WHERE corp_code=? AND fs_div=? ORDER BY bsns_year, reprt_code", cc, fs)
+        rows = q(con, "SELECT bsns_year, reprt_code, revenue, op_income, ebitda, net_borrowings, cogs, rcept_no FROM fin_kpi WHERE corp_code=? AND fs_div=? ORDER BY bsns_year, reprt_code", cc, fs)
         if not rows:
             continue
         by = {(r["bsns_year"], r["reprt_code"]): r for r in rows}
@@ -124,8 +124,11 @@ def _quarters(con, cc):
                     prevc = None if qn != "1" else prevc
                     qs.append({"label": f"{y[2:]}.{qn}Q", "rev": None, "op": None, "ebitda": None, "cogs": None, "nd": None, "_y": y, "_q": qn})
                     continue
+                # 2026-11-02: 누적이 줄어든 구간(3Q누적 < 반기 등)에서 한쪽이 '다음 해 보고서 전기 열'(':전기')·접수번호 없음이면 기준이 달라 차감값이 틀림 → 그 분기는 비움
+                mixed = bool(prevc and qn != "1" and r["revenue"] and prevc["revenue"] and r["revenue"] < prevc["revenue"] * 0.98
+                             and any((not (x["rcept_no"] or "")) or (x["rcept_no"] or "").endswith(":전기") for x in (r, prevc)))
                 def diff(k):
-                    if r[k] is None:
+                    if r[k] is None or mixed:
                         return None
                     if qn == "1":
                         return r[k]
@@ -133,7 +136,8 @@ def _quarters(con, cc):
                         return None
                     return r[k] - prevc[k]
                 qs.append({"label": f"{y[2:]}.{qn}Q", "rev": diff("revenue"), "op": diff("op_income"), "ebitda": diff("ebitda"), "cogs": diff("cogs"), "nd": r["net_borrowings"], "_y": y, "_q": qn})
-                prevc = r
+                # 기준이 다른 쪽이 이번 행이면 다음 분기 차감에도 쓰지 않음(24.3Q 전기 열 → 24.4Q = 연간 − 3Q도 틀림)
+                prevc = None if (mixed and ((not (r["rcept_no"] or "")) or (r["rcept_no"] or "").endswith(":전기"))) else r
         # 뒤에서부터 값 있는 분기만 남기되 순서 유지, 최근 12개
         while qs and qs[-1]["rev"] is None:
             qs.pop()

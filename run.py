@@ -544,6 +544,33 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "유효기간샘플":   # 2026-11-02 품질진단: CP·전단채 유효기간 미확인이 한기평 40%·한신평 44%(나이스 0.4%) — 원문 글자 배치 확인용
+        import re as _re, requests as _rq, rating_valid as _rv
+        _rv.ensure(con)
+        rows = con.execute("""SELECT r.agency, r.target_type, r.disc_dt, r.file_url, c.corp_name FROM rating_valid v JOIN credit_rating r ON r.file_url=v.file_url
+                              JOIN company c ON c.corp_code=r.corp_code WHERE v.valid_to IS NULL AND (r.target_type LIKE '%기업어음%' OR r.target_type LIKE '%단기사채%')
+                              AND r.agency IN ('한국기업평가','한국신용평가') ORDER BY r.disc_dt DESC""").fetchall()
+        picked, per = [], {}
+        for r in rows:
+            if per.get(r[0], 0) < 4:
+                per[r[0]] = per.get(r[0], 0) + 1; picked.append(r)
+        from common import UA as _UA
+        for ag, tt, dd, url, cn in picked:
+            try:
+                data = _rq.get(url, headers=_UA, timeout=(15, 60)).content
+            except Exception as e:  # noqa
+                print(f"=== {cn} {ag} {tt} {dd}: 다운로드 실패 {e}", flush=True); continue
+            print(f"=== {cn} {ag} {tt} {dd} · {len(data):,}B · PDF={data[:4]==b'%PDF'}", flush=True)
+            for name, fn in _rv._pdf_texts(data):
+                try:
+                    t = _re.sub(r"\s+", " ", fn() or "")
+                except Exception as e:  # noqa
+                    print(f"  [{name}] 추출 실패 {e}", flush=True); continue
+                print(f"  [{name}] {len(t)}자 · 앞 500: {t[:500]}", flush=True)
+                for m in list(_re.finditer(r"유\s*효|기\s*한|만\s*기|까\s*지|평\s*가\s*일|등\s*급\s*확\s*정", t))[:6]:
+                    print(f"    …{t[max(0, m.start() - 80): m.end() + 120]}…", flush=True)
+                break
+        pairs = []
     elif a.job == "rawdump" and a.type == "품질진단":   # 2026-11-02 사용자 지시 2·4·5번: 분기 누적 역전·대용가 없음·등급 유효기간 미확인 원인 진단(DART 0콜)
         import re as _re, collections as _co
         # ── ① 분기 누적 역전

@@ -8,7 +8,10 @@
      후보 = 해당 계정의 연결·별도 전 기간 값 + (차입 키워드면) 재무 특이사항 문구에 계산돼 있는 억원 금액
   ③ 금액이 회사 규모 상한(자산·부채·매출 최댓값의 1.5배)을 넘거나, 후보와 25% 안으로 맞는 값이 없을 때만 의심
   ④ 의심 금액(후보 최댓값의 2배 이상)을 10·100·1000배로 나눈 값이 후보와 3% 안에서 맞거나, 상한을 넘으면 → '⚠ 단위 확인 필요' 표시
-  ⑤ 숫자는 절대 자동으로 바꾸지 않음(2026-10-29: 다른 기간·계정과 우연히 맞아 오보정된 사례 확인) — 추정값은 로그(_unit_fix.guess)에만 남김
+  ⑤ (2026-11-02 사용자 지시로 변경) 의심 금액은 '경고만 붙여 그대로 노출'하지 않는다 — 266건 전수 검토 결과 모두 원문 금액이 그 계정의 DB 최대값의 2배 이상이거나
+     회사 규모 상한을 넘는 값이었음(E8 '매출 1,655억'↔DB 17억, SV인베스트먼트 '창업투자자산 71,590억'↔자산총계 956억, 경동나비엔 '차입금 342.4조' 등 = 백만원·천원을 억으로 읽은 AI 오류)
+     ⑤-1 ④의 배수 일치(÷10·100·1000이 같은 계정 DB 값과 3% 이내)가 있으면 → 그 값으로 바꾸고 '(원문 X 정정)' 표시
+     ⑤-2 일치 없이 회사 규모 상한을 넘으면 → 숫자를 지우고 '[금액 삭제: 회사 규모 초과]' 표시(틀린 숫자보다 빈칸)
 """
 import re
 
@@ -32,10 +35,12 @@ def _refs(kpi, notes):
 
 
 def _fmt(v_eok, unit, src):
-    if unit == "조":
+    if unit == "조" and v_eok >= 1e4:
         dec = len(src.split(".")[1]) if "." in src else 1
-        return f"{v_eok / 1e4:,.{max(1, dec)}f}"
-    return f"{round(v_eok):,}"
+        return f"{v_eok / 1e4:,.{max(1, dec)}f}조"
+    if v_eok < 10:
+        return f"{v_eok:,.1f}억"            # 2026-11-02: '0억'(노브메타파마 0.35억) 방지
+    return f"{round(v_eok):,}억"
 
 
 def _fix_text(s, by, cap, nn, log):
@@ -66,12 +71,13 @@ def _fix_text(s, by, cap, nn, log):
         for f in (10, 100, 1000):
             x = v / f
             if cands and near(x, 0.03) and (not cap or x <= cap):
-                # 2026-10-29: 자동으로 숫자를 바꾸지 않음 — 후보 대조가 다른 기간·다른 계정과 우연히 맞는 오보정이 확인됨(HL만도 EBITDA·GS리테일 영업현금흐름 등). 표시만
-                log.append({"from": m.group(0).strip(), "to": None, "ctx": ctx.strip(), "guess": f"{_fmt(x, unit, raw)}{unit}", "kw": kw, "ref": sorted({round(c) for c in cands if c})[-4:], "cap": round(cap)})
-                return f"{m.group(0)} ⚠ 단위 확인 필요"
+                # 원문 금액이 같은 계정 DB 최대값의 2배 이상(위 조건)이라 원문은 틀린 값이 확실 — 배수로 나눈 값이 DB와 3% 이내면 그 값으로 정정(⑤-1)
+                g = _fmt(x, unit, raw)
+                log.append({"from": m.group(0).strip(), "to": g, "ctx": ctx.strip(), "guess": g, "kw": kw, "ref": sorted({round(c) for c in cands if c})[-4:], "cap": round(cap)})
+                return f"{g}원(원문 {m.group(0).strip()} 정정)"
         if over:
-            log.append({"from": m.group(0).strip(), "to": None, "ctx": ctx.strip(), "kw": kw, "ref": sorted({round(c) for c in cands if c})[-4:], "cap": round(cap)})
-            return f"{m.group(0)} ⚠ 단위 확인 필요"
+            log.append({"from": m.group(0).strip(), "to": "삭제", "ctx": ctx.strip(), "kw": kw, "ref": sorted({round(c) for c in cands if c})[-4:], "cap": round(cap)})
+            return "[금액 삭제: 회사 규모 초과]"
         return m.group(0)
     return AMT.sub(rep, s)
 
