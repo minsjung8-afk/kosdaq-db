@@ -270,7 +270,8 @@ table.ft th.fcur{box-shadow:inset 0 -2px 0 var(--gold)}
 .twrap.stick table.ft tr>th:first-child{background:#f3f5f9}.twrap.stick table.ft tr>td:first-child,.twrap.stick table.ft tr:nth-child(even)>td:first-child{background:var(--panel)}
 .fai{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--nbg2);font-size:12.5px;line-height:1.6}.fai-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:3px}.fai-h b{color:var(--navy)}.fcause{color:var(--navy2)}
 .ft1{font-weight:700;font-size:13px}.ft2{grid-column:2;font-size:12.5px}.ft3{grid-column:2;font-size:11px;color:var(--mute)}
-sup.est{font-size:9px;color:var(--mute);margin-left:2px;cursor:help;font-weight:600}
+sup.est{font-size:9px;color:var(--mute);margin-left:2px;cursor:pointer;font-weight:600;text-decoration:underline dotted}
+#estpop{position:fixed;z-index:60;max-width:min(360px,calc(100vw - 24px));background:var(--panel);color:var(--ink,inherit);border:1px solid var(--line2);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:8px 10px;font-size:12px;line-height:1.5;white-space:pre-line}
 </style>
 </head>
 <body>
@@ -287,7 +288,7 @@ sup.est{font-size:9px;color:var(--mute);margin-left:2px;cursor:help;font-weight:
  </div><div class="meta"><button type="button" id="instBtn" hidden>⬇ 앱 설치 (심사DB)</button><div id="instTip" hidden></div><div id="meta">불러오는 중</div></div></div></header>
 <div id="band"></div>
 <aside>
-  <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button><button class="mbtn" data-m="UNLISTED">비상장</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div><button class="mbtn" id="addBtn" style="margin-top:6px" title="DB에 없는 회사(감사보고서 제출 법인)를 관리자 비밀번호로 추가">＋ 회사 추가</button></div>
+  <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button><button class="mbtn" data-m="UNLISTED">비상장</button><button class="mbtn" data-m="MANUAL" id="mbtnManual" title="사이트 '회사 추가'로 넣은 회사 — 추가한 순서대로">수동 추가</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div><button class="mbtn" id="addBtn" style="margin-top:6px" title="DB에 없는 회사(감사보고서 제출 법인)를 관리자 비밀번호로 추가">＋ 회사 추가</button></div>
   <div id="list"></div>
 </aside>
 <main id="main"><div class="empty">왼쪽에서 종목을 고르세요. 재무는 DART 사업보고서(연결 우선), 주가는 KRX 일별시세 기준이며 심사 참고용 요약입니다. 원문은 각 항목의 DART 링크로 확인하세요.</div></main>
@@ -339,6 +340,7 @@ let items=[],cur=null;
 
 fetch('data/companies.json').then(r=>r.json()).then(j=>{
   items=j.items; renderBand(j.meta);
+  {const nm=items.filter(i=>i.manual).length, mb=document.getElementById('mbtnManual'); if(mb){ if(nm) mb.textContent=`수동 추가 ${nm}`; else mb.remove(); }}
   render(items); const h=location.hash.slice(1); if(/^\d{6}$/.test(h)) open(h);
 });
 function renderBand(m){
@@ -385,9 +387,9 @@ function sortList(l){
 }
 function applyFilter(){
   const t=$('#q').value.trim().toLowerCase();
-  let l=mkt?items.filter(i=>i.market===mkt):items;
+  let l=mkt==='MANUAL'?items.filter(i=>i.manual):mkt?items.filter(i=>i.market===mkt):items;
   if(t) l=l.filter(i=>(i.name+' '+i.code+' '+(i.sector||'')+' '+(i.industry||'')).toLowerCase().includes(t));
-  render(sortList(l));
+  render(mkt==='MANUAL'?[...l].sort((a,b)=>a.manual-b.manual):sortList(l));   // 수동 추가: 추가한 순서(2026-11-02 사용자)
 }
 document.querySelectorAll('.sbtn').forEach(b=>b.onclick=()=>{
   if(sortKey===b.dataset.s){sortDesc=!sortDesc;} else {sortKey=b.dataset.s;sortDesc=false;}
@@ -606,7 +608,7 @@ async function open(code){
       const SRCTXT={'da_xbrl':'XBRL 주석 데이터(DART 구조화 주석)','da_notes:backfill':'주석 표(비용의 성격별 분류·자산 변동표) 자동추출','da_notes:latest':'주석 표(비용의 성격별 분류·자산 변동표) 자동추출','da_notes:annual':'주석 표(비용의 성격별 분류·자산 변동표) 자동추출','da_notes:ai':'주석 표 AI 판독(Sonnet)','da_notes':'주석 표 자동추출'};
       // 2026-10-31 사용자: 라벨만으로는 뜻을 알 수 없음 → 툴팁에 계산식(영업이익+상각비)과 상각비 출처·근거 보고서를 그대로 적는다
       const daMark=r=>(r.ebitda!=null&&r.da_src&&r.da_src!=='본문')?`<sup class="est" title="EBITDA ${억(r.ebitda)}억 = 영업이익 ${억(r.op_income)}억 + 상각비 ${억(r.da)}억\n상각비 출처: ${r.bsns_year} ${RN2[r.reprt_code]||''} ${SRCTXT[r.da_src]||r.da_src} — 현금흐름표 본문에 상각비 줄이 없는 회사">주석</sup>`:'';
-      const daNote=(fsList)=>fsList.some(fs=>(d.kpi[fs]||[]).some(r=>r.ebitda!=null&&r.da_src&&r.da_src!=='본문'))?`<div class="src danote" style="margin-top:6px;margin-bottom:2px;line-height:1.5"><b>EBITDA</b> = 영업이익 + 유·무형자산 상각비. 상각비 출처 — 표시 없음: 현금흐름표 본문 금액 / <b>주석</b>: 현금흐름표에 상각비 줄이 없어 같은 보고서 주석 표(비용의 성격별 분류·자산 변동표)에서 읽은 금액(XBRL 주석 데이터·표 자동추출·일부 AI 판독). 자동추출 금액은 원문 대조 전이므로 심사 자료로 쓰기 전 해당 보고서 주석을 확인하십시오. 칸의 <b>주석</b>에 마우스를 올리면 계산식과 출처가 보입니다.</div>`:'';
+      const daNote=(fsList)=>fsList.some(fs=>(d.kpi[fs]||[]).some(r=>r.ebitda!=null&&r.da_src&&r.da_src!=='본문'))?`<div class="src danote" style="margin-top:6px;margin-bottom:2px;line-height:1.5"><b>EBITDA</b> = 영업이익 + 유·무형자산 상각비. 상각비 출처 — 표시 없음: 현금흐름표 본문 금액 / <b>주석</b>: 현금흐름표에 상각비 줄이 없어 같은 보고서 주석 표(비용의 성격별 분류·자산 변동표)에서 읽은 금액(XBRL 주석 데이터·표 자동추출·일부 AI 판독). 자동추출 금액은 원문 대조 전이므로 심사 자료로 쓰기 전 해당 보고서 주석을 확인하십시오. 칸의 <b>주석</b>을 누르면 계산식과 출처가 열립니다.</div>`:'';
       const R=[['g','손익'],['매출액',r=>r.revenue],['영업이익',r=>r.op_income],['영업이익률',r=>r.op_margin,pct],['당기순이익',r=>r.net_income],['당기순이익률',r=>r.net_margin,pct],['EBITDA',r=>r.ebitda,null,null,null,daMark],
         ['g','재무상태'],['자산총계',r=>r.total_assets],['부채총계',r=>r.total_liab],['자본총계',r=>r.equity],['현금성자산',r=>r.cash],
         ['g','차입금'],['총차입금',r=>r.borrowings,null,'sum','세부 구성(차입금·사채·리스 × 유동/비유동)은 3-1. 차입금 현황'],['순차입금',r=>r.net_borrowings,null,'sum'],
@@ -934,6 +936,14 @@ window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(/^\d
   try{localStorage.setItem('kdb_vday',d)}catch(e){}
   document.getElementById('visit').innerHTML=`<span class="vl">TODAY</span> <b>${(+v.today).toLocaleString()}</b> <span class="vl">· 누적</span> <b>${(+v.total).toLocaleString()}</b>`;
 }catch(e){}})();
+// 2026-11-02 사용자: '주석'에 마우스를 올려도 '?'만 보이고 설명이 안 뜸(브라우저 기본 툴팁은 지연·모바일 미지원) → 누르면 설명 상자
+document.addEventListener('click',e=>{const t=e.target.closest&&e.target.closest('sup.est');const old=document.getElementById('estpop');
+  if(old&&(!t||old._for===t)){old.remove();if(t)return;}
+  if(!t)return; if(old)old.remove(); const txt=t.dataset.tip||t.getAttribute('title')||''; if(!txt)return;
+  if(t.getAttribute('title')){t.dataset.tip=t.getAttribute('title');t.removeAttribute('title');}
+  const p=document.createElement('div');p.id='estpop';p._for=t;p.textContent=txt;document.body.appendChild(p);
+  const r=t.getBoundingClientRect(),w=p.offsetWidth,h=p.offsetHeight;let x=Math.min(Math.max(12,r.left-w/2),innerWidth-w-12),y=r.bottom+6;if(y+h>innerHeight-8)y=r.top-h-6;p.style.left=x+'px';p.style.top=y+'px';});
+addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.remove();},{passive:true});
 </script>
 <div id="visit"></div>
 </body>
