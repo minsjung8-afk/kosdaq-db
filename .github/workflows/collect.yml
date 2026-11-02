@@ -149,9 +149,12 @@ jobs:
         run: |
           if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "R2 미설정 — 아티팩트만 사용"; echo "R2=0" >> $GITHUB_ENV; exit 0; fi
           if [ "$DB_OK" != "1" ]; then echo "무결성 실패분은 올리지 않음"; echo "R2=1" >> $GITHUB_ENV; exit 0; fi
-          aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/kosdaq.db.gz" --endpoint-url "$R2_EP" --only-show-errors
+          # 2026-11-02: R2 멀티파트 업로드가 가끔 InvalidPart로 실패 → 일자별 백업 한 번 실패에 run 전체가 실패하고 사이트 빌드·배포까지 건너뛰던 문제.
+          # 최신본은 3회 재시도 후에도 실패하면 실패(DB 보관이 핵심), 일자별·주간 백업은 3회 재시도 후 경고만 남기고 계속
+          r2put() { for i in 1 2 3; do aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/$1" --endpoint-url "$R2_EP" --only-show-errors && return 0; echo "R2 업로드 실패($i/3): $1 — 15초 후 재시도"; sleep 15; done; return 1; }
+          r2put kosdaq.db.gz || { echo "::error::최신본 R2 업로드 3회 실패"; exit 1; }
           D=$(TZ=Asia/Seoul date +%Y%m%d)                      # 하루 1개(같은 날은 덮어씀) × 14일 보관 → 용량 상한 ≈ 14 × DB 크기
-          aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/backup/kosdaq-$D.db.gz" --endpoint-url "$R2_EP" --only-show-errors
+          r2put "backup/kosdaq-$D.db.gz" || echo "::warning::일자별 백업(backup/kosdaq-$D.db.gz) 3회 실패 — 최신본은 저장됨, 계속 진행"
           CUT=$(TZ=Asia/Seoul date -d '14 days ago' +%Y%m%d)
           aws s3 ls "s3://$R2_BUCKET/backup/" --endpoint-url "$R2_EP" | awk '{print $4}' | while read f; do
             d=$(echo "$f" | sed -nE 's/^kosdaq-([0-9]{8})\.db\.gz$/\1/p'); if [ -n "$d" ] && [ "$d" -lt "$CUT" ]; then aws s3 rm "s3://$R2_BUCKET/backup/$f" --endpoint-url "$R2_EP"; fi
@@ -159,7 +162,7 @@ jobs:
           # 주간 백업(2026-10-23 추가): 이번 주 월요일 날짜로 weekly/ 에 1개(주 첫 실행 때만 기록, 그 주엔 덮어쓰지 않음) × 8주 보관 → 일자별 14일 백업으로 못 돌아가는 오래된 오염도 복구 가능
           MON=$(TZ=Asia/Seoul date -d "$D -$(( $(TZ=Asia/Seoul date -d "$D" +%u) - 1 )) days" +%Y%m%d)
           if ! aws s3 ls "s3://$R2_BUCKET/weekly/kosdaq-$MON.db.gz" --endpoint-url "$R2_EP" >/dev/null 2>&1; then
-            aws s3 cp kosdaq.db.gz "s3://$R2_BUCKET/weekly/kosdaq-$MON.db.gz" --endpoint-url "$R2_EP" --only-show-errors && echo "주간 백업 기록: weekly/kosdaq-$MON.db.gz"
+            r2put "weekly/kosdaq-$MON.db.gz" && echo "주간 백업 기록: weekly/kosdaq-$MON.db.gz" || echo "::warning::주간 백업 3회 실패 — 계속 진행"
             WCUT=$(TZ=Asia/Seoul date -d '56 days ago' +%Y%m%d)
             aws s3 ls "s3://$R2_BUCKET/weekly/" --endpoint-url "$R2_EP" | awk '{print $4}' | while read f; do
               d=$(echo "$f" | sed -nE 's/^kosdaq-([0-9]{8})\.db\.gz$/\1/p'); if [ -n "$d" ] && [ "$d" -lt "$WCUT" ]; then aws s3 rm "s3://$R2_BUCKET/weekly/$f" --endpoint-url "$R2_EP"; fi
