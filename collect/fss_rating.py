@@ -102,12 +102,60 @@ def _ensure_target(con):
         pass
 
 
+_AMB = None
+
+
+def homonym_owner(con):
+    """정규화 이름이 같은 회사가 둘 이상일 때 그 이름의 등급 주인(2026-11-02: SKC 정식명 '에스케이씨 주식회사'와 안산 비상장 '에스케이씨'(매출 232억)가
+    같은 이름으로 정규화돼 SKC의 나이스 A·제145회 사채 등급과 SKC 설명이 비상장사에 붙음). 주인 = 상장사 > 자산총계 큰 회사.
+    반환: {이름키: 주인 corp_code} — 겹치는 이름만"""
+    global _AMB
+    if _AMB is not None:
+        return _AMB
+    grp = {}
+    for cc, nm, full, mkt, ta in con.execute("""SELECT c.corp_code, c.corp_name, c.corp_name_full, c.market,
+                                                  (SELECT MAX(total_assets) FROM fin_kpi k WHERE k.corp_code=c.corp_code) FROM company c"""):
+        for k in {norm(search_name({"corp_name": nm, "corp_name_full": full})), norm(nm)} - {""}:
+            grp.setdefault(k, {})[cc] = ((mkt or "") in ("KOSPI", "KOSDAQ", "KONEX"), ta or 0)
+    _AMB = {k: max(v, key=lambda cc: v[cc]) for k, v in grp.items() if len(v) > 1}
+    return _AMB
+
+
+def fix_homonyms(con, apply=True):
+    """동명 회사에 잘못 붙은 등급 행 정리: 이름이 겹치는 회사 중 주인이 아닌 회사의 그 이름 등급 행을 지우고, 그 평가서로 만든 등급 요약도 지운다"""
+    _ensure_target(con)
+    amb = homonym_owner(con)
+    nm = {r[0]: (r[1], r[2]) for r in con.execute("SELECT corp_code, corp_name, market FROM company")}
+    keys = {r[0]: {norm(search_name({"corp_name": r[1], "corp_name_full": r[2]})), norm(r[1])} - {""}
+            for r in con.execute("SELECT corp_code, corp_name, corp_name_full FROM company")}
+    bad = []
+    for cc, tgt, n in con.execute("SELECT corp_code, target, COUNT(*) FROM credit_rating GROUP BY corp_code, target").fetchall():
+        # 평가대상명이 없는 옛 행은 그 회사 이름으로 판단
+        own = amb.get(norm(tgt)) if tgt else next((amb[k] for k in keys.get(cc, ()) if k in amb), None)
+        if own and own != cc:
+            bad.append((cc, tgt, n, own))
+    print(f"[동명등급] 이름 겹침 {len(amb)}개 · 주인 아닌 회사에 붙은 등급 {sum(b[2] for b in bad)}행 · {len({b[0] for b in bad})}사", flush=True)
+    for cc, tgt, n, own in bad:
+        print(f"  {nm.get(cc, ('?', ''))[0]}({cc} {nm.get(cc, ('', '?'))[1]}) ← '{tgt}' {n}행 · 주인 {nm.get(own, ('?', ''))[0]}({own} {nm.get(own, ('', '?'))[1]})", flush=True)
+    if apply and bad:
+        for cc, tgt, n, own in bad:
+            con.execute("DELETE FROM credit_rating WHERE corp_code=? AND target IS ?", (cc, tgt))
+        gone = [r[0] for r in con.execute("""SELECT s.corp_code FROM rating_summary s WHERE s.file_url IS NOT NULL AND NOT EXISTS
+                     (SELECT 1 FROM credit_rating r WHERE r.corp_code=s.corp_code AND r.file_url=s.file_url)""")]
+        for cc in gone:
+            con.execute("DELETE FROM rating_summary WHERE corp_code=?", (cc,))
+        con.commit()
+        print(f"[동명등급] 삭제 완료 · 근거 평가서가 사라진 등급 요약 삭제 {len(gone)}사", flush=True)
+    return bad
+
+
 def store_rows(con, c, rows, replace=False):
     """평가대상회사명이 정확히 같은 행만(정규화 후). 예전 '부분일치' 허용 때문에 CJ ← CJ푸드빌·CJ대한통운, SK ← SK하이닉스 등
     계열사 등급이 섞이던 문제(2026-10-22) → 완전일치로 변경. replace=True면 그 회사의 기존 행을 지우고 다시 넣음."""
     _ensure_target(con)
     keys = {norm(search_name(c)), norm(c.get("corp_name"))} - {""}
-    ok = [r for r in rows if norm(r["target"]) in keys]
+    amb = homonym_owner(con)
+    ok = [r for r in rows if norm(r["target"]) in keys and amb.get(norm(r["target"]), c["corp_code"]) == c["corp_code"]]   # 동명 회사면 주인에게만
     if replace:
         con.execute("DELETE FROM credit_rating WHERE corp_code=?", (c["corp_code"],))
     for r in ok:
@@ -232,9 +280,11 @@ def run_delta(con=None, days=3, max_pages=20):
         time.sleep(PAUSE)
     cs = [dict(x) for x in con.execute("SELECT corp_code, corp_name, corp_name_full FROM company")]
     by_key = {}
+    amb = homonym_owner(con)
+    byc = {c["corp_code"]: c for c in cs}
     for c in cs:
         for k in {norm(search_name(c)), norm(c.get("corp_name"))} - {""}:
-            by_key.setdefault(k, c)
+            by_key.setdefault(k, byc.get(amb.get(k)) or c)     # 동명 회사면 주인(상장사 > 자산 큰 회사)
     have = {(r[0], r[1], r[2], r[3], r[4]) for r in con.execute("SELECT corp_code, agency, target_type, disc_dt, grade FROM credit_rating WHERE disc_dt >= ?", (sdate,))}
     new, changed = 0, set()
     for x in rows:
