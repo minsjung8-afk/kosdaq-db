@@ -606,7 +606,9 @@ def main():
                     k = (cc, y, rc, fs)
                     if k in seen:
                         continue
-                    v = next((x for x in (_nv._da_from_nature(b["tbl"], rc != "11011") for b in s.get("blocks", []) if "tbl" in b) if x), None)
+                    # 10-30 이전에 보관된 주석은 표 안 '(단위: 천원)'을 못 읽어 unit=1로 저장된 경우가 있음(대림통상 2026 반기: 1,965,920천원 → 0.02억) → 표 안 단위 문구로 보정
+                    tbls = [dict(b["tbl"], unit=(_nv._tbl_unit(b["tbl"]["rows"]) or 1) if (b["tbl"].get("unit") or 1) == 1 else b["tbl"]["unit"]) for b in s.get("blocks", []) if "tbl" in b]
+                    v = next((x for x in (_nv._da_from_nature(t, rc != "11011") for t in tbls) if x), None)
                     if not v:
                         continue
                     seen.add(k)
