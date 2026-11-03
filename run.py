@@ -544,6 +544,42 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "상각비진단":   # 2026-11-03 사용자: SGC에너지 2026 반기 별도 EBITDA에 사용권자산상각비(22.2억) 누락 — 원인·범위 진단(DART 2콜)
+        import re as _re, xml.etree.ElementTree as _ET, collections as _co, da_xbrl as _dx
+        # ① SGC에너지 2026 반기 XBRL: 상각 관련 사실을 태그·연결/별도·기간·금액 전부
+        for rc, rp in (("20260814001158", "11012"), ("20260312001227", "11011")):
+            xml = _dx._fetch_zip(rc, rp)
+            if not xml:
+                print(f"[상각비진단] {rc}: XBRL 없음", flush=True); continue
+            root = _ET.fromstring(xml); ctx = _dx._contexts(root); rows = []
+            for e in root.iter():
+                if "}" not in e.tag:
+                    continue
+                loc = e.tag.split("}")[-1]
+                if not _re.search(r"Depreciat|Amorti", loc, _re.I):
+                    continue
+                c = ctx.get(e.get("contextRef")) or (None, None, None)
+                if not c[0] or c[0] == c[1]:
+                    continue
+                try:
+                    v = float((e.text or "").strip())
+                except ValueError:
+                    continue
+                rows.append((c[2] or "-", loc, c[0], c[1], round(v / 1e8, 2)))
+            pend = max(r[3] for r in rows) if rows else None
+            print(f"[상각비진단] {rc} 기간말 {pend} · 상각 관련 사실 {len(rows)}개(그중 기간말 일치만 출력)", flush=True)
+            for r in sorted(set(x for x in rows if x[3] == pend)):
+                print(f"    {r[0]} {r[1]} {r[2]}~{r[3]} {r[4]}억", flush=True)
+            for fs in ("CFS", "OFS"):
+                print(f"    → 현재 로직 {fs}: {_dx.parse_da(xml, fs)}", flush=True)
+        # ② 범위: XBRL 경로로 상각비를 채운 KPI 행과 태그 구성
+        src = _co.Counter(r[0] for r in con.execute("SELECT COALESCE(da_src,'(없음)') FROM fin_kpi WHERE ebitda IS NOT NULL"))
+        print(f"[상각비진단] EBITDA 있는 KPI 행의 상각비 출처: {dict(src)}", flush=True)
+        q = con.execute("""SELECT x.tag, x.rou FROM da_xbrl x JOIN fin_kpi k ON k.corp_code=x.corp_code AND k.bsns_year=x.bsns_year
+                           AND k.reprt_code=x.reprt_code AND k.fs_div=x.fs_div WHERE x.status='ok' AND k.da_src='da_xbrl'""").fetchall()
+        kind = _co.Counter("합산태그" if "DepreciationAndAmortisation" in (t or "") else ("사용권 포함" if r_ else "사용권 없음") for t, r_ in q)
+        ncorp = con.execute("SELECT COUNT(DISTINCT k.corp_code) FROM fin_kpi k WHERE k.da_src='da_xbrl'").fetchone()[0]
+        print(f"[상각비진단] XBRL 경로 KPI {len(q)}행 · {ncorp}사 · 태그 구성 {dict(kind)}", flush=True)
     elif a.job == "rawdump" and a.type in ("동명등급점검", "동명등급정리"):   # 2026-11-02: 동명 회사(SKC↔비상장 '에스케이씨')에 잘못 붙은 등급·요약 — 점검(목록만)/정리(삭제), DART 0콜
         import fss_rating as _fr
         bad = _fr.fix_homonyms(con, apply=(a.type == "동명등급정리"))
