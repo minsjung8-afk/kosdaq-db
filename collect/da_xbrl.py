@@ -90,6 +90,7 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
     ctx = _contexts(root)
     want = "C" if want_fs == "CFS" else "S"
     facts = {}                                       # local → [(start,end,mem,val)]
+    xppe = []                                        # 차원(자산종류별) 유형자산 감가상각비 (start,end,val)
     for e in root.iter():
         tag = e.tag
         if "}" not in tag:
@@ -98,11 +99,16 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
         if not re.search(r"Depreciation|Amorti[sz]ation", local) or EXCL.search(local.replace("Rightofuse", "")):
             continue
         c = ctx.get(e.get("contextRef"))
-        if not c or c[2] == "X" or not c[0] or c[0] == c[1]:
+        if not c or not c[0] or c[0] == c[1]:
             continue
         try:
             v = abs(float((e.text or "").strip()))
         except ValueError:
+            continue
+        if c[2] == "X":
+            # 유형자산 변동표의 자산종류별(차원) 감가상각비 — 사용권자산이 유형자산 안의 한 종류인지 판별용(2026-11-03 일신방직: 유형 177.2억 중 사용권 47.6억)
+            if re.search(r"DepreciationPropertyPlantAndEquipment", local):
+                xppe.append((c[0], c[1], v))
             continue
         facts.setdefault(local, []).append((c[0], c[1], c[2], v))
     if not facts:
@@ -138,6 +144,10 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
         # 2026-11-03 사용자 지적(SGC에너지 별도): '감가상각비'(DepreciationExpense 355.4억)가 유형자산분(355.4억)만이고 사용권 22.2억은 따로인데
         # 예전 규칙('사용권은 AdjustmentsFor 태그일 때만 더함')에 걸려 빠짐 → 감가상각비가 어떤 항목의 합인지 유형자산 감가상각비로 맞춰 보고 빠진 항목만 더함:
         #   감가 = 유형 → 사용권·투자부동산 더함 / 감가 = 유형+사용권 → 투자부동산만 / 감가 = 유형+투자부동산(SGC 연결 566.4 = 530.2+36.3) → 사용권만 …(0.5% 이내)
+        rin = bool(r and any(x[1] == pend and abs(x[2] - r[0]) <= 0.001 * r[0] for x in xppe))
+        if rin:
+            # 사용권자산 상각비가 유형자산 감가상각비의 한 종류로 들어 있음(자산종류별 금액과 정확히 같음) → 유형자산분에 이미 포함, 따로 더하지 않음
+            r = None
         if d and ppe:
             dv, pv = d[0], ppe[0]
             rv, iv = (r[0] if r else 0), (ip[0] if ip else 0)
@@ -172,7 +182,7 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
                 print("   후보 태그:", sorted(facts)[:30], flush=True)
             return None
         res.update(dep=(d[0] if d else 0) + (ip[0] if ip else 0) or None, amort=a[0] if a else None, rou=r[0] if r else None,
-                   tag="+".join(x[1] for x in (d, a, r, ip) if x) + (f"|감가={chk}" if chk else "|감가구성미확인"), start=(d or a or r)[2])
+                   tag="+".join(x[1] for x in (d, a, r, ip) if x) + (f"|감가={chk}" if chk else "|감가구성미확인") + ("|사용권⊂유형" if rin else ""), start=(d or a or r)[2])
         res["da"] = sum(x for x in (res["dep"], res["amort"], res["rou"]) if x)
     if debug:
         print(f"   기간 {res.get('start')}~{pend} · 감가 {res.get('dep')} · 무형 {res.get('amort')} · 사용권 {res.get('rou')} · 합계 {res['da']} · 태그 {res['tag']}", flush=True)
@@ -290,14 +300,16 @@ def run(corp_codes=None, limit=None, con=None, workers=8, debug=False):
     return ok
 
 
-def redo_rou(con, limit=None, workers=8):
+def redo_rou(con, limit=None, workers=8, only_rou=False):
     """2026-11-03: 사용권자산·투자부동산 상각비 구성 확인 규칙 적용 전에 저장된 XBRL 결과(합산 태그 아닌 'ok' 행)를 다시 내려받아 재계산.
     같은 보고서의 연결·별도를 함께 갱신하고 KPI 재계산. 바뀐 행은 전·후 금액을 출력(검증용)."""
     from concurrent.futures import ThreadPoolExecutor
     from financials import build_kpi
     ensure(con)
-    reps = con.execute("""SELECT rcept_no, reprt_code, MIN(corp_code), MIN(bsns_year) FROM da_xbrl
-                          WHERE status='ok' AND tag NOT LIKE '%DepreciationAndAmortisation%' AND tag NOT LIKE '%|감가%' AND rcept_no IS NOT NULL
+    # only_rou: 사용권을 따로 더한 행만 다시(2026-11-03 '사용권⊂유형' 판별 추가 후 재검사)
+    cond = "tag LIKE '%DepreciationRightofuseAssets%|감가%' AND tag NOT LIKE '%사용권⊂유형%'" if only_rou else "tag NOT LIKE '%|감가%'"
+    reps = con.execute(f"""SELECT rcept_no, reprt_code, MIN(corp_code), MIN(bsns_year) FROM da_xbrl
+                          WHERE status='ok' AND tag NOT LIKE '%DepreciationAndAmortisation%' AND {cond} AND rcept_no IS NOT NULL
                           GROUP BY rcept_no, reprt_code ORDER BY MIN(corp_code) <> (SELECT corp_code FROM company WHERE stock_code='005090'), MIN(corp_code)   -- SGC에너지(사용자 지적 사례) 먼저""").fetchall()
     if limit:
         reps = reps[:limit]
