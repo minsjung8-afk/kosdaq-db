@@ -307,7 +307,9 @@ def redo_rou(con, limit=None, workers=8, only_rou=False):
     from financials import build_kpi
     ensure(con)
     # only_rou: 사용권을 따로 더한 행만 다시(2026-11-03 '사용권⊂유형' 판별 추가 후 재검사)
-    cond = "tag LIKE '%DepreciationRightofuseAssets%|감가%' AND tag NOT LIKE '%사용권⊂유형%'" if only_rou else "tag NOT LIKE '%|감가%'"
+    # 2026-11-03: 재검사는 실행 제한 시간(약 3시간)에 걸려 이어하기로 넘어가므로, 이미 재검사한 보고서(06:05 UTC 이후 갱신)는 건너뜀 — 같은 보고서 DART 재호출 방지
+    cond = ("tag LIKE '%DepreciationRightofuseAssets%|감가%' AND tag NOT LIKE '%사용권⊂유형%' AND fetched_at < '2026-11-03 06:05:00'"
+            if only_rou else "tag NOT LIKE '%|감가%'")
     reps = con.execute(f"""SELECT rcept_no, reprt_code, MIN(corp_code), MIN(bsns_year) FROM da_xbrl
                           WHERE status='ok' AND tag NOT LIKE '%DepreciationAndAmortisation%' AND {cond} AND rcept_no IS NOT NULL
                           GROUP BY rcept_no, reprt_code ORDER BY MIN(corp_code) <> (SELECT corp_code FROM company WHERE stock_code='005090'), MIN(corp_code)   -- SGC에너지(사용자 지적 사례) 먼저""").fetchall()
