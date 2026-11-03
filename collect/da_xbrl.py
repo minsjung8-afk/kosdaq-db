@@ -343,6 +343,8 @@ def redo_rou(con, limit=None, workers=8):
         pct = (c[5] - c[4]) / c[4] * 100
         bins["+0~5%" if 0 < pct <= 5 else "+5~15%" if 0 < pct <= 15 else "+15%초과" if pct > 15 else "감소"] += 1
     print(f"[da-rou] 변화 폭 분포 {dict(bins)}", flush=True)
+    for c in [c for c in chg if c[5] < c[4]]:      # 줄어든 행은 전부(이중계상 해소인지 확인용)
+        print(f"  [감소] {c[0]} {c[1]} {c[2]} {c[3]}: {c[4]/1e8:,.1f}억 → {c[5]/1e8:,.1f}억 ({(c[5]-c[4])/c[4]*100:+.1f}%) [{c[6]}]", flush=True)
     for c in sorted(chg, key=lambda c: -abs(c[5] - c[4]) / c[4])[:40]:
         print(f"  {c[0]} {c[1]} {c[2]} {c[3]}: {c[4]/1e8:,.1f}억 → {c[5]/1e8:,.1f}억 ({(c[5]-c[4])/c[4]*100:+.1f}%) [{c[6]}]", flush=True)
     return chg
