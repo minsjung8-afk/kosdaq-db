@@ -581,7 +581,7 @@ def main():
     elif a.job == "rawdump" and a.type.startswith("상각비재계산"):   # 2026-11-03 사용자 '바로잡아보자': XBRL 경로 상각비를 감가상각비 구성 확인 규칙으로 재계산(DART 보고서당 1콜) — '상각비재계산200' = 표본 200건만
         import da_xbrl as _dx
         _n = a.type[len("상각비재계산"):]
-        _dx.redo_rou(con, limit=int(_n) if _n.isdigit() else None)
+        _dx.redo_rou(con, limit=int(_n.strip("R")) if _n.strip("R").isdigit() else None, only_rou=_n.startswith("R"))   # '상각비재계산R' = 사용권 더한 행만 재검사
         for r in con.execute("SELECT bsns_year, reprt_code, fs_div, da, ebitda, da_src FROM fin_kpi WHERE corp_code=(SELECT corp_code FROM company WHERE stock_code='005090') ORDER BY bsns_year, reprt_code, fs_div"):
             print(f"  [SGC에너지] {r[0]} {r[1]} {r[2]}: 상각비 {r[3] and round(r[3]/1e8,1)}억 · EBITDA {r[4] and round(r[4]/1e8,1)}억 · {r[5]}", flush=True)
     elif a.job == "rawdump" and a.type == "상각비진단":   # 2026-11-03 사용자: SGC에너지 2026 반기 별도 EBITDA에 사용권자산상각비(22.2억) 누락 — 원인·범위 진단(DART 2콜)
