@@ -634,7 +634,14 @@ def main():
                 t = tag.get(k) or ""
                 xb[(t.split("|감가")[-1] if "|감가" in t else "합산태그" if "DepreciationAndAmortisation" in t else "?", "큼" if kd > v else "작음")] += 1
         print(f"[성격별대조] XBRL 경로 어긋남의 감가상각비 구성별: {dict(xb)}", flush=True)
-        for d, k, v, kd, ks, kind in sorted(bad, key=lambda x: -x[0])[:80]:
+        # 2026-11-04: 성격별 표 파서가 일부 회사에서 엉뚱한 행(판관비 안 상각비 등)을 집어 수십 배 차이가 나는 경우가 섞임 → 의미 있는 구간만 출력
+        #   ① 사이트가 작음(빠진 항목 의심) 전부 ② 사이트가 1~30% 큼(이중계상·영업외 상각 의심) 상위 60 ③ 30% 초과 큼은 개수만
+        sm = sorted([b for b in bad if b[3] < b[2]], key=lambda x: -x[0])
+        md = sorted([b for b in bad if b[3] > b[2] and b[0] <= 0.30], key=lambda x: -x[0])
+        print(f"[성격별대조] 사이트가 작음 {len(sm)} · 사이트가 1~30% 큼 {len(md)} · 30% 넘게 큼 {sum(1 for b in bad if b[3] > b[2] and b[0] > 0.30)}", flush=True)
+        for d, k, v, kd, ks, kind in sm + md[:60]:
+            print(f"  {'작음' if kd < v else '큼'} {nm.get(k[0], k[0])} {k[1]} {k[2]} {k[3]}: 사이트 {kd/1e8:,.1f}억[{ks}] vs 성격별 {v/1e8:,.1f}억({kind}) {(kd-v)/v*100:+.1f}% [{tag.get(k, '')}]", flush=True)
+        for d, k, v, kd, ks, kind in []:
             print(f"  {nm.get(k[0], k[0])} {k[1]} {k[2]} {k[3]}: 사이트 {kd/1e8:,.1f}억[{ks}] vs 성격별 {v/1e8:,.1f}억({kind}) {(kd-v)/v*100:+.1f}% [{tag.get(k, '')}]", flush=True)
         for c in ("487570", "373220", "298040", "003200", "005090"):
             cc = con.execute("SELECT corp_code FROM company WHERE stock_code=?", (c,)).fetchone()
