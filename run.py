@@ -578,6 +578,20 @@ def main():
             print(f"    {chk} {k}: {n}", flush=True)
         for d, r in sorted(bad, key=lambda x: -x[0])[:40]:
             print(f"  {r[0]} {r[1]} {r[2]} {r[3]}: XBRL {r[4]/1e8:,.1f}억(감가 {(r[8] or 0)/1e8:,.1f}·무형 {(r[9] or 0)/1e8:,.1f}·사용권 {(r[10] or 0)/1e8:,.1f}) vs 주석표 {r[5]/1e8:,.1f}억[{r[6]}] [{r[7]}]", flush=True)
+    elif a.job == "rawdump" and a.type == "상각비주석보정":   # 2026-11-04 사용자 승인: 주석 성격별/현금흐름 조정 표 값이 고른 상각비보다 1% 넘게 크면 보정(DART 0콜)
+        import notes_v2 as _nv, collections as _co
+        chg = _nv.build_direct(con)
+        nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        st = _co.Counter((b[1] or "(없음)").split(":")[0] + "→" + (v[1] or "") for k, b, v in chg)
+        print(f"[주석보정] 바뀐 행 출처 전→후: {dict(st)}", flush=True)
+        up = sum(1 for k, b, v in chg if b[0] and v[0] and v[0] > b[0]); dn = sum(1 for k, b, v in chg if b[0] and v[0] and v[0] < b[0])
+        print(f"[주석보정] 증가 {up} · 감소 {dn} · 새로 채움 {sum(1 for k, b, v in chg if not b[0] and v[0])} · 비워짐 {sum(1 for k, b, v in chg if b[0] and not v[0])}", flush=True)
+        for k, b, v in sorted(chg, key=lambda x: -abs((x[2][0] or 0) - (x[1][0] or 0)) / max(x[1][0] or 1, 1)):
+            print(f"  {nm.get(k[0], k[0])} {k[1]} {k[2]} {k[3]}: {b[0] and round(b[0]/1e8,1)}억[{b[1]}] → {v[0] and round(v[0]/1e8,1)}억[{v[1]}]", flush=True)
+        for c in ("000320", "443060", "108670", "038500", "005090", "003200", "487570", "373220", "298040"):
+            for r in con.execute("""SELECT c.corp_name, k.bsns_year, k.reprt_code, k.fs_div, k.da, k.da_src FROM fin_kpi k JOIN company c USING(corp_code)
+                                    WHERE c.stock_code=? AND k.bsns_year='2026' AND k.reprt_code='11012'""", (c,)):
+                print(f"  [표본] {r[0]} {r[1]} {r[2]} {r[3]}: {r[4] and round(r[4]/1e8,1)}억 [{r[5]}]", flush=True)
     elif a.job == "rawdump" and a.type == "상각비성격별대조":   # 2026-11-03 사용자 승인: 사이트 상각비 vs 주석 '비용의 성격별 분류' 감가상각비(원문 공시 금액) 전수 대조 — DART 0콜(보관 주석 사용)
         import json as _js, collections as _co, notes_v2 as _nv
         from common import ztext as _zt
