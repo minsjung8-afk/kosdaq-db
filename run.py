@@ -544,6 +544,40 @@ def main():
             print(f"[da_reject] AI 상각비 저장 {n_ai}건 중 KPI 공백 {n_ai_null}건", flush=True)
         except Exception as e:  # noqa
             print("[da_reject] 조회 실패:", e, flush=True)
+    elif a.job == "rawdump" and a.type == "상각비대조":   # 2026-11-03 재계산 검증: 일신방직(연결 원문 248.9억 vs 새 값 296.5억) 원문 태그 + XBRL 새 값 vs 주석 표 파서 값 전수 대조(DART 1콜)
+        import re as _re, xml.etree.ElementTree as _ET, collections as _co, da_xbrl as _dx
+        xml = _dx._fetch_zip("20260318001204", "11011")
+        if xml:
+            root = _ET.fromstring(xml); ctx = _dx._contexts(root); rows = set()
+            for e in root.iter():
+                loc = e.tag.split("}")[-1] if "}" in e.tag else ""
+                if not _re.search(r"Depreciat|Amorti", loc, _re.I) or _re.search(r"Financial|Liabilit", loc):
+                    continue
+                c = ctx.get(e.get("contextRef")) or (None, None, None)
+                if not c[0] or c[0] == c[1] or c[1] != "2025-12-31" or c[0] != "2025-01-01":
+                    continue
+                try:
+                    rows.add((c[2] or "-", loc, round(float((e.text or "").strip()) / 1e8, 2)))
+                except ValueError:
+                    pass
+            for r in sorted(rows):
+                print(f"    [일신방직] {r[0]} {r[1]} {r[2]}억", flush=True)
+        q = con.execute("""SELECT c.corp_name, x.bsns_year, x.reprt_code, x.fs_div, x.da, n.da, n.src, x.tag, x.dep, x.amort, x.rou FROM da_xbrl x
+                           JOIN da_notes n ON n.corp_code=x.corp_code AND n.bsns_year=x.bsns_year AND n.reprt_code=x.reprt_code AND n.fs_div=x.fs_div
+                           JOIN company c ON c.corp_code=x.corp_code WHERE x.status='ok' AND x.tag LIKE '%|감가%' AND x.da>0 AND n.da>0""").fetchall()
+        st = _co.Counter(); bad = []
+        for r in q:
+            chk = r[7].split("|감가")[-1]
+            d = (r[4] - r[5]) / r[5]
+            k = "일치(±1%)" if abs(d) <= 0.01 else ("XBRL이 큼" if d > 0 else "XBRL이 작음")
+            st[(chk, k)] += 1
+            if k != "일치(±1%)":
+                bad.append((abs(d), r))
+        print(f"[상각비대조] XBRL 새 값 vs 주석 표 파서 값 겹치는 행 {len(q)}", flush=True)
+        for (chk, k), n in sorted(st.items()):
+            print(f"    {chk} {k}: {n}", flush=True)
+        for d, r in sorted(bad, key=lambda x: -x[0])[:40]:
+            print(f"  {r[0]} {r[1]} {r[2]} {r[3]}: XBRL {r[4]/1e8:,.1f}억(감가 {(r[8] or 0)/1e8:,.1f}·무형 {(r[9] or 0)/1e8:,.1f}·사용권 {(r[10] or 0)/1e8:,.1f}) vs 주석표 {r[5]/1e8:,.1f}억[{r[6]}] [{r[7]}]", flush=True)
     elif a.job == "rawdump" and a.type.startswith("상각비재계산"):   # 2026-11-03 사용자 '바로잡아보자': XBRL 경로 상각비를 감가상각비 구성 확인 규칙으로 재계산(DART 보고서당 1콜) — '상각비재계산200' = 표본 200건만
         import da_xbrl as _dx
         _n = a.type[len("상각비재계산"):]
