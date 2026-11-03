@@ -133,9 +133,26 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
         res.update(da=comb[0], dep=None, amort=None, rou=None, tag=comb[1], start=comb[2])
     else:
         d, a, r, ip = first(DEP), first(AMO), first(ROU), first(INVP)
-        # 사용권자산상각비는 '감가상각비'에 이미 포함된 경우가 많아, 현금흐름 조정 항목(AdjustmentsFor…)으로 따로 공시된 경우만 더함(이중계상 방지)
-        if r and d and "AdjustmentsFor" not in r[1]:
-            r = None
+        ppe = first(["DepreciationPropertyPlantAndEquipment", "AdjustmentsForDepreciationPropertyPlantAndEquipment"])
+        chk = None
+        # 2026-11-03 사용자 지적(SGC에너지 별도): '감가상각비'(DepreciationExpense 355.4억)가 유형자산분(355.4억)만이고 사용권 22.2억은 따로인데
+        # 예전 규칙('사용권은 AdjustmentsFor 태그일 때만 더함')에 걸려 빠짐 → 감가상각비가 어떤 항목의 합인지 유형자산 감가상각비로 맞춰 보고 빠진 항목만 더함:
+        #   감가 = 유형 → 사용권·투자부동산 더함 / 감가 = 유형+사용권 → 투자부동산만 / 감가 = 유형+투자부동산(SGC 연결 566.4 = 530.2+36.3) → 사용권만 …(0.5% 이내)
+        if d and ppe:
+            dv, pv = d[0], ppe[0]
+            rv, iv = (r[0] if r else 0), (ip[0] if ip else 0)
+            # 오차가 가장 작은 조합을 쓰되, 다른 조합도 0.5% 안에 들면 가장 작은 오차가 그 1/3 미만일 때만 인정(SGC 연결: 유형+투자부동산 오차 0.01억 vs 유형+사용권 2.0억)
+            errs = sorted((abs(dv - (pv + incR * rv + incI * iv)) / dv, incR, incI) for incR, incI in ((0, 0), (1, 0), (0, 1), (1, 1))
+                          if not ((incR and not rv) or (incI and not iv)))
+            if errs and errs[0][0] <= 0.005 and (len(errs) < 2 or errs[1][0] > 0.005 or errs[0][0] < errs[1][0] / 3):
+                _, incR, incI = errs[0]
+                chk = ("P" + ("+R" if incR else "") + ("+I" if incI else ""))
+                r = None if incR else r          # 이미 들어 있는 항목은 더하지 않음
+                ip = None if incI else ip
+        if chk is None:
+            # 맞는 조합이 없으면(유형자산 감가상각비 미공시 등) 예전 규칙 유지: 사용권은 현금흐름 조정 태그로 따로 공시된 경우만 더함(이중계상 방지)
+            if r and d and "AdjustmentsFor" not in r[1]:
+                r = None
         if not d:
             # 표준 태그가 없으면 주석 '유형·무형자산 변동내역' 확장 태그(…Depreciation…/…Amortization…, 자산종류 구분 없는 합계 행)에서
             # 기간 말에 끝나는 누적값 중 '가장 큰 값'을 각각 채택(합계 행 = 최대) — 표가 여럿이면 이중계상 방지 위해 합산하지 않음
@@ -155,7 +172,7 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
                 print("   후보 태그:", sorted(facts)[:30], flush=True)
             return None
         res.update(dep=(d[0] if d else 0) + (ip[0] if ip else 0) or None, amort=a[0] if a else None, rou=r[0] if r else None,
-                   tag="+".join(x[1] for x in (d, a, r, ip) if x), start=(d or a or r)[2])
+                   tag="+".join(x[1] for x in (d, a, r, ip) if x) + (f"|감가={chk}" if chk else "|감가구성미확인"), start=(d or a or r)[2])
         res["da"] = sum(x for x in (res["dep"], res["amort"], res["rou"]) if x)
     if debug:
         print(f"   기간 {res.get('start')}~{pend} · 감가 {res.get('dep')} · 무형 {res.get('amort')} · 사용권 {res.get('rou')} · 합계 {res['da']} · 태그 {res['tag']}", flush=True)
@@ -271,3 +288,62 @@ def run(corp_codes=None, limit=None, con=None, workers=8, debug=False):
                 break
     print(f"[da] 완료 {i}/{len(ts)} · 상각비 확보 {ok} · DART {common.CALLS - c0}콜", flush=True)
     return ok
+
+
+def redo_rou(con, limit=None, workers=8):
+    """2026-11-03: 사용권자산·투자부동산 상각비 구성 확인 규칙 적용 전에 저장된 XBRL 결과(합산 태그 아닌 'ok' 행)를 다시 내려받아 재계산.
+    같은 보고서의 연결·별도를 함께 갱신하고 KPI 재계산. 바뀐 행은 전·후 금액을 출력(검증용)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from financials import build_kpi
+    ensure(con)
+    reps = con.execute("""SELECT rcept_no, reprt_code, MIN(corp_code), MIN(bsns_year) FROM da_xbrl
+                          WHERE status='ok' AND tag NOT LIKE '%DepreciationAndAmortisation%' AND tag NOT LIKE '%|감가%' AND rcept_no IS NOT NULL
+                          GROUP BY rcept_no, reprt_code ORDER BY MIN(corp_code) <> (SELECT corp_code FROM company WHERE stock_code='005090'), MIN(corp_code)   -- SGC에너지(사용자 지적 사례) 먼저""").fetchall()
+    if limit:
+        reps = reps[:limit]
+    nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+    print(f"[da-rou] 재계산 대상 보고서 {len(reps)}건 · 병렬 {workers}", flush=True)
+    c0, chg, same, nomatch, done = common.CALLS, [], 0, 0, 0
+    with ThreadPoolExecutor(workers) as ex:
+        for b in range(0, len(reps), workers * 5):
+            batch = reps[b:b + workers * 5]
+            futs = [(rp, ex.submit(_fetch_parse, rp[0], rp[1], "CFS")) for rp in batch]
+            stop = False
+            for rp, f in futs:
+                done += 1
+                try:
+                    _, both = f.result()
+                except Exception as e:  # noqa
+                    if common.QUOTA_HIT or "한도" in str(e):
+                        stop = True
+                    continue
+                for old in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, tag FROM da_xbrl WHERE rcept_no=? AND reprt_code=? AND status='ok'",
+                                       (rp[0], rp[1])).fetchall():
+                    o = both.get(old[3])
+                    if not o:
+                        continue
+                    con.execute("UPDATE da_xbrl SET dep=?, amort=?, rou=?, da=?, tag=?, fetched_at=? WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
+                                (o["dep"], o["amort"], o["rou"], o["da"], o["tag"], now(), old[0], old[1], old[2], old[3]))
+                    if "미확인" in (o["tag"] or ""):
+                        nomatch += 1
+                    if old[4] and abs(o["da"] - old[4]) > 0.001 * old[4]:
+                        chg.append((nm.get(old[0], old[0]), old[1], old[2], old[3], old[4], o["da"], o["tag"]))
+                    else:
+                        same += 1
+                    build_kpi(con, old[0], old[1], old[2])
+            con.commit()
+            print(f"[da-rou] {done}/{len(reps)} · 변경 {len(chg)} · 동일 {same} · DART {common.CALLS - c0}콜", flush=True)
+            if stop:
+                print("[da-rou] DART 한도 — 중단(다음 실행에서 이어서)", flush=True)
+                break
+    print(f"[da-rou] 완료 {done}/{len(reps)} · 상각비 변경 {len(chg)}행 · 동일 {same}행 · 구성 미확인(예전 규칙 유지) {nomatch}행 · DART {common.CALLS - c0}콜", flush=True)
+    import collections as _co
+    bins = _co.Counter()
+    for c in chg:
+        pct = (c[5] - c[4]) / c[4] * 100
+        bins["+0~5%" if 0 < pct <= 5 else "+5~15%" if 0 < pct <= 15 else "+15%초과" if pct > 15 else "감소"] += 1
+    print(f"[da-rou] 변화 폭 분포 {dict(bins)}", flush=True)
+    for c in sorted(chg, key=lambda c: -abs(c[5] - c[4]) / c[4])[:40]:
+        print(f"  {c[0]} {c[1]} {c[2]} {c[3]}: {c[4]/1e8:,.1f}억 → {c[5]/1e8:,.1f}억 ({(c[5]-c[4])/c[4]*100:+.1f}%) [{c[6]}]", flush=True)
+    return chg
+
