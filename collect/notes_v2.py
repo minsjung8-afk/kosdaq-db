@@ -280,12 +280,12 @@ def _da_from_nature(tbl, interim=False):
     rows, unit = tbl["rows"], tbl.get("unit", 1) or 1
     if not rows:
         return None
-    ci = None
+    ci, hlen = None, 0
     q3 = any("3개월" in (h or "").replace(" ", "") for hdr in rows[:4] for h in hdr)
     for hdr in rows[:4]:
         for i, h in enumerate(hdr):
             if "누적" in (h or "").replace(" ", ""):
-                ci = i
+                ci, hlen = i, len(hdr)
                 break
         if ci is not None:
             break
@@ -297,7 +297,9 @@ def _da_from_nature(tbl, interim=False):
         if not nums:
             continue
         if ci is not None:
-            v = next((x for i, x in nums if i == ci), None)
+            # 2026-11-04 대림통상 2026 반기: 둘째 머리글 행 ['3개월','누적','3개월','누적']에 항목명 칸이 없어 데이터 행보다 짧음 → '누적' 열 위치를 오른쪽으로 맞춤(안 맞추면 3개월 값 10.4억을 집음, 실제 누적 19.7억)
+            cj = ci + (len(r) - hlen) if hlen and len(r) > hlen else ci
+            v = next((x for i, x in nums if i == cj), None)
             if v is None and interim and q3 and len(nums) >= 2:
                 v = nums[-1][1]
         else:                                          # '누적' 머리글이 없으면: 분기·반기에 '3개월' 열이 있을 때만 마지막 열(누적), 그 외엔 첫 열(당기·당반기 누적)
@@ -410,7 +412,81 @@ def _store_da(con, cc, y, rc, secs, rcept, src):
             con.execute("INSERT OR REPLACE INTO da_notes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (cc, y, rc, fs, r["dep"], r["amort"], r["rou"], r["da"], rcept, src, now()))
             n += 1
+        if tagged:                            # 2026-11-04: 성격별/현금흐름 조정 표 값은 따로 보관 → build_kpi가 고른 상각비보다 크면 보정(da_direct)
+            try:
+                dv, how = direct_from_secs(secs, fs, rc != "11011")
+                if dv:
+                    con.execute("""CREATE TABLE IF NOT EXISTS da_direct (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, da REAL, how TEXT, rcept_no TEXT, at TEXT,
+                                   PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))""")
+                    con.execute("INSERT OR REPLACE INTO da_direct VALUES (?,?,?,?,?,?,?,?)", (cc, y, rc, fs, dv, how, rcept, now()))
+            except Exception:  # noqa
+                pass
     return n
+
+
+def _fix_unit(tbl):
+    """10-30 이전 보관 주석: 표 안 '(단위: 천원)'을 못 읽어 unit=1로 저장된 표 보정(대림통상 2026 반기 1,965,920천원 → 0.02억)"""
+    u = tbl.get("unit") or 1
+    return dict(tbl, unit=(_tbl_unit(tbl["rows"]) or 1)) if u == 1 else tbl
+
+
+def direct_from_secs(secs, fs, interim):
+    """주석의 '비용의 성격별 분류' > '현금흐름표 조정' 표에서 공시된 상각비 합(원) — (값, 'how') 또는 (None, None). 자산 변동표는 쓰지 않음(오독 위험)"""
+    for key, fn in (("성격별", lambda t: _da_from_nature(t, interim)), ("현금흐름", _da_from_cf)):
+        for s in secs:
+            if s.get("fs") != fs:
+                continue
+            t = s.get("t", "").replace(" ", "")
+            if not (re.search(r"비용의성격|성격별", t) if key == "성격별" else "현금흐름" in t):
+                continue
+            for b in s.get("blocks", []):
+                if "tbl" in b:
+                    v = fn(_fix_unit(b["tbl"]))
+                    if v:
+                        return v, key
+    return None, None
+
+
+def build_direct(con):
+    """2026-11-04 사용자 승인: 보관된 주석(notes_latest·notes_annual)에서 성격별/현금흐름 조정 표 상각비 → da_direct, 바뀐 행 KPI 재계산. DART 0콜.
+    연결/별도 구분이 있는 절만 사용(구분 없는 절은 어느 쪽인지 몰라 제외)."""
+    from financials import build_kpi
+    con.execute("""CREATE TABLE IF NOT EXISTS da_direct (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, da REAL, how TEXT, rcept_no TEXT, at TEXT,
+                   PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))""")
+    old = {(r[0], r[1], r[2], r[3]): r[4] for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da FROM da_direct")}
+    srcs = [("SELECT corp_code, rcept_no, report_nm, notes_j FROM notes_latest WHERE notes_j IS NOT NULL")]
+    if con.execute("SELECT name FROM sqlite_master WHERE name='notes_annual'").fetchone():
+        srcs.append("SELECT corp_code, rcept_no, report_nm, secs_j FROM notes_annual WHERE secs_j IS NOT NULL")
+    seen, keys, n = set(), set(), 0
+    for sql in srcs:
+        for cc, rn, rnm, blob in con.execute(sql).fetchall():
+            try:
+                secs = json.loads(ztext(blob) or "[]")
+            except Exception:  # noqa
+                continue
+            y, rc = _report_key(rnm)
+            if not (y and rc):
+                continue
+            for fs in ("CFS", "OFS"):
+                k = (cc, y, rc, fs)
+                if k in seen:
+                    continue
+                v, how = direct_from_secs(secs, fs, rc != "11011")
+                if not v:
+                    continue
+                seen.add(k); n += 1
+                con.execute("INSERT OR REPLACE INTO da_direct VALUES (?,?,?,?,?,?,?,?)", (*k, v, how, rn, now()))
+                if old.get(k) != v:
+                    keys.add(k[:3])
+    con.commit()
+    before = {(r[0], r[1], r[2], r[3]): (r[4], r[5]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, da_src FROM fin_kpi")}
+    for cc, y, rc in sorted(keys):
+        build_kpi(con, cc, y, rc)
+    con.commit()
+    after = {(r[0], r[1], r[2], r[3]): (r[4], r[5]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, da_src FROM fin_kpi")}
+    chg = [(k, before.get(k, (None, None)), v) for k, v in after.items() if k[:3] in keys and before.get(k, (None, None))[0] != v[0]]
+    print(f"[da-direct] 주석 직접값 {n}행 · KPI 재계산 {len(keys)}건 · 상각비 바뀜 {len(chg)}행", flush=True)
+    return chg
 
 
 def _worker(cc, rcept):

@@ -417,24 +417,43 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         ta = k.get("total_assets")
         k["da"] = None
         rejects = []                                   # (src, v, 사유) — 왜 비었는지 추적용(2026-10-30: AI 보완 1,188건이 사이트에 안 보임)
+        def _bad(src, v):
+            """상식 점검 — 통과하면 None, 걸리면 사유(2026-11-04: 주석 직접값 보정에도 같은 점검을 쓰려고 함수로 분리, 내용은 그대로)"""
+            nonlocal_ref = ref
+            if ta and v > ta * 0.25:
+                return "총자산25%초과"
+            if ta and src != "본문" and v < ta * 0.000001:
+                return "총자산0.0001%미만"   # 2026-10-30 18:40: 0.02% 기준은 지주·증권·보험·건설(자산 대비 상각비 극소)과 1분기 값 754건을 잘못 버림 → 사실상 0인 값만 거르고, 단위 누락은 파서(patch219)와 직전 연간 대조로 막는다
+            if nonlocal_ref and ta and pa < ta * 0.0002:
+                nonlocal_ref = None              # 2026-10-31: 기준이 되는 직전 연간값 자체가 총자산 대비 0.02% 미만이면(HD현대 2023 연결 12억 — 오독) 기준으로 못 씀 → 점검 생략
+            if nonlocal_ref and src != "본문" and not (nonlocal_ref / 8 <= v <= nonlocal_ref * 8):
+                return f"직전연간 1/8~8배 밖(ref {nonlocal_ref:.0f})"   # 본문(현금흐름표) 값은 기준 점검 없이 신뢰 — 점검은 주석 오독 방지용(2026-10-26 HL D&I). 1/4~4배는 연결범위 변동·리스 도입·기준값이 일부 항목뿐인 경우 806행을 잘못 버림(2026-10-31) → 1/8~8배(단위 오류 1,000배는 여전히 걸러짐)
+            if cap and v > cap:
+                return f"같은해 연간 비율 초과(cap {cap:.0f})"
+            if reprt_code != "11011" and pa and abs(v - pa) <= pa * 0.003:
+                return "직전연간과 동일(전기열)"   # 분기·반기 값이 직전 연간과 똑같으면 전기(연간) 열을 읽은 것(2026-10-29 CJ대한통운 별도 2026 반기 1,996억 = 2025 연간)
+            return None
         for src, v in cands:
             if v is None:
                 continue
-            if ta and v > ta * 0.25:
-                rejects.append((src, v, "총자산25%초과")); continue
-            if ta and src != "본문" and v < ta * 0.000001:
-                rejects.append((src, v, "총자산0.0001%미만")); continue   # 2026-10-30 18:40: 0.02% 기준은 지주·증권·보험·건설(자산 대비 상각비 극소)과 1분기 값 754건을 잘못 버림 → 사실상 0인 값만 거르고, 단위 누락은 파서(patch219)와 직전 연간 대조로 막는다
-            if ref and ta and pa < ta * 0.0002:
-                ref = None                             # 2026-10-31: 기준이 되는 직전 연간값 자체가 총자산 대비 0.02% 미만이면(HD현대 2023 연결 12억 — 오독) 기준으로 못 씀 → 점검 생략
-            if ref and src != "본문" and not (ref / 8 <= v <= ref * 8):
-                rejects.append((src, v, f"직전연간 1/8~8배 밖(ref {ref:.0f})")); continue   # 본문(현금흐름표) 값은 기준 점검 없이 신뢰 — 점검은 주석 오독 방지용(2026-10-26 HL D&I). 1/4~4배는 연결범위 변동·리스 도입·기준값이 일부 항목뿐인 경우 806행을 잘못 버림(2026-10-31) → 1/8~8배(단위 오류 1,000배는 여전히 걸러짐)
-            if cap and v > cap:
-                rejects.append((src, v, f"같은해 연간 비율 초과(cap {cap:.0f})")); continue
-            if reprt_code != "11011" and pa and abs(v - pa) <= pa * 0.003:
-                rejects.append((src, v, "직전연간과 동일(전기열)")); continue   # 분기·반기 값이 직전 연간과 똑같으면 전기(연간) 열을 읽은 것(2026-10-29 CJ대한통운 별도 2026 반기 1,996억 = 2025 연간)
+            why = _bad(src, v)
+            if why:
+                rejects.append((src, v, why)); continue
             k["da"] = v
             k["da_src"] = src                      # 2026-10-31 사용자 결정(A안): 상각비 출처를 KPI에 남겨 사이트에서 '추정' 표시 — 본문(현금흐름표)이 아니면 주석 파서/AI 값
             break
+        # 2026-11-04 사용자 승인: 같은 보고서 주석의 '비용의 성격별 분류'·'현금흐름표 조정' 표 값(da_direct)이 고른 값보다 1% 넘게 크면 그 값으로 보정.
+        #   XBRL이 사용권·무형 상각을 회사 자체 태그로 공시해 유형자산분만 잡히거나(노루홀딩스 2026 반기 연결 104.9억 vs 원문 140.9억),
+        #   본문 값이 깨진 경우(삼표시멘트 별도 3.0억 vs 245.7억)를 바로잡음. 고른 값이 더 크면 그대로(영업외 상각·표 오독 가능성) — 주석 값도 같은 상식 점검 통과해야 함
+        try:
+            dd = con.execute("SELECT da, how FROM da_direct WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND da > 0",
+                             (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
+        except Exception:  # noqa
+            dd = None
+        if dd and (not k.get("da") or k["da"] < dd[0] * 0.99) and not _bad("da_direct", dd[0]):   # 다른 후보가 모두 없거나 버려진 경우도 주석 직접값으로 채움
+            if k.get("da"):
+                rejects.append((k.get("da_src"), k["da"], f"주석 직접값보다 작음({dd[1]} {dd[0]:.0f})"))
+            k["da"], k["da_src"] = dd[0], f"da_direct:{dd[1]}"
         if k.get("da_src") == "da_notes":
             try:
                 ns = con.execute("SELECT src FROM da_notes WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
