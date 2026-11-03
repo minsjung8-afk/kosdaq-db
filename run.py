@@ -578,6 +578,67 @@ def main():
             print(f"    {chk} {k}: {n}", flush=True)
         for d, r in sorted(bad, key=lambda x: -x[0])[:40]:
             print(f"  {r[0]} {r[1]} {r[2]} {r[3]}: XBRL {r[4]/1e8:,.1f}억(감가 {(r[8] or 0)/1e8:,.1f}·무형 {(r[9] or 0)/1e8:,.1f}·사용권 {(r[10] or 0)/1e8:,.1f}) vs 주석표 {r[5]/1e8:,.1f}억[{r[6]}] [{r[7]}]", flush=True)
+    elif a.job == "rawdump" and a.type == "상각비성격별대조":   # 2026-11-03 사용자 승인: 사이트 상각비 vs 주석 '비용의 성격별 분류' 감가상각비(원문 공시 금액) 전수 대조 — DART 0콜(보관 주석 사용)
+        import json as _js, collections as _co, notes_v2 as _nv
+        from common import ztext as _zt
+        kpi = {(r[0], r[1], r[2], r[3]): (r[4], r[5]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, da_src FROM fin_kpi")}
+        tag = {(r[0], r[1], r[2], r[3]): r[4] for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, tag FROM da_xbrl WHERE status='ok'")}
+        nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        seen, rows, nofs = set(), [], 0
+        srcs = [("latest", "SELECT corp_code, rcept_no, report_nm, notes_j FROM notes_latest WHERE notes_j IS NOT NULL")]
+        if con.execute("SELECT name FROM sqlite_master WHERE name='notes_annual'").fetchone():
+            srcs.append(("annual", "SELECT corp_code, rcept_no, report_nm, secs_j FROM notes_annual WHERE secs_j IS NOT NULL"))
+        for kind, sql in srcs:
+            for cc, rn, rnm, blob in con.execute(sql).fetchall():
+                try:
+                    secs = _js.loads(_zt(blob) or "[]")
+                except Exception:  # noqa
+                    continue
+                y, rc = _nv._report_key(rnm)
+                if not (y and rc):
+                    continue
+                for s in secs:
+                    if not __import__("re").search(r"비용의성격|성격별", s.get("t", "").replace(" ", "")):
+                        continue
+                    fs = s.get("fs")
+                    if fs is None:
+                        nofs += 1; continue
+                    k = (cc, y, rc, fs)
+                    if k in seen:
+                        continue
+                    v = next((x for x in (_nv._da_from_nature(b["tbl"], rc != "11011") for b in s.get("blocks", []) if "tbl" in b) if x), None)
+                    if not v:
+                        continue
+                    seen.add(k)
+                    kd, ks = kpi.get(k, (None, None))
+                    rows.append((k, v, kd, ks, kind))
+        st = _co.Counter(); bad = []
+        for k, v, kd, ks, kind in rows:
+            src = (ks or "(없음)").split(":")[0]
+            if not kd:
+                st[(src, "사이트 상각비 없음")] += 1; continue
+            d = (kd - v) / v
+            c = "일치(±1%)" if abs(d) <= 0.01 else ("사이트가 큼" if d > 0 else "사이트가 작음")
+            st[(src, c)] += 1
+            if c != "일치(±1%)":
+                bad.append((abs(d), k, v, kd, ks, kind))
+        print(f"[성격별대조] 성격별 분류 표에서 상각비를 읽은 행 {len(rows)} · 연결/별도 구분 없는 절 {nofs}개 제외", flush=True)
+        for src in sorted({s for s, _ in st}):
+            tot = sum(n for (s, _), n in st.items() if s == src)
+            print(f"    {src}: 계 {tot} · " + " · ".join(f"{c} {st[(src, c)]}" for c in ("일치(±1%)", "사이트가 큼", "사이트가 작음", "사이트 상각비 없음") if st[(src, c)]), flush=True)
+        xb = _co.Counter()
+        for d, k, v, kd, ks, kind in bad:
+            if ks == "da_xbrl":
+                t = tag.get(k) or ""
+                xb[(t.split("|감가")[-1] if "|감가" in t else "합산태그" if "DepreciationAndAmortisation" in t else "?", "큼" if kd > v else "작음")] += 1
+        print(f"[성격별대조] XBRL 경로 어긋남의 감가상각비 구성별: {dict(xb)}", flush=True)
+        for d, k, v, kd, ks, kind in sorted(bad, key=lambda x: -x[0])[:80]:
+            print(f"  {nm.get(k[0], k[0])} {k[1]} {k[2]} {k[3]}: 사이트 {kd/1e8:,.1f}억[{ks}] vs 성격별 {v/1e8:,.1f}억({kind}) {(kd-v)/v*100:+.1f}% [{tag.get(k, '')}]", flush=True)
+        for c in ("487570", "373220", "298040", "003200", "005090"):
+            cc = con.execute("SELECT corp_code FROM company WHERE stock_code=?", (c,)).fetchone()
+            for k, v, kd, ks, kind in rows:
+                if cc and k[0] == cc[0]:
+                    print(f"  [표본] {nm.get(k[0])} {k[1]} {k[2]} {k[3]}: 사이트 {kd and round(kd/1e8,1)}억[{ks}] vs 성격별 {v/1e8:,.1f}억 [{tag.get(k, '')}]", flush=True)
     elif a.job == "rawdump" and a.type.startswith("상각비재계산"):   # 2026-11-03 사용자 '바로잡아보자': XBRL 경로 상각비를 감가상각비 구성 확인 규칙으로 재계산(DART 보고서당 1콜) — '상각비재계산200' = 표본 200건만
         import da_xbrl as _dx
         _n = a.type[len("상각비재계산"):]
