@@ -578,6 +578,27 @@ def main():
             print(f"    {chk} {k}: {n}", flush=True)
         for d, r in sorted(bad, key=lambda x: -x[0])[:40]:
             print(f"  {r[0]} {r[1]} {r[2]} {r[3]}: XBRL {r[4]/1e8:,.1f}억(감가 {(r[8] or 0)/1e8:,.1f}·무형 {(r[9] or 0)/1e8:,.1f}·사용권 {(r[10] or 0)/1e8:,.1f}) vs 주석표 {r[5]/1e8:,.1f}억[{r[6]}] [{r[7]}]", flush=True)
+    elif a.job == "rawdump" and a.type.startswith("상각비과거보정"):   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정 — 보고서당 DART 1콜. '상각비과거보정점검' = 대상 수만, '상각비과거보정3000' = 최대 3,000건
+        import notes_v2 as _nv, collections as _co, re as _re
+        _n = a.type[len("상각비과거보정"):]
+        chg = _nv.direct_backfill(con, years=4, limit=int(_n) if _n.isdigit() else None, budget_sec=150 * 60, dry=(_n == "점검"))
+        nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        st = _co.Counter(((b[1] or "(없음)").split(":")[0] + "→" + (v[1] or ""), k[1] + "/" + k[2]) for k, b, v in chg)
+        print(f"[과거보정] 바뀐 행 (출처 전→후, 기간): {dict(st)}", flush=True)
+        bins = _co.Counter()
+        for k, b, v in chg:
+            if not b[0]:
+                bins["새로 채움"] += 1
+            elif v[0] and b[0]:
+                rr = v[0] / b[0]
+                bins["감소" if rr < 1 else "+5%이하" if rr <= 1.05 else "+20%이하" if rr <= 1.2 else "+60%이하" if rr <= 1.6 else "1.6~2.4배" if rr <= 2.4 else "2.4배초과"] += 1
+        print(f"[과거보정] 변화 폭: {dict(bins)}", flush=True)
+        for k, b, v in sorted(chg, key=lambda x: -((x[2][0] or 0) / (x[1][0] or 1e30)))[:60]:
+            print(f"  {nm.get(k[0], k[0])} {k[1]} {k[2]} {k[3]}: {b[0] and round(b[0]/1e8,1)}억[{b[1]}] → {v[0] and round(v[0]/1e8,1)}억[{v[1]}]", flush=True)
+        for c in ("000320", "462870", "487570", "443060", "108670", "005090", "003200"):
+            for r in con.execute("""SELECT c.corp_name, k.bsns_year, k.reprt_code, k.fs_div, k.da, k.da_src FROM fin_kpi k JOIN company c USING(corp_code)
+                                    WHERE c.stock_code=? AND k.bsns_year IN ('2024','2025') AND k.reprt_code IN ('11011','11012') ORDER BY 2,3,4""", (c,)):
+                print(f"  [표본] {r[0]} {r[1]} {r[2]} {r[3]}: {r[4] and round(r[4]/1e8,1)}억 [{r[5]}]", flush=True)
     elif a.job == "rawdump" and a.type == "상각비주석보정":   # 2026-11-04 사용자 승인: 주석 성격별/현금흐름 조정 표 값이 고른 상각비보다 1% 넘게 크면 보정(DART 0콜)
         import notes_v2 as _nv, collections as _co
         chg = _nv.build_direct(con)
