@@ -412,6 +412,7 @@ def main():
                     _c["v"] = set()
             return _c["v"]
         steps = [("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=90 * 60)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
+                 ("da_direct", lambda: __import__("notes_v2").direct_backfill(con, years=4, limit=2000, budget_sec=50 * 60)),   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정(XBRL 일부 항목 누락·분기 3개월 열 오독) — 하루 2,000건씩, 약 2주
                  ("da_ai", lambda: __import__("da_ai").run(con, limit=1500)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 1,500건·예산 40달러, 2026-10-30 사용자 "예산 올려줄게")
                  ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
                  ("mezz", lambda: mezz.run(ccs, new_only=True)),
