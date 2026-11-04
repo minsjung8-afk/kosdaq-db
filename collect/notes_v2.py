@@ -489,6 +489,87 @@ def build_direct(con):
     return chg
 
 
+def direct_backfill(con, years=4, limit=None, budget_sec=None, workers=8, dry=False):
+    """2026-11-04 사용자 '알아서': 주석이 보관되지 않은 과거 보고서(사업·반기·분기)의 성격별/현금흐름 조정 표 상각비를 받아 da_direct 채우고 KPI 재계산.
+    보고서당 DART 1콜. 사이트에 보이는 연간·반기·최근 연도 먼저. 이미 da_direct가 있거나 시도한 보고서는 건너뜀(da_dtry). 원문 전체는 보관하지 않음."""
+    import common
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+    from datetime import date
+    from financials import build_kpi
+    t0 = _time.time()
+    con.execute("""CREATE TABLE IF NOT EXISTS da_direct (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, da REAL, how TEXT, rcept_no TEXT, at TEXT,
+                   PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))""")
+    con.execute("CREATE TABLE IF NOT EXISTS da_dtry (rcept_no TEXT PRIMARY KEY, n INTEGER, at TEXT)")
+    y0 = str(date.today().year - years)
+    have = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_direct")}
+    tried = {r[0] for r in con.execute("SELECT rcept_no FROM da_dtry")}
+    todo, seen = [], set()
+    for cc, y, rc, rn in con.execute("""SELECT corp_code, bsns_year, reprt_code, rcept_no FROM fin_kpi
+                                        WHERE bsns_year >= ? AND op_income IS NOT NULL AND rcept_no IS NOT NULL AND rcept_no NOT LIKE '%:%'""", (y0,)):
+        if (cc, y, rc) in have or rn in tried or rn in seen:
+            continue
+        seen.add(rn); todo.append((cc, y, rc, rn))
+    pri = {"11011": 0, "11012": 1, "11014": 2, "11013": 3}
+    todo.sort(key=lambda t: (-int(t[1]) if t[2] in ("11011", "11012") else -int(t[1]) + 1.5, pri.get(t[2], 9)))   # 연간·반기는 그 해 순서대로, 분기는 한 해 늦게
+    import collections as _co
+    cnt = _co.Counter((t[1], t[2]) for t in todo)
+    print(f"[da-dback] 대상 보고서 {len(todo)}건(최근 {years}개 사업연도, 주석 직접값 없는 것) · 기간별 " + " ".join(f"{y}/{rc}:{n}" for (y, rc), n in sorted(cnt.items(), reverse=True)), flush=True)
+    if dry:
+        return []
+    if limit:
+        todo = todo[:limit]
+
+    def work(t):
+        if common.QUOTA_HIT:
+            return t, None
+        xml = fetch_document_xml(t[3])
+        return t, extract_notes_v2(xml)
+
+    chg, n_ok, i = [], 0, 0
+    with ThreadPoolExecutor(workers) as ex:
+        pending, nxt, stop = set(), 0, False
+        while (pending or nxt < len(todo)) and not stop:
+            while nxt < len(todo) and len(pending) < workers * 2:
+                pending.add(ex.submit(_safe, work, todo[nxt])); nxt += 1
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for f in done:
+                r = f.result()
+                if len(r) == 3:                                # _safe 오류 반환 (t, ""|None, None)
+                    if r[1] == "":
+                        con.execute("INSERT OR REPLACE INTO da_dtry VALUES (?,?,datetime('now'))", (r[0][3], -1))   # 한도 아닌 오류는 시도 기록(반복 호출 방지)
+                    continue
+                if r[1] is None:
+                    continue                                   # 한도 — 기록 없이 다음 실행에서 다시
+                (cc, y, rc, rn), secs = r
+                i += 1
+                got = 0
+                for fs in ("CFS", "OFS"):
+                    v, how = direct_from_secs(secs, fs, rc != "11011")
+                    if v:
+                        con.execute("INSERT OR REPLACE INTO da_direct VALUES (?,?,?,?,?,?,?,?)", (cc, y, rc, fs, v, how, rn, now())); got += 1
+                con.execute("INSERT OR REPLACE INTO da_dtry VALUES (?,?,datetime('now'))", (rn, got))
+                if got:
+                    n_ok += 1
+                    b = {x[0]: (x[1], x[2]) for x in con.execute("SELECT fs_div, da, da_src FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=?", (cc, y, rc))}
+                    build_kpi(con, cc, y, rc)
+                    for x in con.execute("SELECT fs_div, da, da_src FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code=?", (cc, y, rc)):
+                        if b.get(x[0], (None, None))[0] != x[1]:
+                            chg.append(((cc, y, rc, x[0]), b.get(x[0], (None, None)), (x[1], x[2])))
+            con.commit()
+            if i % 200 < len(done):
+                print(f"[da-dback] {i}/{len(todo)} · 직접값 확보 {n_ok} · 상각비 바뀜 {len(chg)} · DART {common.CALLS}콜", flush=True)
+            if common.QUOTA_HIT:
+                print(f"[da-dback] DART 한도 — {i}/{len(todo)}에서 중단(다음 실행에서 이어감)", flush=True); stop = True
+            if budget_sec and _time.time() - t0 > budget_sec:
+                print(f"[da-dback] 시간 예산 도달 — {i}/{len(todo)}에서 중단(다음 실행에서 이어감)", flush=True); stop = True
+        if stop:
+            for f in pending:
+                f.cancel()
+    print(f"[da-dback] 완료 {i}/{len(todo)} · 직접값 확보 보고서 {n_ok} · 상각비 바뀜 {len(chg)}행", flush=True)
+    return chg
+
+
 def _worker(cc, rcept):
     xml = fetch_document_xml(rcept)
     return extract_notes_v2(xml)
