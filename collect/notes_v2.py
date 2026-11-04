@@ -505,9 +505,12 @@ def direct_backfill(con, years=4, limit=None, budget_sec=None, workers=8, dry=Fa
     have = {(r[0], r[1], r[2]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code FROM da_direct")}
     tried = {r[0] for r in con.execute("SELECT rcept_no FROM da_dtry")}
     todo, seen = [], set()
+    body = {}                                              # (cc,y,rc) → 모든 구분이 현금흐름표 본문 값인지(본문은 1,700여 행 대조에서 오류 약 1% → DART 호출 아끼려 제외)
+    for cc, y, rc, src in con.execute("SELECT corp_code, bsns_year, reprt_code, da_src FROM fin_kpi WHERE bsns_year >= ?", (y0,)):
+        body[(cc, y, rc)] = body.get((cc, y, rc), True) and src == "본문"
     for cc, y, rc, rn in con.execute("""SELECT corp_code, bsns_year, reprt_code, rcept_no FROM fin_kpi
                                         WHERE bsns_year >= ? AND op_income IS NOT NULL AND rcept_no IS NOT NULL AND rcept_no NOT LIKE '%:%'""", (y0,)):
-        if (cc, y, rc) in have or rn in tried or rn in seen:
+        if (cc, y, rc) in have or rn in tried or rn in seen or body.get((cc, y, rc)):
             continue
         seen.add(rn); todo.append((cc, y, rc, rn))
     pri = {"11011": 0, "11012": 1, "11014": 2, "11013": 3}
@@ -777,6 +780,16 @@ def backfill(con=None, limit=None, years=4, workers=4, codes=None, budget_sec=No
                     # 구분을 무시하고 읽어, 그 문서를 접수번호로 가진 구분(연결감사보고서 → 연결)에만 저장
                     tagged = {s.get("fs") for s in (secs or [])} >= {"CFS", "OFS"}
                     mine = {fs for fs, v in own.get((cc, y, rc), {}).items() if v == rn}
+                    if tagged:                              # 2026-11-04: 받은 원문의 성격별/현금흐름 조정 표 값도 보관(da_direct) — build_kpi가 고른 값보다 크면 보정
+                        try:
+                            con.execute("""CREATE TABLE IF NOT EXISTS da_direct (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, da REAL, how TEXT, rcept_no TEXT, at TEXT,
+                                           PRIMARY KEY (corp_code, bsns_year, reprt_code, fs_div))""")
+                            for _fs in ("CFS", "OFS"):
+                                _v, _how = direct_from_secs(secs, _fs, rc != "11011")
+                                if _v:
+                                    con.execute("INSERT OR REPLACE INTO da_direct VALUES (?,?,?,?,?,?,?,?)", (cc, y, rc, _fs, _v, _how, rn, now()))
+                        except Exception:  # noqa
+                            pass
                     for fs in sorted(fss):
                         if not tagged and mine and fs not in mine:
                             continue                        # 구분 하나뿐인 문서(감사보고서)는 자기 구분에만
