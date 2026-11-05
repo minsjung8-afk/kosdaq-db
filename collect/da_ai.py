@@ -100,6 +100,9 @@ def run(con=None, limit=None, codes=None, workers=6):
     _ensure(con); notes_v2.ensure(con)
     budget = float(os.environ.get("DA_AI_BUDGET", "90"))   # 2026-10-30 16:59 15→40, 10-31 사용자 "예산 올려줄게·정확도 우선" → 90(전 모델 누적 기준)
     spent0 = _spent(con)
+    if spent0 >= budget:                                   # 2026-11-05 사용자 "예산이 없어": 이미 예산을 넘었으면 시작하지 않음(예전엔 한 묶음을 돌린 뒤 멈춰 밤마다 약 0.6달러씩 초과)
+        print(f"[da_ai] 누적 ${spent0:.2f} ≥ 예산 ${budget:.0f} — 실행 안 함", flush=True)
+        return 0
     todo = _targets(con, codes, limit)
     print(f"[da_ai] 대상 {len(todo)}건 · 누적 ${spent0:.2f} · 예산 ${budget:.0f} · {MODEL}", flush=True)
     client = anthropic.Anthropic()
