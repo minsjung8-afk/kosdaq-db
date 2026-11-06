@@ -314,6 +314,44 @@ def fetch_business(con, corp_code, bsns_year, pre=None):
     return True
 
 
+def fetch_business_newlist(con, corp_code):
+    """2026-11-06 사용자 '예산 5달러 안에서': 아직 사업보고서가 없는 신규 상장사의 'II. 사업의 내용'을
+    최신 분기·반기보고서(같은 절 포함) → 없으면 투자설명서·증권신고서(지분증권)에서 가져와 business에 저장. DART 1~3콜.
+    반환 (rcept_no, 출처) 또는 (None, 사유)."""
+    from datetime import date, timedelta
+    end = date.today().strftime("%Y%m%d")
+    bgn = (date.today() - timedelta(days=540)).strftime("%Y%m%d")
+    cands = []
+    for ty, pat, kind in (("A", r"(사업|반기|분기)보고서", "periodic"), ("C", r"투자설명서|증권신고서\(지분증권\)", "ipo")):
+        try:
+            js = dart_get("list", corp_code=corp_code, bgn_de=bgn, end_de=end, pblntf_ty=ty, page_count=100)
+        except Exception:  # noqa — 013(자료 없음) 등
+            continue
+        rows = [r for r in js.get("list", []) if re.search(pat, r["report_nm"]) and "첨부" not in r["report_nm"]]
+        rows.sort(key=lambda r: r["rcept_dt"], reverse=True)
+        cands += [(r, kind) for r in rows[:2]]            # 정기보고서 먼저, 거기서 사업의 내용을 못 찾으면 투자설명서
+    for r, kind in cands:
+        try:
+            xml = fetch_document_xml(r["rcept_no"])
+        except Exception:  # noqa
+            continue
+        full, overview = extract_business_section(xml)
+        if not full or len(full) < 1500:
+            continue
+        m = re.search(r"\((\d{4})\.(\d{2})\)", r["report_nm"])
+        y = m.group(1) if m else r["rcept_dt"][:4]
+        rc = "11011" if "사업보고서" in r["report_nm"] else "11012" if "반기" in r["report_nm"] else "11013" if "분기" in r["report_nm"] else "IPO"
+        con.execute("""INSERT INTO business (corp_code, bsns_year, rcept_no, reprt_code, overview_text, full_z, char_len, fetched_at)
+            VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(corp_code, bsns_year) DO UPDATE SET rcept_no=excluded.rcept_no, reprt_code=excluded.reprt_code,
+            overview_text=excluded.overview_text, full_z=excluded.full_z, full_text=NULL, char_len=excluded.char_len, fetched_at=excluded.fetched_at""",
+                    (corp_code, y, r["rcept_no"], rc, overview, zpack(full), len(full), now()))
+        con.commit()
+        log(con, corp_code, "biz_newlist", "ok", f"{r['report_nm']} {len(full)} chars")
+        return r["rcept_no"], r["report_nm"]
+    log(con, corp_code, "biz_newlist", "fail", "사업의 내용 있는 정기보고서·투자설명서 없음")
+    return None, "없음"
+
+
 # ---------- 감사의견 / 최대주주 ----------
 def fetch_audit_opinion(con, corp_code, bsns_year):
     js = dart_get("accnutAdtorNmNdAdtOpinion", corp_code=corp_code, bsns_year=bsns_year, reprt_code="11011")
