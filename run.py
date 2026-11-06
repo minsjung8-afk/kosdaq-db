@@ -579,6 +579,27 @@ def main():
             print(f"    {chk} {k}: {n}", flush=True)
         for d, r in sorted(bad, key=lambda x: -x[0])[:40]:
             print(f"  {r[0]} {r[1]} {r[2]} {r[3]}: XBRL {r[4]/1e8:,.1f}억(감가 {(r[8] or 0)/1e8:,.1f}·무형 {(r[9] or 0)/1e8:,.1f}·사용권 {(r[10] or 0)/1e8:,.1f}) vs 주석표 {r[5]/1e8:,.1f}억[{r[6]}] [{r[7]}]", flush=True)
+    elif a.job == "rawdump" and a.type in ("신규상장사업", "신규상장사업점검"):   # 2026-11-06 사용자 '예산 5달러 이내': 사업보고서 없는 신규 상장사 사업내용 요약(분기·반기보고서/투자설명서 → Haiku)
+        import business as _bz, summarize as _sm
+        live = con.execute("""SELECT c.corp_code, c.corp_name FROM company c WHERE c.delisted_dt IS NULL AND c.market IN ('KOSPI','KOSDAQ','KONEX')
+                              AND c.corp_name NOT LIKE '%스팩%' AND c.corp_name NOT LIKE '%기업인수목적%'
+                              AND NOT EXISTS (SELECT 1 FROM business b WHERE b.corp_code=c.corp_code AND b.summary_json IS NOT NULL)""").fetchall()
+        print(f"[신규상장] 사업내용 요약 없는 상장사(스팩 제외) {len(live)}사: " + ", ".join(r[1] for r in live), flush=True)
+        if a.type == "신규상장사업" and len(live) <= 80:          # 비용 상한: Haiku 회사당 약 3~4센트 × 80사 ≈ 3달러 미만
+            got = set()
+            for cc, nm_ in live:
+                has = con.execute("SELECT 1 FROM business WHERE corp_code=? AND (full_z IS NOT NULL OR full_text IS NOT NULL)", (cc,)).fetchone()
+                if has:
+                    got.add(cc); continue
+                rn, src = _bz.fetch_business_newlist(con, cc)
+                print(f"  {nm_}: {src}", flush=True)
+                if rn:
+                    got.add(cc)
+            print(f"[신규상장] 원문 확보 {len(got)}/{len(live)}사 → Haiku 요약", flush=True)
+            if got:
+                _sm.run_all(got, model="haiku", force=False, workers=6, limit=80)
+            for r in con.execute(f"SELECT c.corp_name, b.bsns_year, b.reprt_code, substr(b.summary_md,1,80) FROM business b JOIN company c USING(corp_code) WHERE b.corp_code IN ({','.join('?'*len(got)) or 'NULL'}) AND b.summary_json IS NOT NULL", tuple(got)):
+                print(f"  [요약] {r[0]} {r[1]} {r[2]}: {r[3]}", flush=True)
     elif a.job == "rawdump" and a.type.startswith("상각비과거보정"):   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정 — 보고서당 DART 1콜. '상각비과거보정점검' = 대상 수만, '상각비과거보정3000' = 최대 3,000건
         import notes_v2 as _nv, collections as _co, re as _re
         _n = a.type[len("상각비과거보정"):]
