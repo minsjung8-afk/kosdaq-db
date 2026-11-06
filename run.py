@@ -579,6 +579,27 @@ def main():
             print(f"    {chk} {k}: {n}", flush=True)
         for d, r in sorted(bad, key=lambda x: -x[0])[:40]:
             print(f"  {r[0]} {r[1]} {r[2]} {r[3]}: XBRL {r[4]/1e8:,.1f}억(감가 {(r[8] or 0)/1e8:,.1f}·무형 {(r[9] or 0)/1e8:,.1f}·사용권 {(r[10] or 0)/1e8:,.1f}) vs 주석표 {r[5]/1e8:,.1f}억[{r[6]}] [{r[7]}]", flush=True)
+    elif a.job == "rawdump" and a.type == "요약실패진단":   # 2026-11-06: 신규상장 요약 2곳 'list index out of range' — 원인 확인 후 1회 재시도(Haiku 2콜, 몇 센트)
+        import summarize as _sm, anthropic as _an, json as _js
+        from common import ztext as _zt
+        cl = _an.Anthropic()
+        for cc in ("00526696", "00677486"):
+            r = con.execute("""SELECT c.corp_name, b.bsns_year, b.rcept_no, b.reprt_code, COALESCE(b.full_z, b.full_text) FROM business b JOIN company c USING(corp_code)
+                               WHERE b.corp_code=? ORDER BY b.bsns_year DESC LIMIT 1""", (cc,)).fetchone()
+            if not r:
+                print(f"[요약진단] {cc}: business 행 없음", flush=True); continue
+            t = _zt(r[4]) or ""
+            print(f"[요약진단] {r[0]} {r[1]} {r[3]} {r[2]}: 원문 {len(t)}자 · 앞부분 {t[:200]!r}", flush=True)
+            msg = cl.messages.create(model=_sm.MODELS["haiku"], max_tokens=4000, messages=[{"role": "user", "content": _sm.PROMPT + t[:_sm.MAX_CHARS]}])
+            out = "".join(getattr(b, "text", "") for b in msg.content)
+            print(f"    stop={msg.stop_reason} · 블록 {len(msg.content)} · 응답 {len(out)}자 · 토큰 {msg.usage.input_tokens}/{msg.usage.output_tokens} · 앞 {out[:160]!r}", flush=True)
+            try:
+                js = _sm._parse_json(out); js["_kind"] = "biz"; js["_model"] = _sm.MODELS["haiku"]
+                con.execute("UPDATE business SET summary_json=?, summary_md=?, summarized_at=datetime('now') WHERE corp_code=? AND bsns_year=?",
+                            (_js.dumps(js, ensure_ascii=False), js.get("summary_md"), cc, r[1]))
+                con.commit(); print(f"    저장: {(js.get('summary_md') or '')[:100]}", flush=True)
+            except Exception as e:  # noqa
+                print(f"    파싱 실패: {e}", flush=True)
     elif a.job == "rawdump" and a.type in ("신규상장사업", "신규상장사업점검"):   # 2026-11-06 사용자 '예산 5달러 이내': 사업보고서 없는 신규 상장사 사업내용 요약(분기·반기보고서/투자설명서 → Haiku)
         import business as _bz, summarize as _sm
         live = con.execute("""SELECT c.corp_code, c.corp_name FROM company c WHERE c.delisted_dt IS NULL AND c.market IN ('KOSPI','KOSDAQ','KONEX')
