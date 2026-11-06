@@ -118,9 +118,9 @@ jobs:
               "30 21 * * 0-4") JOB=subst ;;
               *)             JOB=daily ;;
             esac
-            timeout --signal=INT 170m python run.py $JOB || echo "::warning::수집 종료 코드 $? (170분 제한 또는 오류) — 저장된 범위까지 보관"
+            timeout --signal=INT --kill-after=8m 150m python run.py $JOB || echo "::warning::수집 종료 코드 $? (150분 제한 또는 오류) — 저장된 범위까지 보관"
           else
-            timeout --signal=INT 170m python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }} || echo "::warning::수집 종료 코드 $? (170분 제한 또는 오류) — 저장된 범위까지 보관"
+            timeout --signal=INT --kill-after=8m 150m python run.py ${{ github.event.inputs.job || 'price' }} ${{ github.event.inputs.args }} || echo "::warning::수집 종료 코드 $? (150분 제한 또는 오류) — 저장된 범위까지 보관"
           fi
       - name: keep dry-run outputs      # unlisted 드라이런 명단 등 산출물
         if: always()
