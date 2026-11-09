@@ -582,7 +582,10 @@ def main():
     elif a.job == "rawdump" and a.type.startswith("AI판정"):   # 2026-11-09 사용자 '1번부터, 예산 50달러 이내': 의심 상각비 행을 Sonnet이 원문으로 판정(사이트 값 자동 변경 없음). 'AI판정25' = 25건
         import verify_ai as _va
         _n = a.type[len("AI판정"):]
-        _va.report(con, _va.run(con, limit=int(_n) if _n.isdigit() else 25))
+        if _n == "점검":                                  # 대상 분포만(DART·AI 0)
+            _va.dist(con)
+        else:
+            _va.report(con, _va.run(con, limit=int(_n) if _n.isdigit() else 25))
     elif a.job == "rawdump" and a.type == "요약실패진단":   # 2026-11-06: 신규상장 요약 2곳 'list index out of range' — 원인 확인 후 1회 재시도(Haiku 2콜, 몇 센트)
         import summarize as _sm, anthropic as _an, json as _js
         from common import ztext as _zt

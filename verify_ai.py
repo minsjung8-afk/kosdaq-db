@@ -77,7 +77,20 @@ def _render(secs, fs, xml_text):
     return txt[:30000]
 
 
-def targets(con, limit=None):
+def dist(con):
+    """대상 분포(비용 0) — 연도·보고서·차이 폭별"""
+    import collections
+    c = collections.Counter()
+    for r in targets(con):
+        g = r[4] / r[5] - 1
+        c[(r[1], {"11011": "연간", "11012": "반기", "11013": "1Q", "11014": "3Q"}.get(r[2], r[2]),
+           "1~5%" if g <= 0.05 else "5~20%" if g <= 0.2 else "20~100%" if g <= 1 else "2배+")] += 1
+    for k in sorted(c, reverse=True):
+        print(f"  [분포] {k[0]} {k[1]} {k[2]}: {c[k]}", flush=True)
+    return c
+
+
+def targets(con, limit=None, min_gap=0.01, since=None, kinds=None):
     """사이트 상각비가 주석 직접값보다 1% 넘게 큰 행(아직 판정 안 한 것) — 최근 연도·연간/반기 먼저"""
     con.execute("""CREATE TABLE IF NOT EXISTS ai_verify (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, field TEXT,
                    site_val REAL, alt_val REAL, ai_val REAL, verdict TEXT, evidence TEXT, reason TEXT, comp TEXT, rcept_no TEXT,
@@ -88,7 +101,8 @@ def targets(con, limit=None):
                             AND NOT EXISTS (SELECT 1 FROM ai_verify v WHERE v.corp_code=k.corp_code AND v.bsns_year=k.bsns_year
                                             AND v.reprt_code=k.reprt_code AND v.fs_div=k.fs_div AND v.field='da')
                           ORDER BY k.bsns_year DESC, CASE k.reprt_code WHEN '11011' THEN 0 WHEN '11012' THEN 1 ELSE 2 END, k.corp_code""").fetchall()
-    rows = [r for r in rows if r[6] and ":" not in r[6]]
+    rows = [r for r in rows if r[6] and ":" not in r[6] and r[4] > r[5] * (1 + min_gap)
+            and (not since or r[1] >= since) and (not kinds or r[2] in kinds)]
     return rows[:limit] if limit else rows
 
 
@@ -97,16 +111,16 @@ def _spent(con):
     return r[0] / 1e6 * PRICE_IN + r[1] / 1e6 * PRICE_OUT
 
 
-def run(con=None, limit=25, workers=4):
+def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011", "11012", "11014")):
     import anthropic
     from concurrent.futures import ThreadPoolExecutor
     from business import fetch_document_xml
     from notes_v2 import extract_notes_v2
     from summarize import _parse_json
     con = con or connect()
-    todo = targets(con, limit)
+    todo = targets(con, limit, min_gap, since, kinds)   # 2026-11-09: 미판정 3,441건 전부는 예산 초과 → 최근(2025~)·연간/반기/3Q·차이 5% 넘는 행만(1~5%는 영업외 상각 가능성 — SGC에너지처럼 원문과 맞는 경우)
     spent0 = _spent(con)
-    print(f"[verify_ai] 대상 {len(todo)}건(전체 미판정 {len(targets(con))}) · 누적 ${spent0:.2f} · 예산 ${BUDGET:.0f} · {MODEL}", flush=True)
+    print(f"[verify_ai] 대상 {len(todo)}건(조건 충족 {len(targets(con, None, min_gap, since, kinds))} · 전체 미판정 {len(targets(con))}) · 누적 ${spent0:.2f} · 예산 ${BUDGET:.0f} · {MODEL}", flush=True)
     if spent0 >= BUDGET:
         print("[verify_ai] 예산 소진 — 실행 안 함", flush=True)
         return []
