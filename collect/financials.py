@@ -459,7 +459,9 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         #   ④ 판정 당시 사이트 값이 지금 고른 값과 같음(입력이 바뀌었으면 무효) ⑤ 상식 점검 통과 — 표본 원문 대조 3/3 일치(티맥스소프트·INVENI·대동)
         try:
             av = con.execute("""SELECT ai_val, site_val, alt_val FROM ai_verify WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND field='da'
-                                AND reason LIKE '[근거확인]%' AND ai_val > 0""", (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
+                                AND reason LIKE '[원문확인]%' AND ai_val > 0""", (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
+            # 2026-11-09 수정: '[근거확인]'만으로 반영했더니 10건 중 3건(제이티비씨 연결·별도, 상보 연결)이 사용권 상각비를 빠뜨려 오히려 틀어짐
+            #   → 사람이 DART 원문으로 대조해 맞다고 표시한 '[원문확인]' 행만 반영(자동 반영 중단)
         except Exception:  # noqa
             av = None
         if (av and k.get("da") and abs(k["da"] - av[1]) <= av[1] * 0.005 and av[0] < av[1] * 0.99
