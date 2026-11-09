@@ -584,6 +584,8 @@ def main():
         _n = a.type[len("AI판정"):]
         if _n == "점검":                                  # 대상 분포만(DART·AI 0)
             _va.dist(con)
+        elif _n == "재판정":                              # 발췌 개선 후 지난 표본 재판정(보관 주석, DART 0콜)
+            _va.report(con, _va.run(con, cache_only=True, rejudge=True))
         elif _n == "확인":                                # 2026-11-09: DART 원문으로 직접 대조해 맞은 행만 '[원문확인]' 표시(사람 검증)
             ok = [("INVENI", "OFS"), ("대동", "CFS"), ("티맥스소프트", "OFS"), ("금호에이치티", "OFS")]
             for nm_, fs_ in ok:

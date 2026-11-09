@@ -19,13 +19,15 @@ MODEL = os.environ.get("VERIFY_AI_MODEL", "claude-sonnet-4-5")
 PRICE_IN, PRICE_OUT = {"claude-haiku-4-5": (1.0, 5.0), "claude-sonnet-4-5": (3.0, 15.0)}.get(MODEL, (3.0, 15.0))
 BUDGET = float(os.environ.get("VERIFY_AI_BUDGET", "10"))   # 2026-11-09 사용자 "10달러 예산 범위 내에서 한번 해봐"(전 실행 누적)
 
-PROMPT = """당신은 회계 감사인이다. 아래는 한 회사 {period} {fs} 재무제표의 원문 발췌(현금흐름표 본문의 상각 관련 줄, 주석의 상각 관련 표 행)다.
+PROMPT = """당신은 회계 감사인이다. 아래는 한 회사 {period} {fs} 재무제표의 원문 발췌(현금흐름표 본문의 상각 관련 줄, 주석 중 상각이 들어간 표 전체와 사용권·리스·상각 문장)다.
 이 기간 누적(분기·반기는 '누적' 열, 연간은 당기 열) 상각비 합계 = 유형자산 감가상각비 + 사용권자산 상각비 + 무형자산 상각비 + 투자부동산 감가상각비 를 구하라.
 규칙:
 - 주어진 원문 숫자만 쓴다. 추측·외부 지식 금지. 전기(비교기간) 열·3개월 열을 쓰지 않는다.
 - 같은 금액이 여러 표에 중복될 수 있다(예: 사용권자산이 유형자산 변동표의 한 종류로 이미 포함). 이중으로 더하지 않는다.
 - 대손상각비·손상차손·처분손실·사채할인발행차금 상각·이자비용은 제외.
 - 표의 단위(원·천원·백만원)를 확인해 원 단위로 환산한다.
+- 사용권자산(리스) 상각비가 원문 어디에든(표의 '상각' 열, 문장) 있으면 반드시 포함한다. 리스 주석·사용권자산 변동표가 있는데 이 기간 사용권 상각비를 찾지 못하면 da_won을 null, verdict를 '판단불가'로 한다.
+- 무형자산 상각비도 같다: 무형자산 변동표가 있는데 상각액을 찾지 못하면 null.
 - 참고로 사이트 값 A={a}원, 주석 성격별/현금흐름 표 값 B={b}원이다. 둘 중 하나에 맞추려 하지 말고 원문으로 독립적으로 계산하라.
 다음 JSON으로만 답하라:
 {{"da_won": 숫자 또는 null, "components": {{"유형": 숫자|null, "사용권": 숫자|null, "무형": 숫자|null, "투자부동산": 숫자|null}},
@@ -67,12 +69,18 @@ def _render(secs, fs, xml_text):
             if not tb:
                 continue
             rows = tb.get("rows", [])
-            hit = [r for r in rows if r and _KEEP.search(str(r[0])) and not _DROP.search(str(r[0]))]
-            if not hit:
+            # 2026-11-09 개선: 예전엔 첫 칸에 '상각'이 있는 행만 → 머리글에 '상각' 열이 있는 변동표(제이티비씨 '사용권자산 | 기초 | 증가 | 감소 | 상각 | 기말')를 놓쳐 사용권 누락
+            #   → 표 어디든 상각·감가가 있으면 표 전체(최대 30행)
+            if not any(_KEEP.search(str(c)) for r in rows for c in r):
                 continue
-            hdr = [r for r in rows[:4] if not any(re.search(r"\d{2,}", str(c)) for c in r[1:])][:3]
             unit = tb.get("unit") or 1
-            out.append(f"[{s.get('t')}] (표 단위 배수 {unit}원)\n" + "\n".join(" | ".join(str(c) for c in r) for r in hdr + hit[:8]))
+            out.append(f"[{s.get('t')}] (표 단위 배수 {unit}원)\n" + "\n".join(" | ".join(str(c) for c in r) for r in rows[:30]))
+        for b in s.get("blocks", []):              # 문장 속 사용권·리스 상각 금액(상보·제이티비씨처럼 표 밖에 적힌 경우)
+            p = b.get("p") or ""
+            for m in re.finditer(r"[^.。]{0,120}(사용권|리스|상각)[^.。]{0,200}", p):
+                seg = m.group(0)
+                if re.search(r"상각|감가", seg) and re.search(r"\d{1,3}(,\d{3})+", seg):
+                    out.append(f"[{s.get('t')}] 문장: {seg.strip()}")
     txt = "\n\n".join(out)
     return txt[:30000]
 
@@ -90,7 +98,7 @@ def dist(con):
     return c
 
 
-def targets(con, limit=None, min_gap=0.01, since=None, kinds=None):
+def targets(con, limit=None, min_gap=0.01, since=None, kinds=None, redo=False):
     """사이트 상각비가 주석 직접값보다 1% 넘게 큰 행(아직 판정 안 한 것) — 최근 연도·연간/반기 먼저"""
     con.execute("""CREATE TABLE IF NOT EXISTS ai_verify (corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, field TEXT,
                    site_val REAL, alt_val REAL, ai_val REAL, verdict TEXT, evidence TEXT, reason TEXT, comp TEXT, rcept_no TEXT,
@@ -99,8 +107,8 @@ def targets(con, limit=None, min_gap=0.01, since=None, kinds=None):
                           FROM fin_kpi k JOIN da_direct d USING(corp_code, bsns_year, reprt_code, fs_div)
                           WHERE k.da > d.da * 1.01 AND d.da > 0
                             AND NOT EXISTS (SELECT 1 FROM ai_verify v WHERE v.corp_code=k.corp_code AND v.bsns_year=k.bsns_year
-                                            AND v.reprt_code=k.reprt_code AND v.fs_div=k.fs_div AND v.field='da')
-                          ORDER BY k.bsns_year DESC, CASE k.reprt_code WHEN '11011' THEN 0 WHEN '11012' THEN 1 ELSE 2 END, k.corp_code""").fetchall()
+                                            AND v.reprt_code=k.reprt_code AND v.fs_div=k.fs_div AND v.field='da' AND (? = 0 OR v.reason LIKE '[원문확인]%'))
+                          ORDER BY k.bsns_year DESC, CASE k.reprt_code WHEN '11011' THEN 0 WHEN '11012' THEN 1 ELSE 2 END, k.corp_code""", (1 if redo else 0,)).fetchall()
     rows = [r for r in rows if r[6] and ":" not in r[6] and r[4] > r[5] * (1 + min_gap)
             and (not since or r[1] >= since) and (not kinds or r[2] in kinds)]
     return rows[:limit] if limit else rows
@@ -115,6 +123,8 @@ def _grounded(js, ctx):
         return False
     if not comp or abs(sum(comp.values()) - tot) > max(1.0, tot * 0.002):
         return False
+    if re.search(r"사용권", ctx) and not comp.get("사용권") and not re.search(r"사용권.{0,20}포함", ctx):
+        return False                                        # 2026-11-09: 원문에 사용권자산이 있는데 사용권 상각을 빼면 불완전(제이티비씨·상보 오정정 원인)
     nums = {int(x.replace(",", "")) for x in re.findall(r"\d{1,3}(?:,\d{3})+|\d{4,}", ctx)}
     for v in comp.values():
         if not any(abs(v / u - n) <= 1 for u in (1, 1e3, 1e6) for n in nums):
@@ -143,7 +153,7 @@ def _cached_secs(con):
     return out
 
 
-def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011", "11012", "11014"), cache_only=False):
+def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011", "11012", "11014"), cache_only=False, rejudge=False):
     import anthropic
     from concurrent.futures import ThreadPoolExecutor
     from business import fetch_document_xml
@@ -151,6 +161,10 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
     from summarize import _parse_json
     con = con or connect()
     allt = targets(con, None, min_gap, since, kinds)
+    if rejudge:                                            # 2026-11-09: 발췌 개선 후 지난 표본(원문확인 제외)을 같은 행으로 다시 판정 — 원문 대조 결과와 비교용
+        old = {(r[0], r[1], r[2], r[3]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div FROM ai_verify WHERE field='da' AND reason NOT LIKE '[원문확인]%'")}
+        allt = [r for r in targets(con, None, min_gap, since, kinds, redo=True) if (r[0], r[1], r[2], r[3]) in old]
+        limit = None
     cache = _cached_secs(con)
     if cache_only:                                         # 2026-11-09: 오늘 DART 한도 초과 — 주석이 보관된 보고서(주로 최신 반기) 행만으로 표본(DART 0콜)
         allt = [r for r in allt if r[6] in cache]
