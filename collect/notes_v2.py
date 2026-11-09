@@ -271,8 +271,9 @@ def _da_from_table(tbl, period_fix=True):
         if tot_idx is not None and tot_idx < len(r) and _num(r[tot_idx]) is not None:
             return abs(_num(r[tot_idx]) * unit)
         nums = [_num(c) for c in r[1:] if _num(c) is not None]
-        if nums and per and tot_idx is None:
+        if nums and per and tot_idx is None and len(nums) in (len(per), 2 * len(per)):
             # 기간 열마다 '3개월 | 누적' 두 칸이면(숫자 수 = 기간 수×2) 당기 누적 = 둘째 칸, 아니면 당기 = 첫 칸
+            # 숫자 수가 기간 구조와 안 맞으면(칩스앤미디어: 첫 줄 '구분 | 당반기'는 제목이고 실제 열은 자산 종류 + 합계) 기존 규칙 유지
             return abs((nums[1] if len(nums) == 2 * len(per) else nums[0]) * unit)
         if nums:
             return abs(nums[-1] * unit)
@@ -534,9 +535,31 @@ def rebuild_period_fix(con, apply=False, show=40):
     print(f"[기간열수정] 비교 {len(seen)}행 · 결과 같음 {same} · 옛 규칙이 저장값 재현 못함(제외) {nomatch} · 바뀜 {len(chg)}", flush=True)
     names = dict(con.execute("SELECT corp_code, corp_name FROM company").fetchall())
     eok = lambda v: f"{v/1e8:,.1f}" if v else "-"   # noqa: E731
+    # 독립 기준: 주석 직접값(성격별/현금흐름 조정 표 — 이 수정과 무관한 파서) · AI 원문확인 값
+    ref = {(r[0], r[1], r[2], r[3]): (r[4], r[5]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, how FROM da_direct WHERE da > 0")}
+    try:
+        for r in con.execute("""SELECT corp_code, bsns_year, reprt_code, fs_div, ai_val FROM ai_verify WHERE field='da' AND ai_val > 0
+                                AND (reason LIKE '[원문확인]%' OR reason LIKE '[근거확인v2]%')"""):
+            ref[(r[0], r[1], r[2], r[3])] = (r[4], "AI원문")
+    except Exception:  # noqa
+        pass
+    tally, far = {"가까워짐": 0, "멀어짐": 0, "같음": 0, "기준없음": 0}, set()
+    for k, c, n in chg:
+        rv = ref.get(k)
+        if not rv:
+            tally["기준없음"] += 1; continue
+        d0, d1 = abs(c[3] - rv[0]), abs((n["da"] or 0) - rv[0])
+        t = "가까워짐" if d1 < d0 - 1 else "멀어짐" if d1 > d0 + 1 else "같음"
+        tally[t] += 1
+        if t == "멀어짐":
+            far.add(k)                                  # 독립 기준에서 멀어지는 행은 반영하지 않음
+    print(f"[기간열수정] 독립 기준(주석 직접값·AI 원문확인)과 비교: {tally}", flush=True)
     for k, c, n in chg[:show]:
+        rv = ref.get(k)
         print(f"  {names.get(k[0], k[0])} {k[1]} {k[2]} {k[3]}: {eok(c[3])}억(유형 {eok(c[0])}·무형 {eok(c[1])}·사용권 {eok(c[2])})"
-              f" → {eok(n['da'])}억(유형 {eok(n['dep'])}·무형 {eok(n['amort'])}·사용권 {eok(n['rou'])}) {n.get('src') or '변동표'}", flush=True)
+              f" → {eok(n['da'])}억(유형 {eok(n['dep'])}·무형 {eok(n['amort'])}·사용권 {eok(n['rou'])})"
+              + (f" · 기준 {eok(rv[0])}억[{rv[1]}]" if rv else ""), flush=True)
+    chg = [x for x in chg if x[0] not in far] if apply else chg
     if apply and chg:
         for k, c, n in chg:
             con.execute("UPDATE da_notes SET dep=?, amort=?, rou=?, da=? WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
