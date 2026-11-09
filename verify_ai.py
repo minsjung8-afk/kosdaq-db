@@ -17,7 +17,7 @@ from common import connect, now
 
 MODEL = os.environ.get("VERIFY_AI_MODEL", "claude-sonnet-4-5")
 PRICE_IN, PRICE_OUT = {"claude-haiku-4-5": (1.0, 5.0), "claude-sonnet-4-5": (3.0, 15.0)}.get(MODEL, (3.0, 15.0))
-BUDGET = float(os.environ.get("VERIFY_AI_BUDGET", "50"))
+BUDGET = float(os.environ.get("VERIFY_AI_BUDGET", "10"))   # 2026-11-09 사용자 "10달러 예산 범위 내에서 한번 해봐"(전 실행 누적)
 
 PROMPT = """당신은 회계 감사인이다. 아래는 한 회사 {period} {fs} 재무제표의 원문 발췌(현금흐름표 본문의 상각 관련 줄, 주석의 상각 관련 표 행)다.
 이 기간 누적(분기·반기는 '누적' 열, 연간은 당기 열) 상각비 합계 = 유형자산 감가상각비 + 사용권자산 상각비 + 무형자산 상각비 + 투자부동산 감가상각비 를 구하라.
@@ -106,12 +106,44 @@ def targets(con, limit=None, min_gap=0.01, since=None, kinds=None):
     return rows[:limit] if limit else rows
 
 
+def _grounded(js, ctx):
+    """AI가 낸 구성항목이 원문 발췌에 실제 있는 숫자인지(원·천원·백만원 환산) + 합계가 구성항목 합과 맞는지 — 둘 다 맞아야 반영 후보"""
+    try:
+        comp = {k: float(v) for k, v in (js.get("components") or {}).items() if v not in (None, "", 0)}
+        tot = float(js.get("da_won"))
+    except Exception:  # noqa
+        return False
+    if not comp or abs(sum(comp.values()) - tot) > max(1.0, tot * 0.002):
+        return False
+    nums = {int(x.replace(",", "")) for x in re.findall(r"\d{1,3}(?:,\d{3})+|\d{4,}", ctx)}
+    for v in comp.values():
+        if not any(abs(v / u - n) <= 1 for u in (1, 1e3, 1e6) for n in nums):
+            return False
+    return True
+
+
 def _spent(con):
     r = con.execute("SELECT COALESCE(SUM(tin),0), COALESCE(SUM(tout),0) FROM ai_verify").fetchone()
     return r[0] / 1e6 * PRICE_IN + r[1] / 1e6 * PRICE_OUT
 
 
-def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011", "11012", "11014")):
+def _cached_secs(con):
+    """보관된 최신 보고서 주석(notes_latest.notes_j) — rcept_no → secs (DART 호출 없이 판정할 수 있는 행)"""
+    from common import ztext
+    out = {}
+    try:
+        rows = con.execute("SELECT rcept_no, notes_j FROM notes_latest WHERE notes_j IS NOT NULL").fetchall()
+    except Exception:  # noqa
+        rows = []
+    for rn, blob in rows:
+        try:
+            out[rn] = json.loads(ztext(blob) or "[]")
+        except Exception:  # noqa
+            pass
+    return out
+
+
+def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011", "11012", "11014"), cache_only=False):
     import anthropic
     from concurrent.futures import ThreadPoolExecutor
     from business import fetch_document_xml
@@ -119,9 +151,24 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
     from summarize import _parse_json
     con = con or connect()
     allt = targets(con, None, min_gap, since, kinds)
-    # 2026-11-09 표본: 차이 폭 구간(5~20% / 20~100% / 2배+)마다 고르게 — 어느 구간에 실제 사이트 오류가 몰리는지 먼저 보려고
-    band = lambda r: 0 if r[4] <= r[5] * 1.2 else 1 if r[4] <= r[5] * 2 else 2
-    todo = [r for b in (0, 1, 2) for r in [x for x in allt if band(x) == b][:max(1, (limit or 30) // 3)]] if limit else allt
+    cache = _cached_secs(con)
+    if cache_only:                                         # 2026-11-09: 오늘 DART 한도 초과 — 주석이 보관된 보고서(주로 최신 반기) 행만으로 표본(DART 0콜)
+        allt = [r for r in allt if r[6] in cache]
+    # 2026-11-09 사용자: 코스피·코스닥·등급보유사·등급없는 회사 등 골고루 → (시장 3군 × 등급 유무 × 차이 폭 3구간) 18칸에서 같은 수씩
+    mk = {r[0]: ("코스피" if r[1] == "KOSPI" else "코스닥·코넥스" if r[1] in ("KOSDAQ", "KONEX") else "비상장") for r in con.execute("SELECT corp_code, market FROM company")}
+    rated = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM credit_rating")}
+    band = lambda r: "5~20%" if r[4] <= r[5] * 1.2 else "20~100%" if r[4] <= r[5] * 2 else "2배+"
+    stratum = lambda r: (mk.get(r[0], "비상장"), "등급있음" if r[0] in rated else "등급없음", band(r))
+    if limit:
+        import collections
+        cells = collections.defaultdict(list)
+        for r in allt:
+            cells[stratum(r)].append(r)
+        per = max(1, limit // max(1, len(cells)))
+        todo = [r for k in sorted(cells) for r in cells[k][:per]]
+        print("[verify_ai] 표본 칸별 " + " · ".join(f"{'/'.join(k)}:{min(per, len(v))}(전체 {len(v)})" for k, v in sorted(cells.items())), flush=True)
+    else:
+        todo = allt
     _ = todo   # 2026-11-09: 미판정 3,441건 전부는 예산 초과 → 최근(2025~)·연간/반기/3Q·차이 5% 넘는 행만(1~5%는 영업외 상각 가능성 — SGC에너지처럼 원문과 맞는 경우)
     spent0 = _spent(con)
     print(f"[verify_ai] 대상 {len(todo)}건(조건 충족 {len(targets(con, None, min_gap, since, kinds))} · 전체 미판정 {len(targets(con))}) · 누적 ${spent0:.2f} · 예산 ${BUDGET:.0f} · {MODEL}", flush=True)
@@ -137,13 +184,16 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
         cc, y, rc, fs, site, alt, rn, src = r
         if st["stop"]:
             return None
-        with lock:
-            xml = docs.get(rn)
-        if xml is None:
-            xml = fetch_document_xml(rn)
+        if rn in cache:                                    # 보관 주석 사용(DART 0콜) — 현금흐름표 본문 줄은 없음
+            ctx = _render(cache[rn], fs, "")
+        else:
             with lock:
-                docs[rn] = xml
-        ctx = _render(extract_notes_v2(xml), fs, xml)
+                xml = docs.get(rn)
+            if xml is None:
+                xml = fetch_document_xml(rn)
+                with lock:
+                    docs[rn] = xml
+            ctx = _render(extract_notes_v2(xml), fs, xml)
         if len(ctx) < 50:
             return (r, None, "원문 발췌 없음", 0, 0)
         period = f"{y}년 " + {"11011": "연간", "11012": "반기(1~6월 누적)", "11013": "1분기", "11014": "3분기(1~9월 누적)"}.get(rc, rc)
@@ -154,6 +204,8 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
             js = _parse_json(out)
         except Exception:  # noqa
             js = None
+        if js is not None:
+            js["_grounded"] = _grounded(js, ctx)
         return (r, js, out[:300], msg.usage.input_tokens, msg.usage.output_tokens)
 
     res = []
@@ -180,7 +232,7 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
                 aiv = None
             con.execute("INSERT OR REPLACE INTO ai_verify VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (cc, y, rc, fs, "da", site, alt, aiv, (js or {}).get("verdict") or "응답오류", (js or {}).get("evidence") or raw,
-                         (js or {}).get("reason"), json.dumps((js or {}).get("components"), ensure_ascii=False), rn, MODEL, tin, tout, now()))
+                         ("[근거확인] " if (js or {}).get("_grounded") else "[근거불일치] ") + str((js or {}).get("reason") or ""), json.dumps((js or {}).get("components"), ensure_ascii=False), rn, MODEL, tin, tout, now()))
             con.commit()
             res.append((r, aiv, js))
     cost = spent0 + st["tin"] / 1e6 * PRICE_IN + st["tout"] / 1e6 * PRICE_OUT
@@ -192,12 +244,19 @@ def report(con, res):
     """판정 요약 — AI 값이 A(사이트)·B(주석 직접값)·둘 다 아님 중 어디에 맞는지(±0.5%)"""
     import collections
     nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+    mk = {r[0]: ("코스피" if r[1] == "KOSPI" else "코스닥·코넥스" if r[1] in ("KOSDAQ", "KONEX") else "비상장") for r in con.execute("SELECT corp_code, market FROM company")}
+    rated = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM credit_rating")}
     c = collections.Counter()
+    seg = collections.Counter()
     for r, aiv, js in res:
         site, alt = r[4], r[5]
         k = ("AI값없음" if not aiv else "A(사이트) 일치" if abs(aiv - site) <= site * 0.005 else
              "B(주석) 일치" if abs(aiv - alt) <= alt * 0.005 else "둘다아님")
-        c[k] += 1
-        print(f"  [{k}|{'5~20%' if r[4] <= r[5]*1.2 else '20~100%' if r[4] <= r[5]*2 else '2배+'}] {nm.get(r[0], r[0])} {r[1]} {r[2]} {r[3]}: 사이트 {site/1e8:,.1f}억[{r[7]}] · 주석 {alt/1e8:,.1f}억 · AI {aiv and round(aiv/1e8,1)}억"
+        g = "근거확인" if (js or {}).get("_grounded") else "근거불일치"
+        c[(k, g)] += 1
+        seg[(mk.get(r[0], "비상장"), "등급있음" if r[0] in rated else "등급없음", k, g)] += 1
+        print(f"  [{k}|{g}|{'5~20%' if r[4] <= r[5]*1.2 else '20~100%' if r[4] <= r[5]*2 else '2배+'}] {nm.get(r[0], r[0])} {r[1]} {r[2]} {r[3]}: 사이트 {site/1e8:,.1f}억[{r[7]}] · 주석 {alt/1e8:,.1f}억 · AI {aiv and round(aiv/1e8,1)}억"
               f" · {(js or {}).get('source')} · {((js or {}).get('evidence') or '')[:160]!r}", flush=True)
-    print(f"[verify_ai] 판정 분포: {dict(c)}", flush=True)
+    print(f"[verify_ai] 판정 분포(판정, 근거): {dict(c)}", flush=True)
+    for k in sorted(seg):
+        print(f"  [칸] {'/'.join(k)}: {seg[k]}", flush=True)

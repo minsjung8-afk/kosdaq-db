@@ -585,7 +585,9 @@ def main():
         if _n == "점검":                                  # 대상 분포만(DART·AI 0)
             _va.dist(con)
         else:
-            _va.report(con, _va.run(con, limit=int(_n) if _n.isdigit() else 25))
+            _c = _n.endswith("보관")                      # 'AI판정108보관' = 보관 주석 있는 행만(DART 0콜)
+            _n = _n[:-2] if _c else _n
+            _va.report(con, _va.run(con, limit=int(_n) if _n.isdigit() else 25, cache_only=_c))
     elif a.job == "rawdump" and a.type == "요약실패진단":   # 2026-11-06: 신규상장 요약 2곳 'list index out of range' — 원인 확인 후 1회 재시도(Haiku 2콜, 몇 센트)
         import summarize as _sm, anthropic as _an, json as _js
         from common import ztext as _zt
