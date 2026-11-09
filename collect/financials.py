@@ -458,7 +458,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         #   ① 근거 숫자가 원문에 있고 구성항목 합 = 합계([근거확인]) ② AI 값 < 판정 당시 사이트 값(과대 계상만 정정) ③ AI 값 ≥ 주석 직접값×0.99(과소 오독 방지)
         #   ④ 판정 당시 사이트 값이 지금 고른 값과 같음(입력이 바뀌었으면 무효) ⑤ 상식 점검 통과 — 표본 원문 대조 3/3 일치(티맥스소프트·INVENI·대동)
         try:
-            av = con.execute("""SELECT ai_val, site_val, alt_val FROM ai_verify WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND field='da'
+            av = con.execute("""SELECT ai_val, site_val, alt_val, reason FROM ai_verify WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND field='da'
                                 AND (reason LIKE '[원문확인]%' OR reason LIKE '[근거확인v2]%') AND ai_val > 0""", (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
             # 2026-11-09 재시도: 발췌 확대(상각 들어간 표 전체·사용권 문장)+사용권 누락 차단 후 재판정 표본에서 반영 후보 7건 모두 원문과 일치(직접 대조 5건)
             #   → 개선판 판정('[근거확인v2]')은 자동 반영, 반영 뒤 무작위 10건을 원문 대조해 1건이라도 틀리면 v2 반영 전부 되돌림
@@ -466,7 +466,10 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             #   → 사람이 DART 원문으로 대조해 맞다고 표시한 '[원문확인]' 행만 반영(자동 반영 중단)
         except Exception:  # noqa
             av = None
-        if (av and k.get("da") and abs(k["da"] - av[1]) <= av[1] * 0.005 and av[0] < av[1] * 0.99
+        # 2026-11-09 기간열수정 뒤 상보 연결: 사이트 값이 판정 당시(8.7억)와 달라져(6.1억) 원문확인 값 6.8억이 빠짐
+        #   → 사람이 원문 대조한 '[원문확인]'은 현재 값과 무관하게 반영, 자동 판정(v2)은 판정 당시 값과 같을 때만
+        human = bool(av and str(av[3] or "").startswith("[원문확인]"))
+        if (av and k.get("da") and (abs(k["da"] - av[0]) > av[0] * 0.005 if human else (abs(k["da"] - av[1]) <= av[1] * 0.005 and av[0] < av[1] * 0.99))
                 and (not av[2] or av[0] >= av[2] * 0.99) and not _bad("da_ai_verify", av[0])):
             rejects.append((k.get("da_src"), k["da"], f"AI 원문 판정으로 정정({av[0]:.0f})"))
             k["da"], k["da_src"] = av[0], "da_ai_verify"
