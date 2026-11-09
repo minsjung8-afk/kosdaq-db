@@ -345,7 +345,7 @@ fetch('data/companies.json').then(r=>r.json()).then(j=>{
 });
 function renderBand(m){
   const n=v=>v==null?'-':Number(v).toLocaleString('ko-KR'), bm=m.by_market||{};
-  $('#meta').innerHTML=`빌드 ${esc(m.built_at||'-')}<br>평일 05:30 시세 · 06:30·08:30 대용가 · 00:10 미수집분 보충`;
+  $('#meta').innerHTML=`빌드 ${esc(m.built_at||'-')}<br>매일 06:00 시세 · 06:30 대용가 · 00:10 미수집분 보충`;
   const qn={'03':'1분기','06':'반기','09':'3분기'};
   const lq=m.latest_q?`${m.latest_q.slice(0,4)} ${qn[m.latest_q.slice(5)]||''}보고서`:'';
   const cells=[
