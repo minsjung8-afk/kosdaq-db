@@ -150,15 +150,23 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
             r = None
         if d and ppe:
             dv, pv = d[0], ppe[0]
-            rv, iv = (r[0] if r else 0), (ip[0] if ip else 0)
+            rv, iv, av = (r[0] if r else 0), (ip[0] if ip else 0), (a[0] if a else 0)
             # 오차가 가장 작은 조합을 쓰되, 다른 조합도 0.5% 안에 들면 가장 작은 오차가 그 1/3 미만일 때만 인정(SGC 연결: 유형+투자부동산 오차 0.01억 vs 유형+사용권 2.0억)
-            errs = sorted((abs(dv - (pv + incR * rv + incI * iv)) / dv, incR, incI) for incR, incI in ((0, 0), (1, 0), (0, 1), (1, 1))
-                          if not ((incR and not rv) or (incI and not iv)))
-            if errs and errs[0][0] <= 0.005 and (len(errs) < 2 or errs[1][0] > 0.005 or errs[0][0] < errs[1][0] / 3):
-                _, incR, incI = errs[0]
-                chk = ("P" + ("+R" if incR else "") + ("+I" if incI else ""))
+            # 2026-11-10 대동 2026 반기 연결: '감가상각비'(290.9억) = 유형 207.3 + 사용권 52.9 + 투자부동산 0.1 + 무형 31.6 — 무형자산상각비까지 든 합계인데
+            #   맞는 조합이 없어 무형 31.6억을 또 더해 322.7억(원문 291.9억) → 무형(A)이 감가상각비 안에 든 조합도 확인
+            def _tot(incR, incI, incA):   # 그 조합일 때 최종 상각비(감가상각비 + 안 들어 있는 항목)
+                return dv + (0 if incR else rv) + (0 if incI else iv) + (0 if incA else av)
+            errs = sorted((abs(dv - (pv + incR * rv + incI * iv + incA * av)) / dv, incR, incI, incA)
+                          for incR in (0, 1) for incI in (0, 1) for incA in (0, 1)
+                          if not ((incR and not rv) or (incI and not iv) or (incA and not av)))
+            # 1·2위 조합이 둘 다 0.5% 안이라도, 어느 쪽을 택하든 최종 상각비 차이가 0.5% 이내면(대동: 투자부동산 0.1억 포함 여부만 다름) 1위 채택
+            if errs and errs[0][0] <= 0.005 and (len(errs) < 2 or errs[1][0] > 0.005 or errs[0][0] < errs[1][0] / 3
+                                                 or abs(_tot(*errs[0][1:]) - _tot(*errs[1][1:])) <= 0.005 * dv):
+                _, incR, incI, incA = errs[0]
+                chk = ("P" + ("+R" if incR else "") + ("+I" if incI else "") + ("+A" if incA else ""))
                 r = None if incR else r          # 이미 들어 있는 항목은 더하지 않음
                 ip = None if incI else ip
+                a = None if incA else a
         if chk is None:
             # 맞는 조합이 없으면(유형자산 감가상각비 미공시 등) 예전 규칙 유지: 사용권은 현금흐름 조정 태그로 따로 공시된 경우만 더함(이중계상 방지)
             if r and d and "AdjustmentsFor" not in r[1]:
@@ -300,7 +308,7 @@ def run(corp_codes=None, limit=None, con=None, workers=8, debug=False):
     return ok
 
 
-def redo_rou(con, limit=None, workers=8, only_rou=False):
+def redo_rou(con, limit=None, workers=8, only_rou=False, only_amort=False):
     """2026-11-03: 사용권자산·투자부동산 상각비 구성 확인 규칙 적용 전에 저장된 XBRL 결과(합산 태그 아닌 'ok' 행)를 다시 내려받아 재계산.
     같은 보고서의 연결·별도를 함께 갱신하고 KPI 재계산. 바뀐 행은 전·후 금액을 출력(검증용)."""
     from concurrent.futures import ThreadPoolExecutor
@@ -310,6 +318,8 @@ def redo_rou(con, limit=None, workers=8, only_rou=False):
     # 2026-11-03: 재검사는 실행 제한 시간(약 3시간)에 걸려 이어하기로 넘어가므로, 이미 재검사한 보고서(06:05 UTC 이후 갱신)는 건너뜀 — 같은 보고서 DART 재호출 방지
     cond = ("tag LIKE '%DepreciationRightofuseAssets%|감가%' AND tag NOT LIKE '%사용권⊂유형%' AND fetched_at < '2026-11-03 06:05:00'"
             if only_rou else "tag NOT LIKE '%|감가%'")
+    if only_amort:   # 2026-11-10: '감가구성미확인'으로 무형을 따로 더한 행만 다시(감가상각비에 무형 포함 여부 확인 추가 후). 이미 다시 본 보고서는 건너뜀
+        cond = "tag LIKE '%|감가구성미확인%' AND amort > 0 AND fetched_at < '2026-11-09 15:20:00'"
     reps = con.execute(f"""SELECT rcept_no, reprt_code, MIN(corp_code), MIN(bsns_year) FROM da_xbrl
                           WHERE status='ok' AND tag NOT LIKE '%DepreciationAndAmortisation%' AND {cond} AND rcept_no IS NOT NULL
                           GROUP BY rcept_no, reprt_code ORDER BY MIN(corp_code) <> (SELECT corp_code FROM company WHERE stock_code='005090'), MIN(corp_code)   -- SGC에너지(사용자 지적 사례) 먼저""").fetchall()
