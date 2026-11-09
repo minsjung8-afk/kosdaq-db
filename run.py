@@ -584,10 +584,24 @@ def main():
         _n = a.type[len("AI판정"):]
         if _n == "점검":                                  # 대상 분포만(DART·AI 0)
             _va.dist(con)
+        elif _n == "적용":                                # 판정 결과를 KPI에 반영(build_kpi 규칙) — DART·AI 0
+            from financials import build_kpi
+            nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+            keys = con.execute("SELECT DISTINCT corp_code, bsns_year, reprt_code FROM ai_verify WHERE field='da'").fetchall()
+            before = {(r[0], r[1], r[2], r[3]): (r[4], r[5]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, da_src FROM fin_kpi")}
+            for cc, y, rc in keys:
+                build_kpi(con, cc, y, rc)
+            con.commit()
+            n = 0
+            for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, da_src FROM fin_kpi WHERE da_src='da_ai_verify'"):
+                b = before.get((r[0], r[1], r[2], r[3]), (None, None))
+                n += 1
+                print(f"  [AI정정] {nm.get(r[0], r[0])} {r[1]} {r[2]} {r[3]}: {b[0] and round(b[0]/1e8,1)}억[{b[1]}] → {round(r[4]/1e8,1)}억", flush=True)
+            print(f"[AI판정적용] 판정 {len(keys)}건 재계산 · AI 정정 반영 {n}행", flush=True)
         else:
-            _c = _n.endswith("보관")                      # 'AI판정108보관' = 보관 주석 있는 행만(DART 0콜)
+            _c = _n.endswith("보관")                      # 'AI판정108보관' = 보관 주석 있는 행만(DART 0콜) · 'AI판정전체' = 조건 충족 전부(예산 상한까지)
             _n = _n[:-2] if _c else _n
-            _va.report(con, _va.run(con, limit=int(_n) if _n.isdigit() else 25, cache_only=_c))
+            _va.report(con, _va.run(con, limit=None if _n == "전체" else int(_n) if _n.isdigit() else 25, cache_only=_c))
     elif a.job == "rawdump" and a.type == "요약실패진단":   # 2026-11-06: 신규상장 요약 2곳 'list index out of range' — 원인 확인 후 1회 재시도(Haiku 2콜, 몇 센트)
         import summarize as _sm, anthropic as _an, json as _js
         from common import ztext as _zt

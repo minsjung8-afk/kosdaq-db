@@ -184,16 +184,19 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
         cc, y, rc, fs, site, alt, rn, src = r
         if st["stop"]:
             return None
-        if rn in cache:                                    # 보관 주석 사용(DART 0콜) — 현금흐름표 본문 줄은 없음
+        if cache_only and rn in cache:                     # 보관 주석 사용(DART 0콜) — 현금흐름표 본문 줄은 없음(표본에서 'AI값없음' 48%의 주원인)
             ctx = _render(cache[rn], fs, "")
-        else:
+        else:                                              # 원문(DART 1콜) — 현금흐름표 본문 포함. 원문 전체는 보관하지 않고 연결·별도 발췌만 메모리에(수천 건 메모리 폭증 방지)
             with lock:
-                xml = docs.get(rn)
-            if xml is None:
+                got = docs.get(rn)
+            if got is None:
                 xml = fetch_document_xml(rn)
+                secs = extract_notes_v2(xml)
+                got = {f: _render(secs, f, xml) for f in ("CFS", "OFS")}
+                del xml
                 with lock:
-                    docs[rn] = xml
-            ctx = _render(extract_notes_v2(xml), fs, xml)
+                    docs[rn] = got
+            ctx = got[fs]
         if len(ctx) < 50:
             return (r, None, "원문 발췌 없음", 0, 0)
         period = f"{y}년 " + {"11011": "연간", "11012": "반기(1~6월 누적)", "11013": "1분기", "11014": "3분기(1~9월 누적)"}.get(rc, rc)
