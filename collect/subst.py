@@ -145,12 +145,15 @@ def run(start=None, con=None):
     # price_summary(최신 asof 행)에 반영 — 사이트는 price_summary.subst_price를 읽는다
     n = 0
     for r in rows:
-        cur = con.execute("UPDATE price_summary SET subst_price=?, subst_dd=? WHERE stock_code=? AND asof=(SELECT MAX(asof) FROM price_summary WHERE stock_code=?)",
-                          (r["sb_prc"], r["trd_dd"], r["stock_code"], r["stock_code"]))
+        # 2026-11-09: 06:30 subst가 KRX 로그인 충돌(code=CD011 → 400 LOGOUT)로 직접 조회에 실패하면 R2의 묵은 파일(11-03)로
+        #   이미 반영된 최신 대용가(11-06)를 덮어써 08:30까지 사이트 대용가가 뒤로 갔다 → 적용일이 더 오래된 값으로는 덮어쓰지 않음
+        cur = con.execute("""UPDATE price_summary SET subst_price=?, subst_dd=? WHERE stock_code=? AND asof=(SELECT MAX(asof) FROM price_summary WHERE stock_code=?)
+                             AND (subst_dd IS NULL OR subst_dd <= ?)""",
+                          (r["sb_prc"], r["trd_dd"], r["stock_code"], r["stock_code"], r["trd_dd"]))
         n += cur.rowcount
     con.commit()
     log(con, "-", "subst", "ok", f"{used} {len(rows)} rows")
-    print(f"[subst] 대용가 {used} 기준 {len(rows):,}종목 수집 · price_summary 반영 {n:,}", flush=True)
+    print(f"[subst] 대용가 {used} 기준 {len(rows):,}종목 수집 · price_summary 반영 {n:,}" + (" (이미 더 최신 대용가가 있어 덮어쓰지 않은 종목 제외)" if n < len(rows) else ""), flush=True)
     return len(rows)
 
 
