@@ -118,7 +118,11 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
     from notes_v2 import extract_notes_v2
     from summarize import _parse_json
     con = con or connect()
-    todo = targets(con, limit, min_gap, since, kinds)   # 2026-11-09: 미판정 3,441건 전부는 예산 초과 → 최근(2025~)·연간/반기/3Q·차이 5% 넘는 행만(1~5%는 영업외 상각 가능성 — SGC에너지처럼 원문과 맞는 경우)
+    allt = targets(con, None, min_gap, since, kinds)
+    # 2026-11-09 표본: 차이 폭 구간(5~20% / 20~100% / 2배+)마다 고르게 — 어느 구간에 실제 사이트 오류가 몰리는지 먼저 보려고
+    band = lambda r: 0 if r[4] <= r[5] * 1.2 else 1 if r[4] <= r[5] * 2 else 2
+    todo = [r for b in (0, 1, 2) for r in [x for x in allt if band(x) == b][:max(1, (limit or 30) // 3)]] if limit else allt
+    _ = todo   # 2026-11-09: 미판정 3,441건 전부는 예산 초과 → 최근(2025~)·연간/반기/3Q·차이 5% 넘는 행만(1~5%는 영업외 상각 가능성 — SGC에너지처럼 원문과 맞는 경우)
     spent0 = _spent(con)
     print(f"[verify_ai] 대상 {len(todo)}건(조건 충족 {len(targets(con, None, min_gap, since, kinds))} · 전체 미판정 {len(targets(con))}) · 누적 ${spent0:.2f} · 예산 ${BUDGET:.0f} · {MODEL}", flush=True)
     if spent0 >= BUDGET:
@@ -194,6 +198,6 @@ def report(con, res):
         k = ("AI값없음" if not aiv else "A(사이트) 일치" if abs(aiv - site) <= site * 0.005 else
              "B(주석) 일치" if abs(aiv - alt) <= alt * 0.005 else "둘다아님")
         c[k] += 1
-        print(f"  [{k}] {nm.get(r[0], r[0])} {r[1]} {r[2]} {r[3]}: 사이트 {site/1e8:,.1f}억[{r[7]}] · 주석 {alt/1e8:,.1f}억 · AI {aiv and round(aiv/1e8,1)}억"
+        print(f"  [{k}|{'5~20%' if r[4] <= r[5]*1.2 else '20~100%' if r[4] <= r[5]*2 else '2배+'}] {nm.get(r[0], r[0])} {r[1]} {r[2]} {r[3]}: 사이트 {site/1e8:,.1f}억[{r[7]}] · 주석 {alt/1e8:,.1f}억 · AI {aiv and round(aiv/1e8,1)}억"
               f" · {(js or {}).get('source')} · {((js or {}).get('evidence') or '')[:160]!r}", flush=True)
     print(f"[verify_ai] 판정 분포: {dict(c)}", flush=True)
