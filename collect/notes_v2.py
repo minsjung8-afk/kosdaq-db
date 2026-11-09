@@ -233,7 +233,10 @@ def _hdr_match(cell):
     return bool(_ROW_DA.search(c)) and not _ROW_EX.search(c)
 
 
-def _da_from_table(tbl):
+_PER_HDR = re.compile(r"^(당|전)(기|반기|분기)(말|누적)?$|^제\d+(\(당\)|\(전\))?기")
+
+
+def _da_from_table(tbl, period_fix=True):
     """변동표 1개 → 상각비(원 단위 절대값) 또는 None.
     ① 열 방향(흔함): 머리글(1~2행)에 '감가상각비/상각' 열이 있고 행이 자산 종류 → '합계/계' 행의 그 열, 없으면 자산 행 합산
     ② 행 방향: 첫 열이 '감가상각비/상각' 인 행 → '합계/계' 열, 없으면 마지막 숫자 열"""
@@ -259,12 +262,18 @@ def _da_from_table(tbl):
     # ② 행 방향
     hdr = rows[0]
     tot_idx = next((i for i, h in enumerate(hdr) if i > 0 and re.search(r"합계|총계|^계$", h.replace(" ", ""))), None)
+    # 2026-11-09 티맥스소프트 2026 반기 별도: 사용권자산 표 '구분 | 당반기 | 전반기' · '감가상각비 | (122,313) | (944,079)' — 합계 열이 없는데
+    # 마지막 숫자(전반기 9.4억)를 집어 상각비가 18.3억(실제 13.7억)이 됨 → 머리글이 기간(당기·전기…)이면 당기 열을 씀
+    per = [i for i, h in enumerate(hdr) if i > 0 and _PER_HDR.search((h or "").replace(" ", ""))] if period_fix else []
     for r in rows[1:]:
         if not r or not _hdr_match(r[0]):
             continue
         if tot_idx is not None and tot_idx < len(r) and _num(r[tot_idx]) is not None:
             return abs(_num(r[tot_idx]) * unit)
         nums = [_num(c) for c in r[1:] if _num(c) is not None]
+        if nums and per and tot_idx is None:
+            # 기간 열마다 '3개월 | 누적' 두 칸이면(숫자 수 = 기간 수×2) 당기 누적 = 둘째 칸, 아니면 당기 = 첫 칸
+            return abs((nums[1] if len(nums) == 2 * len(per) else nums[0]) * unit)
         if nums:
             return abs(nums[-1] * unit)
     return None
@@ -328,7 +337,7 @@ def _da_from_cf(tbl):
     return tot * unit if hit and tot else None
 
 
-def da_from_secs(secs, fs=None, interim=False):
+def da_from_secs(secs, fs=None, interim=False, period_fix=True):
     """[{t, fs, blocks}] → {dep, amort, rou, da}. 각 절에서 상각비 행이 있는 첫 표(=당기 변동표)만 사용. fs 지정 시 그 구분 절만(구분 없는 절은 포함)."""
     res = {"dep": None, "amort": None, "rou": None, "inv": None}
     for s in secs:
@@ -341,7 +350,7 @@ def da_from_secs(secs, fs=None, interim=False):
             continue
         for b in s["blocks"]:
             if "tbl" in b:
-                v = _da_from_table(b["tbl"])
+                v = _da_from_table(b["tbl"], period_fix)
                 if v:
                     res[key] = v
                     break
@@ -486,6 +495,62 @@ def build_direct(con):
     after = {(r[0], r[1], r[2], r[3]): (r[4], r[5]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, da_src FROM fin_kpi")}
     chg = [(k, before.get(k, (None, None)), v) for k, v in after.items() if k[:3] in keys and before.get(k, (None, None))[0] != v[0]]
     print(f"[da-direct] 주석 직접값 {n}행 · KPI 재계산 {len(keys)}건 · 상각비 바뀜 {len(chg)}행", flush=True)
+    return chg
+
+
+def rebuild_period_fix(con, apply=False, show=40):
+    """2026-11-09 사용자 '규칙 수정 해봐': 보관 주석으로 변동표 상각비를 옛 규칙·새 규칙(기간 열 = 당기) 둘 다 다시 계산. DART 0콜.
+    옛 규칙 결과가 저장값과 정확히 같은 행만(=이 수정 말고 다른 차이가 없는 행) 새 값으로 바꾼다. apply=False면 목록만."""
+    from financials import build_kpi
+    cur = {(r[0], r[1], r[2], r[3]): r[4:] for r in con.execute(
+        "SELECT corp_code, bsns_year, reprt_code, fs_div, dep, amort, rou, da, rcept_no, src FROM da_notes")}
+    srcs = ["SELECT corp_code, rcept_no, report_nm, notes_j FROM notes_latest WHERE notes_j IS NOT NULL"]
+    if con.execute("SELECT name FROM sqlite_master WHERE name='notes_annual'").fetchone():
+        srcs.append("SELECT corp_code, rcept_no, report_nm, secs_j FROM notes_annual WHERE secs_j IS NOT NULL")
+    chg, seen, same, nomatch = [], set(), 0, 0
+    for sql in srcs:
+        for cc, rn, rnm, blob in con.execute(sql).fetchall():
+            try:
+                secs = json.loads(ztext(blob) or "[]")
+            except Exception:  # noqa
+                continue
+            y, rc = _report_key(rnm)
+            if not (y and rc):
+                continue
+            tagged = any(s.get("fs") for s in secs)
+            for fs in ("CFS", "OFS"):
+                k = (cc, y, rc, fs)
+                if k in seen or k not in cur or cur[k][4] != rn:
+                    continue
+                seen.add(k)
+                kw = dict(fs=fs) if tagged else {}
+                o = da_from_secs(secs, interim=rc != "11011", period_fix=False, **kw)
+                n = da_from_secs(secs, interim=rc != "11011", period_fix=True, **kw)
+                if o["da"] == n["da"]:
+                    same += 1; continue
+                if not cur[k][3] or abs((o["da"] or 0) - cur[k][3]) > 1:
+                    nomatch += 1; continue
+                chg.append((k, cur[k], n))
+    print(f"[기간열수정] 비교 {len(seen)}행 · 결과 같음 {same} · 옛 규칙이 저장값 재현 못함(제외) {nomatch} · 바뀜 {len(chg)}", flush=True)
+    names = dict(con.execute("SELECT corp_code, corp_name FROM company").fetchall())
+    eok = lambda v: f"{v/1e8:,.1f}" if v else "-"   # noqa: E731
+    for k, c, n in chg[:show]:
+        print(f"  {names.get(k[0], k[0])} {k[1]} {k[2]} {k[3]}: {eok(c[3])}억(유형 {eok(c[0])}·무형 {eok(c[1])}·사용권 {eok(c[2])})"
+              f" → {eok(n['da'])}억(유형 {eok(n['dep'])}·무형 {eok(n['amort'])}·사용권 {eok(n['rou'])}) {n.get('src') or '변동표'}", flush=True)
+    if apply and chg:
+        for k, c, n in chg:
+            con.execute("UPDATE da_notes SET dep=?, amort=?, rou=?, da=? WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?",
+                        (n["dep"], n["amort"], n["rou"], n["da"], *k))
+        con.commit()
+        before = {(r[0], r[1], r[2], r[3]): (r[4], r[5]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, da, da_src FROM fin_kpi")}
+        for key in sorted({k[:3] for k, _, _ in chg}):
+            build_kpi(con, *key)
+        con.commit()
+        site = [(k, before.get(k), v) for k, v in ((r[:4], r[4:]) for r in con.execute(
+            "SELECT corp_code, bsns_year, reprt_code, fs_div, da, da_src FROM fin_kpi")) if before.get(k) and before[k][0] != v[0]]
+        print(f"[기간열수정] 반영 da_notes {len(chg)}행 · 사이트 상각비 바뀜 {len(site)}행", flush=True)
+        for k, b, a in site[:show]:
+            print(f"  [사이트] {names.get(k[0], k[0])} {k[1]} {k[2]} {k[3]}: {eok(b[0])}억[{b[1]}] → {eok(a[0])}억[{a[1]}]", flush=True)
     return chg
 
 
