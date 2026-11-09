@@ -584,6 +584,13 @@ def main():
         _n = a.type[len("AI판정"):]
         if _n == "점검":                                  # 대상 분포만(DART·AI 0)
             _va.dist(con)
+        elif _n == "확인":                                # 2026-11-09: DART 원문으로 직접 대조해 맞은 행만 '[원문확인]' 표시(사람 검증)
+            ok = [("INVENI", "OFS"), ("대동", "CFS"), ("티맥스소프트", "OFS"), ("금호에이치티", "OFS")]
+            for nm_, fs_ in ok:
+                n_ = con.execute("""UPDATE ai_verify SET reason='[원문확인] ' || reason WHERE field='da' AND bsns_year='2026' AND reprt_code='11012' AND fs_div=?
+                                    AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?) AND reason NOT LIKE '[원문확인]%'""", (fs_, nm_)).rowcount
+                print(f"  [원문확인] {nm_} {fs_}: {n_}행", flush=True)
+            con.commit()
         elif _n == "적용":                                # 판정 결과를 KPI에 반영(build_kpi 규칙) — DART·AI 0
             from financials import build_kpi
             nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
