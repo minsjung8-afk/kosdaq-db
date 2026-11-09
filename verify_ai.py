@@ -153,7 +153,7 @@ def _cached_secs(con):
     return out
 
 
-def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011", "11012", "11014"), cache_only=False, rejudge=False):
+def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011", "11012", "11014"), cache_only=False, rejudge=False, max_ratio=None):
     import anthropic
     from concurrent.futures import ThreadPoolExecutor
     from business import fetch_document_xml
@@ -161,6 +161,8 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
     from summarize import _parse_json
     con = con or connect()
     allt = targets(con, None, min_gap, since, kinds)
+    if max_ratio:                                          # 2026-11-09: '2배+' 구간은 주석 직접값 쪽 오독이 대부분(표본) → 예산 안에서는 제외
+        allt = [r for r in allt if r[4] <= r[5] * max_ratio]
     if rejudge:                                            # 2026-11-09: 발췌 개선 후 지난 표본(원문확인 제외)을 같은 행으로 다시 판정 — 원문 대조 결과와 비교용
         old = {(r[0], r[1], r[2], r[3]) for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div FROM ai_verify WHERE field='da' AND reason NOT LIKE '[원문확인]%'")}
         allt = [r for r in targets(con, None, min_gap, since, kinds, redo=True) if (r[0], r[1], r[2], r[3]) in old]
@@ -249,7 +251,7 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
                 aiv = None
             con.execute("INSERT OR REPLACE INTO ai_verify VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (cc, y, rc, fs, "da", site, alt, aiv, (js or {}).get("verdict") or "응답오류", (js or {}).get("evidence") or raw,
-                         ("[근거확인] " if (js or {}).get("_grounded") else "[근거불일치] ") + str((js or {}).get("reason") or ""), json.dumps((js or {}).get("components"), ensure_ascii=False), rn, MODEL, tin, tout, now()))
+                         ("[근거확인v2] " if (js or {}).get("_grounded") else "[근거불일치] ") + str((js or {}).get("reason") or ""), json.dumps((js or {}).get("components"), ensure_ascii=False), rn, MODEL, tin, tout, now()))
             con.commit()
             res.append((r, aiv, js))
     cost = spent0 + st["tin"] / 1e6 * PRICE_IN + st["tout"] / 1e6 * PRICE_OUT

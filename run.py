@@ -587,7 +587,8 @@ def main():
         elif _n == "재판정":                              # 발췌 개선 후 지난 표본 재판정(보관 주석, DART 0콜)
             _va.report(con, _va.run(con, cache_only=True, rejudge=True))
         elif _n == "확인":                                # 2026-11-09: DART 원문으로 직접 대조해 맞은 행만 '[원문확인]' 표시(사람 검증)
-            ok = [("INVENI", "OFS"), ("대동", "CFS"), ("티맥스소프트", "OFS"), ("금호에이치티", "OFS")]
+            ok = [("INVENI", "OFS"), ("대동", "CFS"), ("티맥스소프트", "OFS"), ("금호에이치티", "OFS"),
+                  ("INVENI", "CFS"), ("에스케이실트론", "OFS"), ("상보", "CFS"), ("제이티비씨", "OFS"), ("KD", "OFS"), ("대동", "OFS")]   # 재판정 후 원문 대조(11-09)
             for nm_, fs_ in ok:
                 n_ = con.execute("""UPDATE ai_verify SET reason='[원문확인] ' || reason WHERE field='da' AND bsns_year='2026' AND reprt_code='11012' AND fs_div=?
                                     AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?) AND reason NOT LIKE '[원문확인]%'""", (fs_, nm_)).rowcount
@@ -610,7 +611,8 @@ def main():
         else:
             _c = _n.endswith("보관")                      # 'AI판정108보관' = 보관 주석 있는 행만(DART 0콜) · 'AI판정전체' = 조건 충족 전부(예산 상한까지)
             _n = _n[:-2] if _c else _n
-            _va.report(con, _va.run(con, limit=None if _n == "전체" else int(_n) if _n.isdigit() else 25, cache_only=_c))
+            _va.report(con, _va.run(con, limit=None if _n == "전체" else int(_n) if _n.isdigit() else 25, cache_only=_c,
+                                    max_ratio=2.0 if _n == "전체" else None, kinds=("11011", "11012") if _n == "전체" else ("11011", "11012", "11014")))
     elif a.job == "rawdump" and a.type == "요약실패진단":   # 2026-11-06: 신규상장 요약 2곳 'list index out of range' — 원인 확인 후 1회 재시도(Haiku 2콜, 몇 센트)
         import summarize as _sm, anthropic as _an, json as _js
         from common import ztext as _zt
