@@ -454,6 +454,18 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             if k.get("da"):
                 rejects.append((k.get("da_src"), k["da"], f"주석 직접값보다 작음({dd[1]} {dd[0]:.0f})"))
             k["da"], k["da_src"] = dd[0], f"da_direct:{dd[1]}"
+        # 2026-11-09 사용자 승인('2번까지 진행해'): AI 원문 판정(verify_ai, Sonnet) 정정 — 아래를 모두 만족할 때만
+        #   ① 근거 숫자가 원문에 있고 구성항목 합 = 합계([근거확인]) ② AI 값 < 판정 당시 사이트 값(과대 계상만 정정) ③ AI 값 ≥ 주석 직접값×0.99(과소 오독 방지)
+        #   ④ 판정 당시 사이트 값이 지금 고른 값과 같음(입력이 바뀌었으면 무효) ⑤ 상식 점검 통과 — 표본 원문 대조 3/3 일치(티맥스소프트·INVENI·대동)
+        try:
+            av = con.execute("""SELECT ai_val, site_val, alt_val FROM ai_verify WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND field='da'
+                                AND reason LIKE '[근거확인]%' AND ai_val > 0""", (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
+        except Exception:  # noqa
+            av = None
+        if (av and k.get("da") and abs(k["da"] - av[1]) <= av[1] * 0.005 and av[0] < av[1] * 0.99
+                and (not av[2] or av[0] >= av[2] * 0.99) and not _bad("da_ai_verify", av[0])):
+            rejects.append((k.get("da_src"), k["da"], f"AI 원문 판정으로 정정({av[0]:.0f})"))
+            k["da"], k["da_src"] = av[0], "da_ai_verify"
         if k.get("da_src") == "da_notes":
             try:
                 ns = con.execute("SELECT src FROM da_notes WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, bsns_year, reprt_code, fs_div)).fetchone()
