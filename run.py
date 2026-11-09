@@ -766,6 +766,35 @@ def main():
         _dx.redo_rou(con, limit=int(_n.strip("R")) if _n.strip("R").isdigit() else None, only_rou=_n.startswith("R"))   # '상각비재계산R' = 사용권 더한 행만 재검사
         for r in con.execute("SELECT bsns_year, reprt_code, fs_div, da, ebitda, da_src FROM fin_kpi WHERE corp_code=(SELECT corp_code FROM company WHERE stock_code='005090') ORDER BY bsns_year, reprt_code, fs_div"):
             print(f"  [SGC에너지] {r[0]} {r[1]} {r[2]}: 상각비 {r[3] and round(r[3]/1e8,1)}억 · EBITDA {r[4] and round(r[4]/1e8,1)}억 · {r[5]}", flush=True)
+    elif a.job == "rawdump" and a.type.startswith("기간열수정"):   # 2026-11-09 사용자 '규칙 수정 해봐': 변동표 기간 열(당기/전기) 오독 — '기간열수정' 목록만, '기간열수정적용' 반영. DART 0콜
+        import notes_v2 as _nv
+        _nv.rebuild_period_fix(con, apply=a.type.endswith("적용"), show=60)
+    elif a.job == "rawdump" and a.type == "XBRL상각태그":   # 2026-11-09: XBRL 경로 과다(INVENI 별도 21.0억 vs 성격별 13.5억 — 차이 7.5억 ≈ 사채할인발행차금 상각 7.5억, 대동 연결 322.7억 vs 291.9억) 원문 태그 확인(DART 2콜)
+        import re as _re, xml.etree.ElementTree as _ET, da_xbrl as _dx
+        for nm, rc, rp, fs in (("INVENI", "20260811000314", "11012", "OFS"), ("대동", "20260814001489", "11012", "CFS")):
+            xml = _dx._fetch_zip(rc, rp)
+            if not xml:
+                print(f"[XBRL상각태그] {nm} {rc}: XBRL 없음", flush=True); continue
+            root = _ET.fromstring(xml); ctx = _dx._contexts(root); rows = []
+            for e in root.iter():
+                if "}" not in e.tag:
+                    continue
+                loc = e.tag.split("}")[-1]
+                if not _re.search(r"Depreciat|Amorti", loc, _re.I):
+                    continue
+                c = ctx.get(e.get("contextRef")) or (None, None, None)
+                if not c[0] or c[0] == c[1]:
+                    continue
+                try:
+                    v = float((e.text or "").strip())
+                except ValueError:
+                    continue
+                rows.append((c[2] or "-", loc, c[0], c[1], round(v / 1e8, 2), "제외" if _dx.EXCL.search(loc.replace("Rightofuse", "")) else ""))
+            pend = max(r[3] for r in rows) if rows else None
+            print(f"[XBRL상각태그] {nm} {fs} {rc} 기간말 {pend} · 사실 {len(rows)}개(기간말 일치만)", flush=True)
+            for r in sorted(set(x for x in rows if x[3] == pend)):
+                print(f"    {r[0]} {r[1]} {r[2]}~{r[3]} {r[4]}억 {r[5]}", flush=True)
+            print(f"    → 현재 로직 {fs}: {_dx.parse_da(xml, fs)}", flush=True)
     elif a.job == "rawdump" and a.type == "상각비진단":   # 2026-11-03 사용자: SGC에너지 2026 반기 별도 EBITDA에 사용권자산상각비(22.2억) 누락 — 원인·범위 진단(DART 2콜)
         import re as _re, xml.etree.ElementTree as _ET, collections as _co, da_xbrl as _dx
         # ① SGC에너지 2026 반기 XBRL: 상각 관련 사실을 태그·연결/별도·기간·금액 전부
