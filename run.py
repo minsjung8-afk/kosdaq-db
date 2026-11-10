@@ -598,10 +598,13 @@ def main():
                 n_ = con.execute("""UPDATE ai_verify SET ai_val=?, reason='[원문확인] ' || ? WHERE field='da' AND bsns_year='2026' AND reprt_code='11012' AND fs_div=?
                                     AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?)""", (v_, why, fs_, nm_)).rowcount
                 print(f"  [원문값확정] {nm_} {fs_}: {v_/1e8:.2f}억 · {n_}행", flush=True)
-            for nm_, fs_ in ok:
-                n_ = con.execute("""UPDATE ai_verify SET reason='[원문확인] ' || reason WHERE field='da' AND bsns_year='2026' AND reprt_code='11012' AND fs_div=?
-                                    AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?) AND reason NOT LIKE '[원문확인]%'""", (fs_, nm_)).rowcount
-                print(f"  [원문확인] {nm_} {fs_}: {n_}행", flush=True)
+            # 11-10 $20 단계 감사(무작위 10건 전부 일치) — 2025 사업보고서
+            ok += [(x, "OFS", "2025", "11011") for x in ("TS인베스트먼트", "씨앤투스", "케이엔에스", "티엘비", "세미파이브", "현우산업", "한국정밀기계", "뉴트리", "이스트에이드")]
+            for it in ok:
+                nm_, fs_, y_, r_ = (it + ("2026", "11012"))[:4] if len(it) == 2 else it
+                n_ = con.execute("""UPDATE ai_verify SET reason='[원문확인] ' || reason WHERE field='da' AND bsns_year=? AND reprt_code=? AND fs_div=?
+                                    AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?) AND reason NOT LIKE '[원문확인]%'""", (y_, r_, fs_, nm_)).rowcount
+                print(f"  [원문확인] {nm_} {y_} {r_} {fs_}: {n_}행", flush=True)
             con.commit()
         elif _n == "적용":                                # 판정 결과를 KPI에 반영(build_kpi 규칙) — DART·AI 0
             from financials import build_kpi
