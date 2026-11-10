@@ -17,7 +17,7 @@ from common import connect, now
 
 MODEL = os.environ.get("VERIFY_AI_MODEL", "claude-sonnet-4-5")
 PRICE_IN, PRICE_OUT = {"claude-haiku-4-5": (1.0, 5.0), "claude-sonnet-4-5": (3.0, 15.0)}.get(MODEL, (3.0, 15.0))
-BUDGET = float(os.environ.get("VERIFY_AI_BUDGET", "10"))   # 2026-11-09 사용자 "10달러 예산 범위 내에서 한번 해봐"(전 실행 누적)
+BUDGET = float(os.environ.get("VERIFY_AI_BUDGET", "20"))   # 2026-11-09 사용자 "10달러 예산 범위 내에서 한번 해봐"(전 실행 누적) → $10 감사 통과 후 $20 단계(11-09 승인: 20→30→50 순차, 11-10 "유지 + 이중계상 차단")
 
 PROMPT = """당신은 회계 감사인이다. 아래는 한 회사 {period} {fs} 재무제표의 원문 발췌(현금흐름표 본문의 상각 관련 줄, 주석 중 상각이 들어간 표 전체와 사용권·리스·상각 문장)다.
 이 기간 누적(분기·반기는 '누적' 열, 연간은 당기 열) 상각비 합계 = 유형자산 감가상각비 + 사용권자산 상각비 + 무형자산 상각비 + 투자부동산 감가상각비 를 구하라.
@@ -123,18 +123,46 @@ def _grounded(js, ctx):
         return False
     if not comp or abs(sum(comp.values()) - tot) > max(1.0, tot * 0.002):
         return False
-    if re.search(r"사용권", ctx) and not comp.get("사용권") and not re.search(r"사용권.{0,20}포함", ctx):
+    if (re.search(r"사용권", ctx) and not comp.get("사용권") and not re.search(r"사용권.{0,20}포함", ctx)
+            and not (comp.get("유형") and _rou_in_ppe(ctx, comp["유형"]))):
         return False                                        # 2026-11-09: 원문에 사용권자산이 있는데 사용권 상각을 빼면 불완전(제이티비씨·상보 오정정 원인)
+        #   단 유형자산 변동표 안에 '사용권자산' 행이 있어 유형 합계에 이미 든 경우(오이솔루션)는 빼는 게 맞음
     nums = {int(x.replace(",", "")) for x in re.findall(r"\d{1,3}(?:,\d{3})+|\d{4,}", ctx)}
     for v in comp.values():
         if not any(abs(v / u - n) <= 1 for u in (1, 1e3, 1e6) for n in nums):
             return False
+    # 2026-11-10 감사(오이솔루션 반기 별도 14.0억, 원문 13.7억): 유형자산 변동표 합계 감가상각비(1,334,922)에 '사용권자산' 행(23,393)이 이미 들어 있는데
+    #   사용권을 따로 또 더함 → 같은 변동표(기초·기말 행이 있는 표) 안에 유형 합계와 '사용권…' 행의 그 금액이 함께 있으면 이중계상으로 보고 반영 안 함
+    if comp.get("유형") and comp.get("사용권") and _rou_in_ppe(ctx, comp["유형"], comp["사용권"]):
+        return False
     return True
 
 
+def _has_num(txt, v):
+    ns = {int(x.replace(",", "")) for x in re.findall(r"\d{1,3}(?:,\d{3})+|\d{4,}", txt)}
+    return any(abs(v / u - n) <= 1 for u in (1, 1e3, 1e6) for n in ns)
+
+
+def _rou_in_ppe(ctx, ppe, rou=None):
+    """유형자산 변동표(기초·기말이 있는 표) 안에 유형 합계 금액과 '사용권…' 행이 함께 있으면 사용권 상각은 유형 합계에 이미 포함.
+    rou를 주면 그 '사용권' 행에 그 금액이 있을 때만 참"""
+    for blk in ctx.split("\n\n"):
+        if not re.search(r"기초|기말", blk) or not _has_num(blk, ppe):
+            continue
+        for ln in blk.splitlines():
+            if re.match(r"\s*사용권", ln) and (rou is None or _has_num(ln, rou)):
+                return True
+    return False
+
+
 def _spent(con):
-    r = con.execute("SELECT COALESCE(SUM(tin),0), COALESCE(SUM(tout),0) FROM ai_verify").fetchone()
-    return r[0] / 1e6 * PRICE_IN + r[1] / 1e6 * PRICE_OUT
+    """실제 누적 지출. 2026-11-10: 재판정이 ai_verify 행을 덮어써 예전 호출 토큰이 사라져 누적이 과소(표시 $10.16, 실제 약 $10.61)
+    → 실행별 지출 장부(ai_verify_spend)를 따로 두고, 장부가 없던 11-10 이전 지출은 실측 합계 $10.61로 한 번 기록"""
+    con.execute("CREATE TABLE IF NOT EXISTS ai_verify_spend (at TEXT, usd REAL, note TEXT)")
+    if not con.execute("SELECT 1 FROM ai_verify_spend").fetchone():
+        con.execute("INSERT INTO ai_verify_spend VALUES (?, ?, ?)", (now(), 10.61, "11-09 표본 $0.49 + 재표본 $1.06 + 11-10 전체 $9.06(로그 실측)"))
+        con.commit()
+    return con.execute("SELECT COALESCE(SUM(usd),0) FROM ai_verify_spend").fetchone()[0]
 
 
 def _cached_secs(con):
@@ -255,6 +283,8 @@ def run(con=None, limit=25, workers=4, min_gap=0.05, since="2025", kinds=("11011
             con.commit()
             res.append((r, aiv, js))
     cost = spent0 + st["tin"] / 1e6 * PRICE_IN + st["tout"] / 1e6 * PRICE_OUT
+    con.execute("INSERT INTO ai_verify_spend VALUES (?, ?, ?)", (now(), cost - spent0, f"{len(res)}건"))
+    con.commit()
     print(f"[verify_ai] 완료 {len(res)}건 · 이번 입력 {st['tin']:,} / 출력 {st['tout']:,} 토큰 · 이번 ${cost - spent0:.2f} · 누적 ${cost:.2f}", flush=True)
     return res
 

@@ -588,7 +588,16 @@ def main():
             _va.report(con, _va.run(con, cache_only=True, rejudge=True))
         elif _n == "확인":                                # 2026-11-09: DART 원문으로 직접 대조해 맞은 행만 '[원문확인]' 표시(사람 검증)
             ok = [("INVENI", "OFS"), ("대동", "CFS"), ("티맥스소프트", "OFS"), ("금호에이치티", "OFS"),
-                  ("INVENI", "CFS"), ("에스케이실트론", "OFS"), ("상보", "CFS"), ("제이티비씨", "OFS"), ("KD", "OFS"), ("대동", "OFS")]   # 재판정 후 원문 대조(11-09)
+                  ("INVENI", "CFS"), ("에스케이실트론", "OFS"), ("상보", "CFS"), ("제이티비씨", "OFS"), ("KD", "OFS"), ("대동", "OFS"),   # 재판정 후 원문 대조(11-09)
+                  # 11-10 $10 단계 감사(무작위 10건 중 9건 일치) + 큰 금액 확인 4건 — DART 뷰어로 현금흐름 조정·성격별 표 직접 대조
+                  ("동양고속", "CFS"), ("파인메딕스", "OFS"), ("세운메디칼", "CFS"), ("이노뎁", "OFS"), ("티이엠씨씨엔에스", "OFS"), ("레이저쎌", "OFS"),
+                  ("SNT에너지", "OFS"), ("SM Life Design", "OFS"), ("자이언트스텝", "OFS"), ("애경케미칼", "OFS"), ("동아에스티", "OFS"), ("이마트", "OFS")]
+            # 11-10 감사에서 틀린 1건: 오이솔루션 반기 별도 AI 14.0억 = 유형 합계(사용권 23,393 포함) + 사용권 이중계상 → 원문값으로 확정
+            #   현금흐름 조정: 감가상각비 1,334,922 + 무형자산상각비 39,278 (천원) = 13.742억 — 사용자 결정 '유지 + 이중계상 차단'
+            for nm_, fs_, v_, why in (("오이솔루션", "OFS", 1374200000.0, "현금흐름 조정 감가상각비 1,334,922(유형 변동표 합계, 사용권 23,393 포함) + 무형자산상각비 39,278 천원"),):
+                n_ = con.execute("""UPDATE ai_verify SET ai_val=?, reason='[원문확인] ' || ? WHERE field='da' AND bsns_year='2026' AND reprt_code='11012' AND fs_div=?
+                                    AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?)""", (v_, why, fs_, nm_)).rowcount
+                print(f"  [원문값확정] {nm_} {fs_}: {v_/1e8:.2f}억 · {n_}행", flush=True)
             for nm_, fs_ in ok:
                 n_ = con.execute("""UPDATE ai_verify SET reason='[원문확인] ' || reason WHERE field='da' AND bsns_year='2026' AND reprt_code='11012' AND fs_div=?
                                     AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?) AND reason NOT LIKE '[원문확인]%'""", (fs_, nm_)).rowcount
