@@ -790,6 +790,23 @@ def main():
     elif a.job == "rawdump" and a.type.startswith("기간열수정"):   # 2026-11-09 사용자 '규칙 수정 해봐': 변동표 기간 열(당기/전기) 오독 — '기간열수정' 목록만, '기간열수정적용' 반영. DART 0콜
         import notes_v2 as _nv
         _nv.rebuild_period_fix(con, apply=a.type.endswith("적용"), show=60)
+    elif a.job == "rawdump" and a.type == "통화점검":   # 2026-11-10: 네오이뮨텍 재무가 USD인데 원화로 저장·표시 — 원화 아닌 공시 회사 범위 확인(DART 회사당 1콜)
+        from common import dart_get as _dg
+        cs = con.execute("""SELECT c.corp_code, c.corp_name, c.stock_code, c.adres, MAX(k.bsns_year) FROM company c JOIN fin_kpi k ON k.corp_code=c.corp_code
+                            WHERE k.reprt_code='11011' AND (c.stock_code LIKE '9%' OR c.adres NOT GLOB '*[가-힣]*') GROUP BY c.corp_code""").fetchall()
+        print(f"[통화점검] 대상 {len(cs)}사(외국 상장코드 9xxxxx·해외 주소)", flush=True)
+        bad = []
+        for cc, nm, sc, adr, yy in cs:
+            cur = None
+            for fs in ("CFS", "OFS"):
+                rows = _dg("fnlttSinglAcntAll", corp_code=cc, bsns_year=str(yy), reprt_code="11011", fs_div=fs).get("list", [])
+                if rows:
+                    cur = sorted({(r.get("currency") or "?") for r in rows})
+                    break
+            print(f"  {nm}({sc}) {yy}: 통화 {cur} · 주소 {str(adr)[:30]}", flush=True)
+            if cur and cur != ["KRW"]:
+                bad.append((nm, sc, cur))
+        print(f"[통화점검] 원화 아닌 공시 {len(bad)}사: {bad}", flush=True)
     elif a.job == "rawdump" and a.type == "XBRL상각태그":   # 2026-11-10 대상 교체(2배 과다 원인 확인) · 2026-11-09: XBRL 경로 과다(INVENI 별도 21.0억 vs 성격별 13.5억 — 차이 7.5억 ≈ 사채할인발행차금 상각 7.5억, 대동 연결 322.7억 vs 291.9억) 원문 태그 확인(DART 2콜)
         import re as _re, xml.etree.ElementTree as _ET, da_xbrl as _dx
         for nm, rc, rp, fs in (("디아이", "20260312001121", "11011", "CFS"), ("디아이", "20260312001121", "11011", "OFS"),   # 11-10 오후: 연간 XBRL 과다
