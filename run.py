@@ -784,7 +784,7 @@ def main():
         _n = a.type[len("상각비재계산"):]
         _m = _n.strip("RAX")
         _dx.redo_rou(con, limit=int(_m) if _m.isdigit() else None, only_rou=_n.startswith("R"),
-                     only_amort=_n.startswith("A"), only_infl=_n.startswith("X"))   # 'X' = 차원없는 합계 부풀림 의심 행(2026-11-10)   # '상각비재계산R' = 사용권 더한 행만, 'A' = 무형을 따로 더한 '감가구성미확인' 행만(2026-11-10 대동) 재검사
+                     only_amort=_n.startswith("A"), only_infl=("redo" if _n.startswith("XR") else _n.startswith("X")))   # 'X' = 차원없는 합계 부풀림 의심 행(2026-11-10)   # '상각비재계산R' = 사용권 더한 행만, 'A' = 무형을 따로 더한 '감가구성미확인' 행만(2026-11-10 대동) 재검사
         for r in con.execute("SELECT bsns_year, reprt_code, fs_div, da, ebitda, da_src FROM fin_kpi WHERE corp_code=(SELECT corp_code FROM company WHERE stock_code='005090') ORDER BY bsns_year, reprt_code, fs_div"):
             print(f"  [SGC에너지] {r[0]} {r[1]} {r[2]}: 상각비 {r[3] and round(r[3]/1e8,1)}억 · EBITDA {r[4] and round(r[4]/1e8,1)}억 · {r[5]}", flush=True)
     elif a.job == "rawdump" and a.type.startswith("기간열수정"):   # 2026-11-09 사용자 '규칙 수정 해봐': 변동표 기간 열(당기/전기) 오독 — '기간열수정' 목록만, '기간열수정적용' 반영. DART 0콜
