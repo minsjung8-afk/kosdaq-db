@@ -790,9 +790,10 @@ def main():
     elif a.job == "rawdump" and a.type.startswith("기간열수정"):   # 2026-11-09 사용자 '규칙 수정 해봐': 변동표 기간 열(당기/전기) 오독 — '기간열수정' 목록만, '기간열수정적용' 반영. DART 0콜
         import notes_v2 as _nv
         _nv.rebuild_period_fix(con, apply=a.type.endswith("적용"), show=60)
-    elif a.job == "rawdump" and a.type == "XBRL상각태그":   # 2026-11-09: XBRL 경로 과다(INVENI 별도 21.0억 vs 성격별 13.5억 — 차이 7.5억 ≈ 사채할인발행차금 상각 7.5억, 대동 연결 322.7억 vs 291.9억) 원문 태그 확인(DART 2콜)
+    elif a.job == "rawdump" and a.type == "XBRL상각태그":   # 2026-11-10 대상 교체(2배 과다 원인 확인) · 2026-11-09: XBRL 경로 과다(INVENI 별도 21.0억 vs 성격별 13.5억 — 차이 7.5억 ≈ 사채할인발행차금 상각 7.5억, 대동 연결 322.7억 vs 291.9억) 원문 태그 확인(DART 2콜)
         import re as _re, xml.etree.ElementTree as _ET, da_xbrl as _dx
-        for nm, rc, rp, fs in (("INVENI", "20260811000314", "11012", "OFS"), ("대동", "20260814001489", "11012", "CFS")):
+        for nm, rc, rp, fs in (("애경케미칼", "20260814002591", "11012", "OFS"), ("동아에스티", "20260820000424", "11012", "OFS"),   # 11-10: XBRL ≈ 원문 2배
+                               ("현대차", "20250814003906", "11012", "CFS"), ("이마트", "20260814002794", "11012", "OFS")):
             xml = _dx._fetch_zip(rc, rp)
             if not xml:
                 print(f"[XBRL상각태그] {nm} {rc}: XBRL 없음", flush=True); continue
