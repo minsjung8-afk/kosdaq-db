@@ -206,13 +206,18 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
             return max(x[4] for x in rows if x[1] == st0)
         xp = xget("DepreciationPropertyPlantAndEquipment")
         base = ppe[0] if ppe else None
-        if xp and base and base > xp * 1.2:
+        st_ = res.get("start") or ""
+        interim = bool(st_) and (int(pend[:4]) - int(st_[:4])) * 12 + int(pend[5:7]) - int(st_[5:7]) < 11   # 분기·반기 누적(연간 제외)
+        # 2026-11-10 전체 재계산 점검: 연간 보고서(디아이 2025 연결 36.5억 vs 원문 43.7억)·값이 오히려 커지는 경우(에스디바이오센서 반기 별도 91.2억 → 231.3억,
+        #   원문 91.2억)는 틀림 → 부풀림이 확인된 분기·반기에서 재구성 결과가 기존보다 작을 때만 적용
+        if xp and base and base > xp * 1.2 and interim:
             xa, xr, xi = xget("AmortisationIntangibleAssetsOtherThanGoodwill"), xget("DepreciationRightofuseAssets"), xget("DepreciationInvestmentProperty")
             if xr and any(abs(x[4] - xr) <= 0.001 * xr for x in xall if x[0] == "DepreciationPropertyPlantAndEquipment" and x[2] == pend and x[3] == want):
                 xr = None                                  # 사용권이 유형자산 표의 한 종류 → 이미 포함
-            res.update(dep=xp + (xi or 0), amort=xa if xa else res["amort"], rou=xr,
-                       tag=res["tag"] + f"|X재구성(차원없는 유형 {base/1e8:,.1f}억→{xp/1e8:,.1f}억)")
-            res["da"] = sum(x for x in (res["dep"], res["amort"], res["rou"]) if x)
+            new = dict(dep=xp + (xi or 0), amort=xa if xa else res["amort"], rou=xr)
+            nda = sum(x for x in new.values() if x)
+            if nda < res["da"]:
+                res.update(new, da=nda, tag=res["tag"] + f"|X재구성(차원없는 유형 {base/1e8:,.1f}억→{xp/1e8:,.1f}억)")
     if debug:
         print(f"   기간 {res.get('start')}~{pend} · 감가 {res.get('dep')} · 무형 {res.get('amort')} · 사용권 {res.get('rou')} · 합계 {res['da']} · 태그 {res['tag']}", flush=True)
     return res
@@ -341,7 +346,9 @@ def redo_rou(con, limit=None, workers=8, only_rou=False, only_amort=False, only_
             if only_rou else "tag NOT LIKE '%|감가%'")
     if only_amort:   # 2026-11-10: '감가구성미확인'으로 무형을 따로 더한 행만 다시(감가상각비에 무형 포함 여부 확인 추가 후). 이미 다시 본 보고서는 건너뜀
         cond = "tag LIKE '%|감가구성미확인%' AND amort > 0 AND fetched_at < '2026-11-09 15:20:00'"
-    if only_infl:    # 2026-11-10: 차원 없는 합계 부풀림 의심 — 주석 직접값·AI 원문 판정보다 20% 넘게 큰 행(X재구성 규칙 추가 후)
+    if only_infl == "redo":   # 2026-11-10: 첫 적용(연간·증가 포함)으로 재구성된 행을 좁힌 규칙으로 다시
+        cond = "tag LIKE '%X재구성%'"
+    elif only_infl:    # 2026-11-10: 차원 없는 합계 부풀림 의심 — 주석 직접값·AI 원문 판정보다 20% 넘게 큰 행(X재구성 규칙 추가 후)
         cond = """tag NOT LIKE '%X재구성%' AND fetched_at < '2026-11-10 04:45:00' AND (
                     da > 1.2 * (SELECT d.da FROM da_direct d WHERE d.corp_code=da_xbrl.corp_code AND d.bsns_year=da_xbrl.bsns_year
                                 AND d.reprt_code=da_xbrl.reprt_code AND d.fs_div=da_xbrl.fs_div AND d.da > 0)
