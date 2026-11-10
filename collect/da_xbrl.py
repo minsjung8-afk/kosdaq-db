@@ -80,7 +80,7 @@ def _contexts(root):
                     other = True
             elif t == "typedMember":
                 other = True
-        out[cid] = (st, en, "X" if other else mem)
+        out[cid] = (st, en, "X" if other else mem, mem)   # 4번째: 다른 차원이 있어도 연결/별도 구분(2026-11-10 차원별 재구성용)
     return out
 
 
@@ -91,6 +91,7 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
     want = "C" if want_fs == "CFS" else "S"
     facts = {}                                       # local → [(start,end,mem,val)]
     xppe = []                                        # 차원(자산종류별) 유형자산 감가상각비 (start,end,val)
+    xall = []                                        # 차원 있는 상각 사실 (local, start, end, 연결/별도, val) — 차원 없는 합계 부풀림 점검용
     for e in root.iter():
         tag = e.tag
         if "}" not in tag:
@@ -109,6 +110,7 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
             # 유형자산 변동표의 자산종류별(차원) 감가상각비 — 사용권자산이 유형자산 안의 한 종류인지 판별용(2026-11-03 일신방직: 유형 177.2억 중 사용권 47.6억)
             if re.search(r"DepreciationPropertyPlantAndEquipment", local):
                 xppe.append((c[0], c[1], v))
+            xall.append((local, c[0], c[1], c[3] if len(c) > 3 else None, v))
             continue
         facts.setdefault(local, []).append((c[0], c[1], c[2], v))
     if not facts:
@@ -192,6 +194,25 @@ def parse_da(xml_bytes, want_fs="CFS", debug=False):
         res.update(dep=(d[0] if d else 0) + (ip[0] if ip else 0) or None, amort=a[0] if a else None, rou=r[0] if r else None,
                    tag="+".join(x[1] for x in (d, a, r, ip) if x) + (f"|감가={chk}" if chk else "|감가구성미확인") + ("|사용권⊂유형" if rin else ""), start=(d or a or r)[2])
         res["da"] = sum(x for x in (res["dep"], res["amort"], res["rou"]) if x)
+        # 2026-11-10: 차원 없는 합계 사실이 부풀려진 공시(애경케미칼 2026 반기 별도 유형 253.7억 vs 자산종류별 표 111.3억 — 상각비 295.6억, 원문 149.3억 /
+        #   현대차 2025 반기 연결 유형 33,922억 vs 18,814억 — 45,965억, 원문 26,193억) → 같은 연결/별도의 차원별 표 값(누적, 최대 = 합계 행)이
+        #   차원 없는 유형자산 감가상각비보다 20% 넘게 작으면 각 항목을 차원별 표 값으로 다시 구성
+        def xget(name):
+            rows = [x for x in xall if x[0] == name and x[2] == pend and x[3] == want] or \
+                   [x for x in xall if x[0] == name and x[2] == pend and x[3] is None]
+            if not rows:
+                return None
+            st0 = min(x[1] for x in rows)
+            return max(x[4] for x in rows if x[1] == st0)
+        xp = xget("DepreciationPropertyPlantAndEquipment")
+        base = ppe[0] if ppe else None
+        if xp and base and base > xp * 1.2:
+            xa, xr, xi = xget("AmortisationIntangibleAssetsOtherThanGoodwill"), xget("DepreciationRightofuseAssets"), xget("DepreciationInvestmentProperty")
+            if xr and any(abs(x[4] - xr) <= 0.001 * xr for x in xall if x[0] == "DepreciationPropertyPlantAndEquipment" and x[2] == pend and x[3] == want):
+                xr = None                                  # 사용권이 유형자산 표의 한 종류 → 이미 포함
+            res.update(dep=xp + (xi or 0), amort=xa if xa else res["amort"], rou=xr,
+                       tag=res["tag"] + f"|X재구성(차원없는 유형 {base/1e8:,.1f}억→{xp/1e8:,.1f}억)")
+            res["da"] = sum(x for x in (res["dep"], res["amort"], res["rou"]) if x)
     if debug:
         print(f"   기간 {res.get('start')}~{pend} · 감가 {res.get('dep')} · 무형 {res.get('amort')} · 사용권 {res.get('rou')} · 합계 {res['da']} · 태그 {res['tag']}", flush=True)
     return res
@@ -308,7 +329,7 @@ def run(corp_codes=None, limit=None, con=None, workers=8, debug=False):
     return ok
 
 
-def redo_rou(con, limit=None, workers=8, only_rou=False, only_amort=False):
+def redo_rou(con, limit=None, workers=8, only_rou=False, only_amort=False, only_infl=False):
     """2026-11-03: 사용권자산·투자부동산 상각비 구성 확인 규칙 적용 전에 저장된 XBRL 결과(합산 태그 아닌 'ok' 행)를 다시 내려받아 재계산.
     같은 보고서의 연결·별도를 함께 갱신하고 KPI 재계산. 바뀐 행은 전·후 금액을 출력(검증용)."""
     from concurrent.futures import ThreadPoolExecutor
@@ -320,6 +341,12 @@ def redo_rou(con, limit=None, workers=8, only_rou=False, only_amort=False):
             if only_rou else "tag NOT LIKE '%|감가%'")
     if only_amort:   # 2026-11-10: '감가구성미확인'으로 무형을 따로 더한 행만 다시(감가상각비에 무형 포함 여부 확인 추가 후). 이미 다시 본 보고서는 건너뜀
         cond = "tag LIKE '%|감가구성미확인%' AND amort > 0 AND fetched_at < '2026-11-09 15:20:00'"
+    if only_infl:    # 2026-11-10: 차원 없는 합계 부풀림 의심 — 주석 직접값·AI 원문 판정보다 20% 넘게 큰 행(X재구성 규칙 추가 후)
+        cond = """tag NOT LIKE '%X재구성%' AND fetched_at < '2026-11-10 04:45:00' AND (
+                    da > 1.2 * (SELECT d.da FROM da_direct d WHERE d.corp_code=da_xbrl.corp_code AND d.bsns_year=da_xbrl.bsns_year
+                                AND d.reprt_code=da_xbrl.reprt_code AND d.fs_div=da_xbrl.fs_div AND d.da > 0)
+                 OR da > 1.2 * (SELECT v.ai_val FROM ai_verify v WHERE v.corp_code=da_xbrl.corp_code AND v.bsns_year=da_xbrl.bsns_year
+                                AND v.reprt_code=da_xbrl.reprt_code AND v.fs_div=da_xbrl.fs_div AND v.field='da' AND v.ai_val > 0))"""
     reps = con.execute(f"""SELECT rcept_no, reprt_code, MIN(corp_code), MIN(bsns_year) FROM da_xbrl
                           WHERE status='ok' AND tag NOT LIKE '%DepreciationAndAmortisation%' AND {cond} AND rcept_no IS NOT NULL
                           GROUP BY rcept_no, reprt_code ORDER BY MIN(corp_code) <> (SELECT corp_code FROM company WHERE stock_code='005090'), MIN(corp_code)   -- SGC에너지(사용자 지적 사례) 먼저""").fetchall()
