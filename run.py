@@ -594,12 +594,19 @@ def main():
                   ("SNT에너지", "OFS"), ("SM Life Design", "OFS"), ("자이언트스텝", "OFS"), ("애경케미칼", "OFS"), ("동아에스티", "OFS"), ("이마트", "OFS")]
             # 11-10 감사에서 틀린 1건: 오이솔루션 반기 별도 AI 14.0억 = 유형 합계(사용권 23,393 포함) + 사용권 이중계상 → 원문값으로 확정
             #   현금흐름 조정: 감가상각비 1,334,922 + 무형자산상각비 39,278 (천원) = 13.742억 — 사용자 결정 '유지 + 이중계상 차단'
-            for nm_, fs_, v_, why in (("오이솔루션", "OFS", 1374200000.0, "현금흐름 조정 감가상각비 1,334,922(유형 변동표 합계, 사용권 23,393 포함) + 무형자산상각비 39,278 천원"),):
-                n_ = con.execute("""UPDATE ai_verify SET ai_val=?, reason='[원문확인] ' || ? WHERE field='da' AND bsns_year='2026' AND reprt_code='11012' AND fs_div=?
-                                    AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?)""", (v_, why, fs_, nm_)).rowcount
-                print(f"  [원문값확정] {nm_} {fs_}: {v_/1e8:.2f}억 · {n_}행", flush=True)
+            fixes = [("오이솔루션", "OFS", 1374200000.0, "현금흐름 조정 감가상각비 1,334,922(유형 변동표 합계, 사용권 23,393 포함) + 무형자산상각비 39,278 천원", "2026", "11012"),
+                     # 11-10 $30 단계 감사에서 과다였던 3건(사용자 '유지 + 3건 원문값 확정')
+                     ("코위버", "OFS", 688200000.0, "현금흐름 조정 감가상각비 596,248(투자부동산 21,231 포함) + 사용권 91,952 천원 — AI가 투자부동산 이중계상", "2025", "11012"),
+                     ("디케이락", "OFS", 1811076000.0, "현금흐름 조정 감가상각비 1,422,119(정부보조금 상각 상계 후) + 투자부동산 245,449 + 무형 143,508 천원", "2025", "11012"),
+                     ("티피씨글로벌", "OFS", 1041493000.0, "성격별 감가상각비 및 무형자산상각비 1,041,493 천원", "2025", "11012")]
+            for nm_, fs_, v_, why, y_, r_ in fixes:
+                n_ = con.execute("""UPDATE ai_verify SET ai_val=?, reason='[원문확인] ' || ? WHERE field='da' AND bsns_year=? AND reprt_code=? AND fs_div=?
+                                    AND corp_code=(SELECT corp_code FROM company WHERE corp_name=?)""", (v_, why, y_, r_, fs_, nm_)).rowcount
+                print(f"  [원문값확정] {nm_} {y_} {r_} {fs_}: {v_/1e8:.2f}억 · {n_}행", flush=True)
             # 11-10 $20 단계 감사(무작위 10건 전부 일치) — 2025 사업보고서
             ok += [(x, "OFS", "2025", "11011") for x in ("TS인베스트먼트", "씨앤투스", "케이엔에스", "티엘비", "세미파이브", "현우산업", "한국정밀기계", "뉴트리", "이스트에이드")]
+            # 11-10 $30 단계 감사 일치 7건 — 2025 반기
+            ok += [(x, "OFS", "2025", "11012") for x in ("삼화전기", "한화호텔앤드리조트", "아이퀘스트", "KBI메탈", "신세계센트럴", "미창석유", "테고사이언스")]
             for it in ok:
                 nm_, fs_, y_, r_ = (it + ("2026", "11012"))[:4] if len(it) == 2 else it
                 n_ = con.execute("""UPDATE ai_verify SET reason='[원문확인] ' || reason WHERE field='da' AND bsns_year=? AND reprt_code=? AND fs_div=?

@@ -135,7 +135,36 @@ def _grounded(js, ctx):
     #   사용권을 따로 또 더함 → 같은 변동표(기초·기말 행이 있는 표) 안에 유형 합계와 '사용권…' 행의 그 금액이 함께 있으면 이중계상으로 보고 반영 안 함
     if comp.get("유형") and comp.get("사용권") and _rou_in_ppe(ctx, comp["유형"], comp["사용권"]):
         return False
+    # 2026-11-10 $30 단계 감사(코위버 투자부동산 이중계상 +3%, 디케이락 정부보조금 상계 전 +1.7%): 현금흐름 조정 표가 발췌에 있으면
+    #   그 표의 상각 항목 합계(당기 열)와 0.5% 안에서 맞을 때만 반영 — 현금흐름 조정이 손익에 실제 반영된 상각비의 기준
+    cf = _cf_sum(ctx)
+    if cf and abs(tot - cf) > cf * 0.005:
+        return False
     return True
+
+
+def _cf_sum(ctx):
+    """발췌 중 현금흐름 조정 표(제목에 '현금흐름')에서 상각 항목 행의 첫 숫자(당기) 합 × 표 단위. 없으면 None"""
+    for blk in ctx.split("\n\n"):
+        head = blk.split("\n", 1)[0]
+        if "현금흐름" not in head:
+            continue
+        m = re.search(r"표 단위 배수 ([\d.e+]+)원", head)
+        unit = float(m.group(1)) if m else 1.0
+        tot, hit = 0.0, 0
+        for ln in blk.splitlines()[1:]:
+            cells = [c.strip() for c in ln.split("|")]
+            lab = cells[0].replace(" ", "")
+            if not re.search(r"감가|상각", lab) or re.search(r"대손|할인|금융|손상|후원가|환입|채권|사채|이익", lab):
+                continue
+            nums = [c for c in cells[1:] if re.fullmatch(r"\(?-?[\d,]+\)?", c or "")]
+            if not nums:
+                continue
+            tot += abs(float(nums[0].strip("()").replace(",", ""))) * unit
+            hit += 1
+        if hit:
+            return tot
+    return None
 
 
 def _has_num(txt, v):
