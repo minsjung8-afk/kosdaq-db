@@ -10,8 +10,15 @@
 """
 
 
+CUR = None   # 2026-11-12: 원화 아닌 공시 통화(USD 등) — build_site가 회사마다 설정. 금액을 원통화 백만 단위로 표기(환율 가정 없음)
+
+
 def _e(v):
-    return "-" if v is None else f"{v / 1e8:,.0f}억"
+    if v is None:
+        return "-"
+    if CUR:
+        return f"{v / 1e6:,.1f}백만 {CUR}"
+    return f"{v / 1e8:,.0f}억"
 
 
 def _p(v):

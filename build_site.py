@@ -253,6 +253,9 @@ def _peers(con, c, ps):
                        AND k.fs_div=(SELECT CASE WHEN EXISTS(SELECT 1 FROM fin_kpi x WHERE x.corp_code=c.corp_code AND x.fs_div='CFS' AND x.reprt_code='11011') THEN 'CFS' ELSE 'OFS' END)
                        AND k.bsns_year=(SELECT MAX(bsns_year) FROM fin_kpi y WHERE y.corp_code=c.corp_code AND y.reprt_code='11011')
                      WHERE substr(c.induty_code,1,2)=? AND c.market=? AND c.corp_code!=? AND k.revenue IS NOT NULL""", ind, c.get("market"), c["corp_code"])
+    if _CUR:
+        return []                                   # 외화 공시 회사: 원화 회사와 금액 비교 불가(2026-11-12)
+    rows = [r for r in rows if r["corp_code"] not in FXC]
     me = (ps or {}).get("mcap")
     if me:
         rows.sort(key=lambda r: abs((r["mcap"] or 0) - me))
@@ -339,7 +342,8 @@ def company_detail(con, c):
         "borrow_bd": _safe(lambda: _borrow_bd(con, cc)),
         "notes_struct": (lambda r: {"rcept_no": r[0]["rcept_no"], "report_nm": r[0]["report_nm"], **json.loads(r[0]["json"])} if r else None)(
             _safe_q(con, "SELECT rcept_no, report_nm, json FROM notes_struct WHERE corp_code=?", cc)),
-        "valuation": _valuation(kpi, ps[0] if ps else None),
+        "valuation": None if _CUR else _valuation(kpi, ps[0] if ps else None),   # 외화 공시: 원화 시총과 섞이는 PER·EV/EBITDA 계산 안 함
+        "currency": _CUR,
         "flags": None,   # 아래에서 채움
         "industry_pos": None,
         "prices": [[p["dt"], p["open"], p["high"], p["low"], p["close"], p["volume"]] for p in prices],
@@ -459,6 +463,17 @@ def _review(con, cc):
     return {"bsns_year": r[0], "period": _RC_NM.get(r[1], r[1]), "adtor": r[2], "opinion": r[3]}
 
 
+_CUR = None        # 2026-11-12: 현재 빌드 중인 회사의 재무 공시 통화(원화면 None)
+FXC = {}           # corp_code → 원화 아닌 공시 통화
+
+
+def _amt(v):
+    """플래그 문구 금액: 원화는 억, 외화 공시는 원통화 백만(환율 가정 없음)"""
+    if v is None:
+        return "-"
+    return f"{v / 1e6:,.1f}백만 {_CUR}" if _CUR else f"{v / 1e8:,.0f}억"
+
+
 def _flags(c, kpi, ps, audit, events, ratings):
     """심사 1차 스크리닝 경고 플래그. (코드, 수준 red/amber, 설명)"""
     rows = kpi.get("CFS") or kpi.get("OFS") or []
@@ -468,13 +483,13 @@ def _flags(c, kpi, ps, audit, events, ratings):
     out = []
     if last and last.get("capital") and last.get("equity") is not None:
         if last["equity"] < 0:
-            out.append(("완전자본잠식", "red", f"자본총계 {last['equity']/1e8:,.0f}억"))
+            out.append(("완전자본잠식", "red", f"자본총계 {_amt(last['equity'])}"))
         elif last["equity"] < last["capital"]:
-            out.append(("부분자본잠식", "red", f"자본총계 {last['equity']/1e8:,.0f}억 < 자본금 {last['capital']/1e8:,.0f}억"))
+            out.append(("부분자본잠식", "red", f"자본총계 {_amt(last['equity'])} < 자본금 {_amt(last['capital'])}"))
     if len(ann) >= 2 and all((r.get("op_income") or 0) < 0 for r in ann[-2:]):
         out.append(("연속 영업적자", "red" if (latest and (latest.get("op_income") or 0) < 0) else "amber", f"{ann[-2]['bsns_year']}~{ann[-1]['bsns_year']} 연간 영업적자"))
     elif last and (last.get("op_income") or 0) < 0:
-        out.append(("최근 연간 영업적자", "amber", f"{last['bsns_year']} 영업이익 {last['op_income']/1e8:,.0f}억"))
+        out.append(("최근 연간 영업적자", "amber", f"{last['bsns_year']} 영업이익 {_amt(last['op_income'])}"))
     if last and last.get("interest_cover") is not None and last["interest_cover"] < 1:
         out.append(("EBITDA/이자비용 < 1", "red", f"{last['interest_cover']}x"))
     if last and last.get("debt_ratio") is not None and last["debt_ratio"] > 300:
@@ -482,7 +497,7 @@ def _flags(c, kpi, ps, audit, events, ratings):
     if last and last.get("cur_ratio") is not None and last["cur_ratio"] < 80:
         out.append(("유동비율 80% 미만", "amber", f"{last['cur_ratio']}%"))
     if last and last.get("cfo") is not None and last["cfo"] < 0 and (last.get("op_income") or 0) < 0:
-        out.append(("영업CF·영업이익 동반 음수", "amber", f"영업CF {last['cfo']/1e8:,.0f}억"))
+        out.append(("영업CF·영업이익 동반 음수", "amber", f"영업CF {_amt(last['cfo'])}"))
     if audit:
         a = audit[0]
         op = a.get("adt_opinion") or ""
@@ -845,14 +860,26 @@ def build():
         MANUAL = {r[0]: i for i, r in enumerate(con.execute("SELECT corp_code FROM manual_company ORDER BY added_at, rowid"), 1)}   # 사이트 '회사 추가'로 넣은 회사(2026-10-26) — 값 = 추가 순번(2026-11-02 사용자: 추가한 순서대로 보기)
     except Exception:  # noqa
         MANUAL = {}
+    global FXC, _CUR
+    try:
+        FXC = {r[0]: r[1] for r in con.execute("SELECT corp_code, currency FROM fin_currency WHERE currency IS NOT NULL AND currency != 'KRW'")}
+    except Exception:  # noqa
+        FXC = {}
+    print(f"[site] 외화 공시 {len(FXC)}사: {sorted(set(FXC.values()))}", flush=True)
     for c in q(con, "SELECT * FROM company ORDER BY corp_name"):
+        _CUR = FXC.get(c["corp_code"])
+        try:
+            import fin_notes as _fn
+            _fn.CUR = _CUR
+        except Exception:  # noqa
+            pass
         d = company_detail(con, c)
         try:                                   # 재무 특이사항(규칙 기반) + 반기·분기 순차입금/EBITDA LTM 보정(2026-10-28)
             import fin_notes
             fin_notes.fix_ltm(d["kpi"])
             d["fin_notes"] = fin_notes.build(d, c)
             import fin_ai                      # AI 종합 의견·원인(Haiku) — 현재 특이사항과 같은 근거로 만든 것만
-            d["fin_ai"] = fin_ai.view(con, c["corp_code"], d["fin_notes"], d["kpi"].get("CFS") or d["kpi"].get("OFS") or [])
+            d["fin_ai"] = None if _CUR else fin_ai.view(con, c["corp_code"], d["fin_notes"], d["kpi"].get("CFS") or d["kpi"].get("OFS") or [])   # 외화 공시: 억 단위로 쓰인 AI 의견 숨김
         except Exception as e:  # noqa
             d["fin_notes"] = []
             print(f"[site] 특이사항 실패 {c.get('corp_name')}: {e}")
@@ -876,7 +903,7 @@ def build():
                       "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None,
                       "rating": cur_rt["grade"] if cur_rt else None, "rt_st": (d.get("rating_status") or {}).get("label"), "rt_aux": (f"{d['rating_aux']['grade']} {d['rating_aux']['label'].replace('유효기간 ', '').replace('등급 ', '')}" if d.get("rating_aux") and d["rating_aux"].get("kind") != "sub" else None),
                       "rt_sub": (d["rating_aux"]["grade"] if d.get("rating_aux") and d["rating_aux"].get("kind") == "sub" else None), "manual": MANUAL.get(c["corp_code"]),
-                      "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"),
+                      "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"), "cur": _CUR,
                       "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber")})
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
             "price_asof": max((r["asof"] for r in q(con, "SELECT asof FROM price_summary")), default=None)}

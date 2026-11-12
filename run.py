@@ -804,9 +804,13 @@ def main():
                     cur = sorted({(r.get("currency") or "?") for r in rows})
                     break
             print(f"  {nm}({sc}) {yy}: 통화 {cur} · 주소 {str(adr)[:30]}", flush=True)
+            if cur and len(cur) == 1 and cur[0] != "?":   # 2026-11-12: 결과 저장(사이트 원통화 표시용)
+                con.execute("CREATE TABLE IF NOT EXISTS fin_currency (corp_code TEXT PRIMARY KEY, currency TEXT, bsns_year TEXT, at TEXT)")
+                con.execute("INSERT OR REPLACE INTO fin_currency VALUES (?,?,?,datetime('now'))", (cc, cur[0], str(yy)))
             if cur and cur != ["KRW"]:
                 bad.append((nm, sc, cur))
         print(f"[통화점검] 원화 아닌 공시 {len(bad)}사: {bad}", flush=True)
+        con.commit()
     elif a.job == "rawdump" and a.type == "XBRL상각태그":   # 2026-11-10 대상 교체(2배 과다 원인 확인) · 2026-11-09: XBRL 경로 과다(INVENI 별도 21.0억 vs 성격별 13.5억 — 차이 7.5억 ≈ 사채할인발행차금 상각 7.5억, 대동 연결 322.7억 vs 291.9억) 원문 태그 확인(DART 2콜)
         import re as _re, xml.etree.ElementTree as _ET, da_xbrl as _dx
         for nm, rc, rp, fs in (("디아이", "20260312001121", "11011", "CFS"), ("디아이", "20260312001121", "11011", "OFS"),   # 11-10 오후: 연간 XBRL 과다
