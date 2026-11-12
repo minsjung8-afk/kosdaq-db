@@ -790,6 +790,18 @@ def main():
     elif a.job == "rawdump" and a.type.startswith("기간열수정"):   # 2026-11-09 사용자 '규칙 수정 해봐': 변동표 기간 열(당기/전기) 오독 — '기간열수정' 목록만, '기간열수정적용' 반영. DART 0콜
         import notes_v2 as _nv
         _nv.rebuild_period_fix(con, apply=a.type.endswith("적용"), show=60)
+    elif a.job == "rawdump" and a.type == "정확도점검":   # 2026-11-12 사용자 '정확도 개선 정도를 쉬운 지표로': 11-09 첫 판정 때와 같은 조건(2025+, 사이트 상각비 > 주석 직접값×1.05) 행 수(DART·AI 0)
+        rows = con.execute("""SELECT k.bsns_year, k.reprt_code, k.da, d.da, k.da_src FROM fin_kpi k JOIN da_direct d USING(corp_code, bsns_year, reprt_code, fs_div)
+                              WHERE d.da > 0 AND k.da > 0 AND k.bsns_year >= '2025' AND d.rcept_no IS NOT NULL AND d.rcept_no NOT LIKE '%:%'""").fetchall()
+        import collections as _co
+        tot = len(rows); over = [r for r in rows if r[2] > r[3] * 1.05]
+        b = _co.Counter("5~20%" if r[2] <= r[3] * 1.2 else "20~100%" if r[2] <= r[3] * 2 else "2배+" for r in over)
+        src = _co.Counter((r[4] or "-").split(":")[0] for r in rows)
+        print(f"[정확도점검] 2025+ 사이트·주석 직접값 비교 가능 {tot:,}행 · 사이트가 5% 넘게 큼 {len(over):,}행({len(over)/max(tot,1)*100:.1f}%) · 폭 {dict(b)}", flush=True)
+        print(f"[정확도점검] 사이트 상각비 출처 {dict(src)}", flush=True)
+        n_ai = con.execute("SELECT COUNT(*) FROM fin_kpi WHERE da_src='da_ai_verify'").fetchone()[0]
+        n_x = con.execute("SELECT COUNT(*) FROM da_xbrl WHERE tag LIKE '%X재구성%'").fetchone()[0]
+        print(f"[정확도점검] AI 원문 판정 반영 {n_ai}행 · XBRL 재구성 {n_x}행", flush=True)
     elif a.job == "rawdump" and a.type == "통화점검":   # 2026-11-10: 네오이뮨텍 재무가 USD인데 원화로 저장·표시 — 원화 아닌 공시 회사 범위 확인(DART 회사당 1콜)
         from common import dart_get as _dg
         cs = con.execute("""SELECT c.corp_code, c.corp_name, c.stock_code, c.adres, MAX(k.bsns_year) FROM company c JOIN fin_kpi k ON k.corp_code=c.corp_code
