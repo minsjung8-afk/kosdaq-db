@@ -808,15 +808,20 @@ def main():
             return "5~20%" if g <= 0.2 else "20~100%" if g <= 1 else "2배+"
         av = {}
         try:
-            for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, site_val, alt_val, ai_val, verdict FROM ai_verify WHERE field='da'"):
+            for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, site_val, alt_val, ai_val, verdict, reason FROM ai_verify WHERE field='da'"):
                 av[r[:4]] = r[4:]
         except Exception:  # noqa
             pass
         rate = _co.defaultdict(lambda: [0, 0, 0])      # 구간 → [사이트 틀림, 사이트 맞음, 판단불가]
-        for (site, alt, aiv, vd) in av.values():
+        def _tg(rs):
+            rs = str(rs or "")
+            return "근거확인" if rs.startswith(("[원문확인]", "[근거확인v2]")) else "근거불일치" if rs.startswith("[근거불일치]") else "구판정"
+        for (site, alt, aiv, vd, rs) in av.values():
             if not site or not alt or site <= alt * 1.05:
                 continue
             k = _band(site, alt)
+            if _tg(rs) != "근거확인":                       # 오류율은 원문 근거가 확인된 판정만으로(근거 없는 AI값은 신뢰 안 함)
+                continue
             if aiv is None or vd in ("판단불가", "응답오류"):
                 rate[k][2] += 1
             elif abs(aiv - site) <= site * 0.01:
@@ -830,15 +835,15 @@ def main():
                                WHERE d.da > 0 AND k.da > 0 AND k.bsns_year >= '2025' AND d.rcept_no IS NOT NULL AND d.rcept_no NOT LIKE '%:%' AND k.da > d.da * 1.05""").fetchall()
         cls = _co.Counter(); est = 0.0; unj = _co.Counter()
         for r in rows2:
-            a = av.get(r[:4])
-            if a:
-                site, alt, aiv, vd = a
+            _a = av.get(r[:4])
+            if _a:
+                site, alt, aiv, vd, rs = _a
                 if aiv is None or vd in ("판단불가", "응답오류"):
                     cls["판정됨·판단불가"] += 1
                 elif abs(aiv - r[4]) <= r[4] * 0.01:
                     cls["판정됨·사이트 맞음(주석 직접값이 불완전)"] += 1
                 else:
-                    cls["판정됨·AI값과 다름(미반영)"] += 1
+                    cls["판정됨·AI값과 다름(미반영)·" + _tg(rs) + ("·판정후 사이트값 바뀜" if site and abs(site - r[4]) > r[4] * 0.005 else "")] += 1
             else:
                 k = _band(r[4], r[5]); unj[k] += 1
                 w, ok, un = rate[k]; est += w / max(w + ok, 1)
