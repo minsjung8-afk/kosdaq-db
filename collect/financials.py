@@ -82,6 +82,10 @@ def store_raw(con, corp_code, bsns_year, reprt_code, fs_div, lst, prev=True):
                           _cum(r, "thstrm_amount"), _cum(r, "frmtrm_amount"), to_num(r.get("bfefrmtrm_amount")),
                           int(r.get("ord") or 0), r.get("rcept_no")))
     con.execute("INSERT OR IGNORE INTO fin_cum_ok VALUES (?,?,?)", (corp_code, y, reprt_code))
+    cur = next((r.get("currency") for r in lst if r.get("currency")), None)
+    if cur:   # 2026-11-12: 외국 상장사 20사가 USD·CNY·JPY로 공시 — 통화를 함께 저장(사이트는 원통화 표시, 환율 가정 없음)
+        con.execute("CREATE TABLE IF NOT EXISTS fin_currency (corp_code TEXT PRIMARY KEY, currency TEXT, bsns_year TEXT, at TEXT)")
+        con.execute("INSERT OR REPLACE INTO fin_currency VALUES (?,?,?,datetime('now'))", (corp_code, cur, y))
     filled = False
     if prev and lst:
         py = str(int(y) - 1)
