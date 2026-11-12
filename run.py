@@ -802,6 +802,49 @@ def main():
         n_ai = con.execute("SELECT COUNT(*) FROM fin_kpi WHERE da_src='da_ai_verify'").fetchone()[0]
         n_x = con.execute("SELECT COUNT(*) FROM da_xbrl WHERE tag LIKE '%X재구성%'").fetchone()[0]
         print(f"[정확도점검] AI 원문 판정 반영 {n_ai}행 · XBRL 재구성 {n_x}행", flush=True)
+        # 2026-11-12 사용자 '돌려봐': 남은 의심행을 ①AI 판정됨(사이트 맞음/틀림/판단불가) ②미판정으로 나누고, 판정된 행의 '실제 오류 비율'(폭 구간별)로 미판정 행의 실제 오류 수를 추정
+        def _band(site, alt):
+            g = site / alt - 1
+            return "5~20%" if g <= 0.2 else "20~100%" if g <= 1 else "2배+"
+        av = {}
+        try:
+            for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, site_val, alt_val, ai_val, verdict FROM ai_verify WHERE field='da'"):
+                av[r[:4]] = r[4:]
+        except Exception:  # noqa
+            pass
+        rate = _co.defaultdict(lambda: [0, 0, 0])      # 구간 → [사이트 틀림, 사이트 맞음, 판단불가]
+        for (site, alt, aiv, vd) in av.values():
+            if not site or not alt or site <= alt * 1.05:
+                continue
+            k = _band(site, alt)
+            if aiv is None or vd in ("판단불가", "응답오류"):
+                rate[k][2] += 1
+            elif abs(aiv - site) <= site * 0.01:
+                rate[k][1] += 1
+            else:
+                rate[k][0] += 1
+        for k in ("5~20%", "20~100%", "2배+"):
+            w, ok, un = rate[k]; d = w + ok
+            print(f"[정확도점검] 판정표본 {k}: 사이트 틀림 {w} · 사이트 맞음 {ok} · 판단불가 {un} → 실제 오류율 {w/max(d,1)*100:.0f}%", flush=True)
+        rows2 = con.execute("""SELECT k.corp_code, k.bsns_year, k.reprt_code, k.fs_div, k.da, d.da FROM fin_kpi k JOIN da_direct d USING(corp_code, bsns_year, reprt_code, fs_div)
+                               WHERE d.da > 0 AND k.da > 0 AND k.bsns_year >= '2025' AND d.rcept_no IS NOT NULL AND d.rcept_no NOT LIKE '%:%' AND k.da > d.da * 1.05""").fetchall()
+        cls = _co.Counter(); est = 0.0; unj = _co.Counter()
+        for r in rows2:
+            a = av.get(r[:4])
+            if a:
+                site, alt, aiv, vd = a
+                if aiv is None or vd in ("판단불가", "응답오류"):
+                    cls["판정됨·판단불가"] += 1
+                elif abs(aiv - r[4]) <= r[4] * 0.01:
+                    cls["판정됨·사이트 맞음(주석 직접값이 불완전)"] += 1
+                else:
+                    cls["판정됨·AI값과 다름(미반영)"] += 1
+            else:
+                k = _band(r[4], r[5]); unj[k] += 1
+                w, ok, un = rate[k]; est += w / max(w + ok, 1)
+        cls["미판정"] = sum(unj.values())
+        print(f"[정확도점검] 의심 {len(rows2):,}행 분류 {dict(cls)} · 미판정 폭 {dict(unj)}", flush=True)
+        print(f"[정확도점검] 미판정 중 실제 오류 추정 약 {est:,.0f}행(구간별 판정표본 오류율 적용)", flush=True)
     elif a.job == "rawdump" and a.type == "통화점검":   # 2026-11-10: 네오이뮨텍 재무가 USD인데 원화로 저장·표시 — 원화 아닌 공시 회사 범위 확인(DART 회사당 1콜)
         from common import dart_get as _dg
         cs = con.execute("""SELECT c.corp_code, c.corp_name, c.stock_code, c.adres, MAX(k.bsns_year) FROM company c JOIN fin_kpi k ON k.corp_code=c.corp_code
