@@ -388,7 +388,7 @@ def main():
             print("[daily] delta 실패:", e)
         try:                                       # 2026-11-13 사용자 '3Q 분기보고서 공시되고 있다': 새 정기보고서는 마감일을 기다리지 않고 바로 반영
             import periodic_new
-            periodic_new.process(con)
+            periodic_new.process(con, light=True)   # 아침: 재무·KPI만(주석·상각비는 야간)
         except Exception as e:  # noqa
             print("[daily] 새 정기보고서 반영 실패:", e)
         try:                                       # 2026-10-24: 신용평가서 공시 당일 반영(금감원 최근 3일 목록, DART 호출 없음)
