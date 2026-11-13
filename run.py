@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill", "da_ai"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill", "da_ai", "periodic_new"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
@@ -178,6 +178,9 @@ def main():
         else:
             import unlisted
             unlisted.run(years=(a.years[0] if a.years else 3), max_pages=a.max_pages, ttype=a.type)
+    if a.job == "periodic_new":              # 새 정기보고서 즉시 반영(--limit N: 대기 중 앞 N건, --days N: 목록 N일 다시 훑기)
+        import periodic_new
+        periodic_new.process(con, limit=a.limit, days=a.days if hasattr(a, "days") else None)
     if a.job == "delta":
         import delta
         delta.run(days=a.limit)
@@ -383,6 +386,11 @@ def main():
             delta.run()
         except Exception as e:  # noqa
             print("[daily] delta 실패:", e)
+        try:                                       # 2026-11-13 사용자 '3Q 분기보고서 공시되고 있다': 새 정기보고서는 마감일을 기다리지 않고 바로 반영
+            import periodic_new
+            periodic_new.process(con)
+        except Exception as e:  # noqa
+            print("[daily] 새 정기보고서 반영 실패:", e)
         try:                                       # 2026-10-24: 신용평가서 공시 당일 반영(금감원 최근 3일 목록, DART 호출 없음)
             import fss_rating
             fss_rating.run_delta(con=con, days=3)
@@ -411,7 +419,8 @@ def main():
                 except Exception:  # noqa
                     _c["v"] = set()
             return _c["v"]
-        steps = [("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=90 * 60)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
+        steps = [("periodic", lambda: __import__("periodic_new").process(con)),   # 2026-11-13: 새로 공시된 분기·반기·사업보고서를 과거 보강(da_backfill)보다 먼저 — 한도를 백필이 다 쓰기 전에
+                 ("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=90 * 60)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
                  ("da_direct", lambda: __import__("notes_v2").direct_backfill(con, years=4, limit=2000, budget_sec=50 * 60)),   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정(XBRL 일부 항목 누락·분기 3개월 열 오독) — 하루 2,000건씩, 약 2주
                  ("da_ai", lambda: __import__("da_ai").run(con, limit=1500)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 1,500건·예산 40달러, 2026-10-30 사용자 "예산 올려줄게")
                  ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
@@ -449,7 +458,7 @@ def main():
                 break
             except Exception as e:  # noqa
                 print(f"[catchup] {name} 오류: {e}", flush=True)
-            if name in ("biz", "summarize", "fin", "fin_ofs", "fin_yoy", "da", "da_notes", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
+            if name in ("periodic", "biz", "summarize", "fin", "fin_ofs", "fin_yoy", "da", "da_notes", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
                 con.commit(); publish(f"catchup {name}")
         else:   # 모든 단계 정상 완료 → 이어하기 불필요
             if _cont.exists() and not _os.environ.get("KOSDAQ_IN_CHAIN"):
