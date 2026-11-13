@@ -531,6 +531,11 @@ def _flags(c, kpi, ps, audit, events, ratings):
             out.insert(0, ("신용등급 D (부도)", "red", f"{cr['agency']} {cr['disc_dt']} {cr.get('target_type') or ''}"))
         elif re.match(r"^C{1,3}([+-]|$)", g):
             out.insert(0, (f"신용등급 {g} (CCC 이하)", "red", f"{cr['agency']} {cr['disc_dt']}"))
+        dg = _downgrades(ratings)       # 2026-11-13 사용자 '등급도 잘 모니터링': 최근 1년 같은 평가사·같은 등급체계에서 내려간 경우
+        if dg:
+            big = any(d[3] >= 2 for d in dg)
+            out.insert(0, ("최근 1년 신용등급 하향" + (" (2노치+)" if big else ""), "red" if big else "amber",
+                           " · ".join(f"{a} {g0}→{g1} ({dt[:4]}-{dt[4:6]}-{dt[6:]})" if len(dt) == 8 else f"{a} {g0}→{g1} ({dt})" for a, g0, g1, _n, dt in dg[:3])))
         r0 = ratings[0]
         if r0.get("watch") or (r0.get("outlook") and "부정" in r0["outlook"]):
             out.append(("등급전망 부정적/감시", "amber", f"{r0['agency']} {r0['grade']} {r0.get('outlook') or ''} {r0.get('watch') or ''}"))
@@ -816,6 +821,33 @@ def rating_view(ratings, today=None):
             if (s0.get("disc_dt") or "") > (cur.get("disc_dt") or ""):   # 둘 다 만료면 더 최근 평가(단기)를 대표로 — 씨제이포디플렉스 A3-(~2026.06.30) 만료가 보이도록(2026-10-26)
                 return s0, s_st, aux
     return cur, st, None
+
+
+_GL = ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "BBB-", "BB+", "BB", "BB-", "B+", "B", "B-", "CCC+", "CCC", "CCC-", "CC", "C", "D"]
+_GS = ["A1", "A2+", "A2", "A2-", "A3+", "A3", "A3-", "B+", "B", "B-", "C", "D"]
+
+
+def _downgrades(ratings, days=365):
+    """최근 days일 안에 같은 평가사·같은 등급체계(장기/단기)·보증 아닌 평가에서 직전보다 낮아진 건 → [(평가사, 이전, 이후, 노치, 공시일)]"""
+    from datetime import date, timedelta
+    cut = (date.today() - timedelta(days=days)).strftime("%Y%m%d")
+    last, out = {}, []
+    for r in sorted(ratings, key=lambda x: str(x.get("disc_dt") or "").replace("-", "")):
+        tt = r.get("target_type") or ""
+        if "보증" in tt or "신종" in tt or "후순위" in tt or "파생" in tt:
+            continue
+        g = (r.get("grade") or "").strip().split(" ")[0] if r.get("grade") else ""
+        short = bool(re.search(r"기업어음|전자단기|단기사채|CP", tt))
+        sc = _GS if short else _GL
+        if g not in sc:
+            continue
+        k = (r.get("agency"), short)
+        v = len(sc) - sc.index(g)
+        dt = str(r.get("disc_dt") or "").replace("-", "")
+        if k in last and v < last[k][0] and dt >= cut:
+            out.append((r.get("agency"), last[k][1], g, last[k][0] - v, dt))
+        last[k] = (v, g)
+    return sorted(out, key=lambda x: x[4], reverse=True)
 
 
 def current_rating(ratings):

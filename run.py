@@ -393,7 +393,7 @@ def main():
             print("[daily] 새 정기보고서 반영 실패:", e)
         try:                                       # 2026-10-24: 신용평가서 공시 당일 반영(금감원 최근 3일 목록, DART 호출 없음)
             import fss_rating
-            fss_rating.run_delta(con=con, days=3)
+            fss_rating.run_delta(con=con, days=5)     # 11-13: 월요일 아침이 실패해도 화요일에 금요일분까지 잡도록 3→5일
         except Exception as e:  # noqa
             print("[daily] 신용평가 델타 실패:", e)
     if a.job == "catchup":                   # 야간: 미수집분을 mezz → biz → fin → kpi 순으로, DART 한도 도달 시 중단(다음날 이어서)
@@ -430,6 +430,7 @@ def main():
                                         __import__("summarize").run_unlisted(None, model="haiku", force=False))),   # 새로 받은 사업보고서만 Haiku 요약 + 사업보고서 없는 비상장사(감사보고서·신평서 기반)
                  ("audit_fix", lambda: [business.fetch_audit_opinion(con, c, str(a.year - 1)) for c in (done("business") - done("audit_opinion"))]),   # 복구로 비워진 감사의견 보강(1콜/사)
                  ("review", lambda: business.run_review(con)),   # 최근 분기·반기 검토의견(미조회분만, 2026-10-26)
+                 ("rating_delta", lambda: __import__("fss_rating").run_delta(con=con, days=7)),   # 2026-11-13 사용자 '등급도 잘 모니터링': 주말·아침 실패에도 빠지지 않게 야간(매일)에도 최근 7일 금감원 목록 재확인(DART 호출 없음)
                  ("rating_valid", lambda: __import__("rating_valid").run(con=con)),   # 새 신용평가서의 등급 유효기간(미조회분만, 2026-10-26)
                  ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
                  ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),
