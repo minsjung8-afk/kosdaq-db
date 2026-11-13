@@ -4,7 +4,7 @@
 해결: DART 공시목록(정기공시 pblntf_ty=A)에서 대상회사의 새 정기보고서를 잡아 그 보고서를 바로 받는다(마감일과 무관).
   1) list(pblntf_ty=A) — 마지막 조회일 하루 전부터(첫 실행은 14일 전부터), 100건/콜
   2) 보고서명 '(YYYY.MM)' + 결산월 → (사업연도, 보고서코드). 그 보고서의 'empty' 표시를 지우고 전체 재무제표(연결·별도) 적재 + KPI 재계산
-  3) 받은 회사는 주석 원문(차입금·우발채무 등)을 새 보고서 기준으로 갱신, XBRL 상각비 계산
+  3) 받은 회사는 주석 원문(차입금·우발채무 등)을 새 보고서 기준으로 갱신(야간 catchup). 상각비는 catchup의 da 단계가 최신 분기를 자동으로 잡음
   4) 재무 API에 아직 안 올라온 보고서(공시 직후 시차)는 대기로 두고 다음 실행에서 재시도, 7일 지나면 포기
   python run.py periodic_new
 """
@@ -75,11 +75,25 @@ def scan(con, days=None):
     return new
 
 
-def process(con=None, limit=None, days=None):
-    """대기 중인 새 정기보고서 반영. 반환 반영한 회사 수"""
-    from financials import fetch_fin_raw, build_kpi
+def _fetch_both(cc, y, rc):
+    """스레드(HTTP만): 연결·별도 재무 목록. 반환 [(fs, list)]"""
+    from financials import _fetch_list
+    return [(fs, _fetch_list(cc, y, rc, fs)) for fs in ("CFS", "OFS")]
+
+
+def process(con=None, limit=None, days=None, light=False, workers=4):
+    """대기 중인 새 정기보고서 반영. 반환 반영한 회사 수
+    light=True(아침 daily): 재무·KPI만. 주석 원문 갱신·XBRL 상각비는 야간 catchup(light=False)에서 — 11-13 첫 실행이 658사에
+      재무 1시간 45분(순차) + 주석 40분 + 상각비 → 150분 제한에 걸려, 재무를 병렬로 바꾸고 무거운 단계는 야간으로 넘김"""
+    from concurrent.futures import ThreadPoolExecutor
+    from financials import store_raw, build_kpi
     con = con or connect()
     _ensure(con)
+    try:
+        con.execute("ALTER TABLE periodic_new ADD COLUMN notes_at TEXT")
+        con.execute("UPDATE periodic_new SET notes_at=done_at WHERE status='반영'")   # 11-13 첫 실행분은 주석까지 갱신 완료
+    except Exception:  # noqa
+        pass
     try:
         scan(con, days=days)
     except Exception as e:  # noqa
@@ -91,45 +105,52 @@ def process(con=None, limit=None, days=None):
         pend = pend[:limit]
     from collections import Counter
     kinds = Counter(f"{r[1]} {r[2]}" for r in pend)
-    print(f"[periodic] 반영 대기 {len(pend)}건 {dict(kinds)}", flush=True)
-    ok_cc, n_ok, n_wait, c0 = [], 0, 0, common.CALLS
-    for cc, y, rc, rns, nm in pend:
-        if common.QUOTA_HIT:
-            print("[periodic] DART 한도 도달 — 나머지는 다음 실행에서", flush=True)
-            break
-        try:
-            con.execute("DELETE FROM quarters_done WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND status='empty'", (cc, y, rc))
-        except Exception:  # noqa
-            pass
-        try:
-            n = fetch_fin_raw(con, cc, y, rc, prev=True)
-        except Exception as e:  # noqa
-            log(con, cc, "periodic_new", "fail", f"{y} {rc} {e}")
-            n = 0
-        ids = rns.split(",")
-        q = ",".join("?" * len(ids))
-        if n:
-            build_kpi(con, cc, y, rc)
-            build_kpi(con, cc, str(int(y) - 1), rc)
-            con.execute(f"UPDATE periodic_new SET status='반영', done_at=?, tries=tries+1 WHERE rcept_no IN ({q})", (now(), *ids))
-            ok_cc.append(cc); n_ok += 1
-        else:
-            con.execute(f"UPDATE periodic_new SET tries=tries+1 WHERE rcept_no IN ({q})", ids)
-            n_wait += 1
-        con.commit()
+    print(f"[periodic] 반영 대기 {len(pend)}건 {dict(kinds)} · 병렬 {workers}", flush=True)
+    n_ok, n_wait, c0 = 0, 0, common.CALLS
+    with ThreadPoolExecutor(workers) as ex:
+        for b in range(0, len(pend), workers * 5):
+            if common.QUOTA_HIT:
+                print("[periodic] DART 한도 도달 — 나머지는 다음 실행에서", flush=True)
+                break
+            batch = pend[b:b + workers * 5]
+            futs = [(r, ex.submit(_fetch_both, r[0], r[1], r[2])) for r in batch]
+            for (cc, y, rc, rns, nm), f in futs:
+                try:
+                    got = f.result()
+                except Exception as e:  # noqa
+                    log(con, cc, "periodic_new", "fail", f"{y} {rc} {e}")
+                    got = []
+                ids = rns.split(",")
+                q = ",".join("?" * len(ids))
+                n = 0
+                for fs, lst in got:
+                    if lst:
+                        n += store_raw(con, cc, y, rc, fs, lst, prev=True)[0]
+                if n:
+                    con.execute("DELETE FROM quarters_done WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND status='empty'", (cc, y, rc))
+                    build_kpi(con, cc, y, rc)
+                    build_kpi(con, cc, str(int(y) - 1), rc)
+                    con.execute(f"UPDATE periodic_new SET status='반영', done_at=?, tries=tries+1 WHERE rcept_no IN ({q})", (now(), *ids))
+                    n_ok += 1
+                else:
+                    con.execute(f"UPDATE periodic_new SET tries=tries+1 WHERE rcept_no IN ({q})", ids)
+                    n_wait += 1
+            con.commit()
+            if (b // (workers * 5)) % 10 == 9:
+                print(f"[periodic] {min(b + workers * 5, len(pend))}/{len(pend)} · 반영 {n_ok}", flush=True)
     print(f"[periodic] 재무 반영 {n_ok}건 · 재무 API 미게시(다음 실행 재시도) {n_wait}건 · DART {common.CALLS - c0}콜", flush=True)
-    if ok_cc and not common.QUOTA_HIT:
+    if light:
+        return n_ok
+    todo = [r[0] for r in con.execute("SELECT DISTINCT corp_code FROM periodic_new WHERE status='반영' AND notes_at IS NULL")]
+    if todo and not common.QUOTA_HIT:
         try:
             import business
-            business.run_notes(con, ok_cc)                 # 주석 원문을 새 보고서 기준으로(새 보고서일 때만 원문 1콜 추가)
+            business.run_notes(con, todo)                  # 주석 원문을 새 보고서 기준으로(새 보고서일 때만 원문 1콜 추가)
+            if not common.QUOTA_HIT:
+                q = ",".join("?" * len(todo))
+                con.execute(f"UPDATE periodic_new SET notes_at=? WHERE status='반영' AND notes_at IS NULL AND corp_code IN ({q})", (now(), *todo))
         except Exception as e:  # noqa
             print(f"[periodic] 주석 갱신 실패: {e}", flush=True)
-    if ok_cc and not common.QUOTA_HIT:
-        try:
-            import da_xbrl
-            da_xbrl.run(corp_codes=ok_cc, con=con)         # 새 분기 상각비(XBRL)
-        except Exception as e:  # noqa
-            print(f"[periodic] 상각비 계산 실패: {e}", flush=True)
     con.commit()
     return n_ok
 
