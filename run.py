@@ -860,6 +860,28 @@ def main():
         cls["미판정"] = sum(unj.values())
         print(f"[정확도점검] 의심 {len(rows2):,}행 분류 {dict(cls)} · 미판정 폭 {dict(unj)}", flush=True)
         print(f"[정확도점검] 미판정 중 실제 오류 추정 약 {est:,.0f}행(구간별 판정표본 오류율 적용)", flush=True)
+    elif a.job == "rawdump" and a.type == "3Q현황":   # 2026-11-14 사용자 '진행상황': 2026 3Q 반영·상각비 채움 현황(DART·AI 0)
+        import collections as _co
+        st = con.execute("SELECT bsns_year||' '||reprt_code, status, COUNT(*) FROM periodic_new GROUP BY 1,2 ORDER BY 1,2").fetchall()
+        print(f"[3Q현황] 새 정기보고서 처리 {st}", flush=True)
+        rows = con.execute("""SELECT k.corp_code, k.fs_div, k.revenue, k.op_income, k.da, k.da_src FROM fin_kpi k
+                              WHERE k.bsns_year='2026' AND k.reprt_code='11014'""").fetchall()
+        cc = {r[0] for r in rows}
+        main = {}
+        for r in rows:                                   # 회사별 주 재무제표(연결 우선)
+            if r[0] not in main or r[1] == "CFS":
+                main[r[0]] = r
+        m = list(main.values())
+        n_op = sum(1 for r in m if r[3] is not None); n_da = sum(1 for r in m if r[4])
+        src = _co.Counter((r[5] or "-").split(":")[0] for r in m if r[4])
+        print(f"[3Q현황] 2026 3Q 재무 보유 {len(cc):,}사 · 영업이익 {n_op:,}사 · 상각비 있음 {n_da:,}사({n_da/max(n_op,1)*100:.1f}%) · 빈칸 {n_op-n_da:,}사 · 출처 {dict(src)}", flush=True)
+        tot = con.execute("SELECT COUNT(*) FROM company WHERE stock_code IS NOT NULL AND stock_code!=''").fetchone()[0]
+        print(f"[3Q현황] 상장사 {tot:,}사 중 3Q 반영 {len(cc):,}사", flush=True)
+        try:
+            tried = con.execute("SELECT COUNT(DISTINCT corp_code) FROM da_xbrl WHERE bsns_year='2026' AND reprt_code='11014'").fetchone()[0]
+            print(f"[3Q현황] XBRL 상각비 시도 {tried}사", flush=True)
+        except Exception as e:  # noqa
+            print(e)
     elif a.job == "rawdump" and a.type == "통화점검":   # 2026-11-10: 네오이뮨텍 재무가 USD인데 원화로 저장·표시 — 원화 아닌 공시 회사 범위 확인(DART 회사당 1콜)
         from common import dart_get as _dg
         cs = con.execute("""SELECT c.corp_code, c.corp_name, c.stock_code, c.adres, MAX(k.bsns_year) FROM company c JOIN fin_kpi k ON k.corp_code=c.corp_code
