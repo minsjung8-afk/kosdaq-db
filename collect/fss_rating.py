@@ -210,10 +210,21 @@ def collect_company(con, c, years=3):
     return store_rows(con, c, fetch_company_rows(c, years))
 
 
-def run(corp_codes=None, years=3, resume=True):
-    con = connect()
+def run(corp_codes=None, years=3, resume=True, budget_min=None, only_if_running=False, con=None):
+    """budget_min: 시간 예산(분, 기본 환경변수 RATING_BUDGET_MIN 또는 150)
+    only_if_running: 야간 catchup용 — 최근 RESUME_DAYS일 안에 시작된 전수 조회가 덜 끝났을 때만 이어서(아니면 즉시 반환)"""
+    con = con or connect()
+    if only_if_running:
+        st = con.execute("SELECT MIN(at) FROM fetch_log WHERE job='rating' AND status='ok' AND at >= date('now', ?)", (f"-{RESUME_DAYS} days",)).fetchone()[0]
+        if not st:
+            print("[rating] 진행 중인 전수 조회 없음 — 건너뜀", flush=True)
+            return 0
     q = "SELECT corp_code, corp_name, corp_name_full FROM company ORDER BY corp_name"
     cs = [dict(r) for r in con.execute(q)]
+    # 2026-11-15: 11/15 전수 조회가 150분 제한으로 2,100/3,175사에서 멈춤 — 이름순이라 매번 뒤쪽(약 1,000사)이 다음 달까지 빠짐.
+    #   마지막 조회가 오래된 회사부터(한 번도 안 된 회사 최우선) 조회하고, 남은 분량은 야간 catchup이 이어받는다
+    last = {r[0]: r[1] for r in con.execute("SELECT corp_code, MAX(at) FROM fetch_log WHERE job='rating' AND status='ok' GROUP BY corp_code")}
+    cs.sort(key=lambda c: last.get(c["corp_code"]) or "")
     if corp_codes:
         cs = [c for c in cs if c["corp_code"] in corp_codes]
     if resume:
@@ -226,7 +237,7 @@ def run(corp_codes=None, years=3, resume=True):
     # 180분 job 제한에 걸려 취소 → 저장·업로드 전부 건너뜀(2,500사 진행분 유실). 200사 묶음으로 넣고, 예산(기본 150분) 초과나 INT면
     # 남은 작업을 취소하고 커밋 후 정상 종료 — 다음 run이 '최근 10일 완료분 제외'로 이어받는다
     import os, signal
-    budget = float(os.environ.get("RATING_BUDGET_MIN", "150")) * 60
+    budget = float(budget_min if budget_min else os.environ.get("RATING_BUDGET_MIN", "150")) * 60
     t0 = time.time()
     stop = {"v": False}
     prev = signal.getsignal(signal.SIGINT)
