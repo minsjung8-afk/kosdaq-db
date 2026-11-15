@@ -864,7 +864,7 @@ def main():
     elif a.job == "rawdump" and a.type == "3Q현황":   # 2026-11-14 사용자 '진행상황': 2026 3Q 반영·상각비 채움 현황(DART·AI 0)
         import collections as _co
         st = con.execute("SELECT bsns_year||' '||reprt_code, status, COUNT(*) FROM periodic_new GROUP BY 1,2 ORDER BY 1,2").fetchall()
-        print(f"[3Q현황] 새 정기보고서 처리 {st}", flush=True)
+        print(f"[3Q현황] 새 정기보고서 처리 {[tuple(r) for r in st]}", flush=True)
         rows = con.execute("""SELECT k.corp_code, k.fs_div, k.revenue, k.op_income, k.da, k.da_src FROM fin_kpi k
                               WHERE k.bsns_year='2026' AND k.reprt_code='11014'""").fetchall()
         cc = {r[0] for r in rows}
@@ -881,6 +881,13 @@ def main():
         try:
             tried = con.execute("SELECT COUNT(DISTINCT corp_code) FROM da_xbrl WHERE bsns_year='2026' AND reprt_code='11014'").fetchone()[0]
             print(f"[3Q현황] XBRL 상각비 시도 {tried}사", flush=True)
+            qd = con.execute("""SELECT fs_div, status, substr(fetched_at,1,10), COUNT(*) FROM quarters_done WHERE bsns_year='2026' AND reprt_code='11014'
+                                GROUP BY 1,2,3 ORDER BY 3 DESC LIMIT 12""").fetchall()
+            print(f"[3Q현황] quarters_done 2026 3Q {[tuple(r) for r in qd]}", flush=True)
+            fr = con.execute("SELECT fs_div, COUNT(DISTINCT corp_code) FROM fin_raw WHERE bsns_year='2026' AND reprt_code='11014' GROUP BY 1").fetchall()
+            print(f"[3Q현황] fin_raw 2026 3Q 회사 수 {[tuple(r) for r in fr]}", flush=True)
+            import quarters as _q
+            print(f"[3Q현황] needed_reports 앞 3개 {_q.needed_reports()[:3]}", flush=True)
         except Exception as e:  # noqa
             print(e)
     elif a.job == "rawdump" and a.type == "통화점검":   # 2026-11-10: 네오이뮨텍 재무가 USD인데 원화로 저장·표시 — 원화 아닌 공시 회사 범위 확인(DART 회사당 1콜)
