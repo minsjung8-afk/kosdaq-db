@@ -98,7 +98,9 @@ def process(con=None, limit=None, days=None, light=False, workers=4):
         scan(con, days=days)
     except Exception as e:  # noqa
         print(f"[periodic] 목록 조회 실패: {e}", flush=True)
-    con.execute("UPDATE periodic_new SET status='포기' WHERE status='대기' AND rcept_dt < ?", ((date.today() - timedelta(days=7)).strftime("%Y%m%d"),))
+    # 2026-11-17: 첫 실행(14일 소급)에서 7일 넘은 공시 9건이 한 번도 시도되지 않고 바로 '포기'됨(에이치엔에스하이텍 등) — 포기는 3회 이상 시도한 것만, 잘못 포기된 건은 되살림
+    con.execute("UPDATE periodic_new SET status='대기' WHERE status='포기' AND COALESCE(tries,0)=0")
+    con.execute("UPDATE periodic_new SET status='포기' WHERE status='대기' AND rcept_dt < ? AND COALESCE(tries,0) >= 3", ((date.today() - timedelta(days=7)).strftime("%Y%m%d"),))
     pend = con.execute("""SELECT corp_code, bsns_year, reprt_code, GROUP_CONCAT(rcept_no), MAX(report_nm) FROM periodic_new WHERE status='대기'
                           GROUP BY corp_code, bsns_year, reprt_code ORDER BY MIN(rcept_dt)""").fetchall()
     if limit:
