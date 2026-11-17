@@ -865,6 +865,9 @@ def main():
         import collections as _co
         st = con.execute("SELECT bsns_year||' '||reprt_code, status, COUNT(*) FROM periodic_new GROUP BY 1,2 ORDER BY 1,2").fetchall()
         print(f"[3Q현황] 새 정기보고서 처리 {[tuple(r) for r in st]}", flush=True)
+        for r in con.execute("""SELECT p.status, c.corp_name, c.stock_code, c.market, p.rcept_dt, p.report_nm, p.tries FROM periodic_new p LEFT JOIN company c USING(corp_code)
+                                WHERE p.bsns_year='2026' AND p.reprt_code='11014' AND p.status IN ('포기','대기') ORDER BY p.status, p.rcept_dt"""):
+            print(f"[3Q현황] 미반영 {tuple(r)}", flush=True)
         rows = con.execute("""SELECT k.corp_code, k.fs_div, k.revenue, k.op_income, k.da, k.da_src FROM fin_kpi k
                               WHERE k.bsns_year='2026' AND k.reprt_code='11014'""").fetchall()
         cc = {r[0] for r in rows}
