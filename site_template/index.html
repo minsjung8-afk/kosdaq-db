@@ -682,7 +682,11 @@ async function open(code){
       const th=`<tr><th class="l">구 분</th>${C.map(c=>`<th>${esc(c.label)}${c.kind!=='annual'?'<small>누적</small>':''}</th>`).join('')}</tr>`;
       const tr=(lb,vals,cls,fmt)=>`<tr class="${cls||''}"><td class="l">${lb}</td>${vals.map(v=>`<td>${(fmt||P)(v)}</td>`).join('')}</tr>`;
       const grp=(lb,g)=>tr(lb,G[g].total,'g')+G[g].items.map(it=>tr(esc(it.nm),it.v,'sub')).join('');
-      let bs=th+tr('자산총계',B.total_assets,'tot')+grp('유동자산','ca')+grp('비유동자산','nca')+tr('부채총계',B.total_liab,'tot')+grp('유동부채','cl')+grp('비유동부채','ncl')+tr('총차입금 <small>차입금+사채+리스부채</small>',B.borrowings,'debt')+tr('자본총계',B.equity,'tot')+tr('자본금',B.capital,'sub');
+      const items=g=>(G[g]?G[g].items:[]).map(it=>tr(esc(it.nm),it.v,'sub')).join('');
+      let bs=th+(X.nocur   // 유동·비유동 구분 없는 표(금융사): 자산·부채 바로 아래 주요 계정
+        ? tr('자산총계',B.total_assets,'tot')+items('ta')+tr('부채총계',B.total_liab,'tot')+items('tl')
+        : tr('자산총계',B.total_assets,'tot')+grp('유동자산','ca')+grp('비유동자산','nca')+tr('부채총계',B.total_liab,'tot')+grp('유동부채','cl')+grp('비유동부채','ncl'))
+        +tr('총차입금 <small>차입금+사채+리스부채</small>',B.borrowings,'debt')+tr('자본총계',B.equity,'tot')+tr('자본금',B.capital,'sub');
       const rev=B.revenue,op=B.op_income,eb=B.ebitda,fc=B.int_exp;
       let is=th+`<tr class="hd"><td colspan="${n+1}">▸ 손익계산서</td></tr>`+tr('매출액',rev,'g')+tr('영업이익',op)+tr('EBITDA',eb)+tr('이자비용',fc)+tr('당기순이익',B.net_income)+tr('영업활동현금흐름(OCF)',B.cfo)
         +`<tr class="hd"><td colspan="${n+1}">▸ 주요 재무비율 (%)</td></tr>`+tr('영업이익률',pct(op,rev),'',P1)+tr('EBITDA%',pct(eb,rev),'',P1)+tr('유동비율',pct(G.ca.total,G.cl.total),'',P1)+tr('부채비율',pct(B.total_liab,B.equity),'',P1)+tr('차입금의존도',pct(B.borrowings,B.total_assets),'',P1)+tr('EBITDA/금융비용',div(eb,fc),'',PX);
@@ -1097,7 +1101,9 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
         line(3,0,'구 분',C,ST.hd,null,ST.hdL); line(3,RC,'구 분',C,ST.hd,null,ST.hdL);
         let r=4; const L=(label,vals,st,z)=>{ line(r++,0,label,vals.map(n),st,z||NUM); };
         const grp=(lb,g)=>{ L(lb,G[g].total,ST.sub); G[g].items.forEach(it=>L('   '+it.nm,it.v,ST.item)); };
-        L('자산총계',B.total_assets,ST.tot); grp('유동자산','ca'); grp('비유동자산','nca'); L('부채총계',B.total_liab,ST.tot); grp('유동부채','cl'); grp('비유동부채','ncl');
+        const its=g=>(G[g]?G[g].items:[]).forEach(it=>L('   '+it.nm,it.v,ST.item));
+        if(X.nocur){ L('자산총계',B.total_assets,ST.tot); its('ta'); L('부채총계',B.total_liab,ST.tot); its('tl'); }
+        else { L('자산총계',B.total_assets,ST.tot); grp('유동자산','ca'); grp('비유동자산','nca'); L('부채총계',B.total_liab,ST.tot); grp('유동부채','cl'); grp('비유동부채','ncl'); }
         L('총차입금 (차입금+사채+리스부채)',B.borrowings,ST.cream); L('자본총계',B.equity,ST.tot); L('자본금',B.capital,ST.item); const rEnd=r;
         let q=4; const R=(label,vals,st,z,raw)=>{ line(q++,RC,label,raw?vals:vals.map(n),st,z||NUM); };
         line(q++,RC,'▸ 손익계산서',C.map(()=>''),ST.sec);
