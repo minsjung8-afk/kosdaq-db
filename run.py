@@ -861,6 +861,12 @@ def main():
         cls["미판정"] = sum(unj.values())
         print(f"[정확도점검] 의심 {len(rows2):,}행 분류 {dict(cls)} · 미판정 폭 {dict(unj)}", flush=True)
         print(f"[정확도점검] 미판정 중 실제 오류 추정 약 {est:,.0f}행(구간별 판정표본 오류율 적용)", flush=True)
+    elif a.job == "rawdump" and a.type == "보증스캔":   # 2026-11-18 사용자 '진행해': CP·전단채 평가서 본문의 보증·매입보장 문구 수집(NICE인프라 신한은행 보증 CP처럼 평가대상 이름에 표시 없는 경우) — 금감원 PDF, AI 0
+        import rating_guar
+        cc = None
+        if a.codes:
+            cc = {r[0] for r in con.execute(f"SELECT corp_code FROM company WHERE corp_code IN ({','.join('?' * len(a.codes))}) OR stock_code IN ({','.join('?' * len(a.codes))})", (*a.codes, *a.codes))}
+        rating_guar.scan(con, corp_codes=cc, limit=a.limit)
     elif a.job == "rawdump" and a.type == "분할점검":   # 2026-11-18 사용자: SK하이닉스 52주 최고 2,943,380원(소수점) — 수정주가 배율 오검출 범위 확인(DART·KRX·AI 0콜)
         import prices as _pr, math
         old = lambda r, pr: abs(pr / r - 1) < 0.25
@@ -879,6 +885,12 @@ def main():
             print(f"[분할점검] 유지 {x}", flush=True)
         for x in sorted(drop, key=lambda x: -abs(math.log(x[3])))[:60]:
             print(f"[분할점검] 제외 {x}", flush=True)
+        import collections as _co
+        bk = _co.Counter("<2%" if abs(x[3] - 1) < 0.02 else "2~5%" if abs(x[3] - 1) < 0.05 else "5~9%" if abs(math.log(x[3])) < math.log(1.09) else "9%↑" for x in drop)
+        print(f"[분할점검] 제외 배율 크기별 {dict(bk)}", flush=True)
+        for x in [x for x in drop if abs(math.log(x[3])) >= math.log(1.09)][:40]:
+            px = {r[0]: r[1] for r in con.execute("SELECT dt, close FROM price_daily WHERE stock_code=? AND dt<=? ORDER BY dt DESC LIMIT 2", (x[0], x[2]))}
+            print(f"[분할점검] 제외(9%↑) {x} 종가 {px}", flush=True)
         for sc in ("000660", "005930"):
             o = _pr.split_factors(con, sc, rule=old)
             cum = 1.0
