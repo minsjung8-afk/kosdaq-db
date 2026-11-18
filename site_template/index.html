@@ -83,8 +83,9 @@ main{overflow:auto;min-width:0;padding:18px 24px 48px}
 .empty{color:var(--mute);padding:40px 0;max-width:60ch}
 .empty.intro{max-width:1100px;padding:20px 0}
 .empty.intro video{display:block;width:100%;aspect-ratio:16/9;background:#0b1b33;border-radius:12px;box-shadow:0 8px 28px rgba(10,25,48,.25)}
-.empty.intro p{margin:14px 2px 0;max-width:80ch}
 @media (prefers-reduced-motion:reduce){.empty.intro video{display:none}}
+.empty.intro p{margin:14px 2px 0;max-width:80ch}
+
 h2{font-size:22px;margin:0 0 2px;font-weight:800;letter-spacing:-.01em;color:var(--fg)}
 .sub-title{color:var(--ink2);font-size:12.5px;margin-bottom:14px}
 section{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px;padding:0 0 14px;overflow:hidden}
@@ -249,7 +250,14 @@ a{color:var(--navy2)}
   #visit{display:none}
   .mhide{display:none!important}
 }
-@media print{body{display:block}aside,header{display:none}section{break-inside:avoid}}
+@media print{body{display:block}aside,header,#band,#xbar,#updBtn,#instBtn,#updPanel,#updBack,#addModal,#visit{display:none!important}main{overflow:visible;padding:0}section{break-inside:auto}section.fold>*:not(h3){display:block!important}section>h3::after{content:''}.twrap{overflow:visible}table{break-inside:auto}tr{break-inside:avoid}.ibkfin.fold .ibkb{display:block!important}}
+.xbar{display:flex;gap:6px;justify-content:flex-end;margin:-30px 0 8px}.xbar button{font:700 11.5px var(--font);color:var(--navy);background:#fff;border:1px solid var(--line2);border-radius:999px;padding:5px 11px;cursor:pointer}.xbar button:hover{background:var(--nbg2)}.xbar button[data-x=pdf]{background:var(--gold-soft);border-color:var(--gold-soft);color:#0f2942}
+.ibkfin .tg{display:inline-block;width:12px;color:var(--gold)}.ibkfin.fold .ibkb{display:none}.ibkfin:not(.fold) .tg{transform:rotate(90deg)}
+.ibk2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}@media (max-width:1150px){.ibk2{grid-template-columns:minmax(0,1fr)}}
+.ibkt{font-size:10.5px;font-weight:700;color:#2c5f8d;background:#e9eef6;padding:3px 7px;border-radius:3px 3px 0 0}
+table.ibk{width:100%;border-collapse:collapse;font-size:11.5px}table.ibk th,table.ibk td{border:1px solid #cfd6e4;padding:3px 7px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}table.ibk th{background:#2c5f8d;color:#fff;font-size:11px}table.ibk th.l,table.ibk td.l{text-align:left}table.ibk th small{display:block;font-weight:400;font-size:9px;opacity:.8}
+table.ibk tr.tot td{background:#1a4a7a;color:#fff;font-weight:700}table.ibk tr.g td{background:#e8eaed;font-weight:700}table.ibk tr.debt td{background:#fdf4e3;font-weight:700}table.ibk tr.sub td.l{padding-left:18px;color:var(--ink2)}table.ibk tr.hd td{background:#d8e3ee;color:#1a4a7a;font-weight:700;font-size:10px;text-align:left}table.ibk td.l small{font-weight:400;color:var(--mute);margin-left:4px}
+@media (max-width:760px){.xbar{margin:0 0 8px;justify-content:flex-start;flex-wrap:wrap}}
 
 /* 3. 재무현황 개편(2026-10-28): 단순 표 + 특이사항 패널 */
 .fin2col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start;margin-bottom:8px}.fin2col.one{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}   /* 2026-11-18 사용자: 별도(또는 연결)만 있어도 둘 다 있는 회사와 같은 폭(왼쪽 절반) — 넓게 늘리면 가독성 저하 */
@@ -434,6 +442,7 @@ async function open(code){
   const d=await fetch(`data/c/${code}.json`).then(r=>r.json()).catch(()=>null);
   if(!d){$('#main').innerHTML='<div class="empty">상세 데이터가 없습니다.</div>';return}
   FXC=d.currency&&d.currency!=='KRW'?d.currency:null;
+  window.CURD=d;
   const c=d.company, ps=d.price_summary||{}, kp=d.kpi.CFS||d.kpi.OFS||[], last=[...kp].reverse().find(r=>r.kind==='annual')||kp[kp.length-1]||{}, ao=d.audit[0];
   const opClass=o=>!o?'':/^적정/.test(o)?'good':/한정/.test(o)?'warn':'bad';   // DART 값은 '적정의견'·'한정의견'·'의견거절'
   // 대표 등급: 장기(단기사채 제외)·비정정 최신 → 단기·비정정 최신 → 정정 포함 (build_site.current_rating과 같은 규칙, 2026-10-25)
@@ -445,6 +454,7 @@ async function open(code){
   const fl=d.flags||[];
   const flagStrip=fl.length?`<div class="flags">${fl.map(([n,l,t])=>`<span class="flag ${l}" title="${esc(t)}">${esc(n)}${t?` <small>${esc(t)}</small>`:''}</span>`).join('')}</div>`:`<div class="flags"><span class="flag ok">경고 플래그 없음</span></div>`;
   let h=`<h2>${esc(c.corp_name)}${c.delisted_dt?'<span class="dl" style="font-size:12px;vertical-align:middle">상장폐지</span>':''}${rtBadge}</h2><div class="sub-title">${c.market==='UNLISTED'?'비상장 · DART '+esc(c.corp_code):c.stock_code+' · '+esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
+  h+=`<div class="xbar" id="xbar"><button type="button" data-x="print" title="브라우저 인쇄 — 접힌 섹션을 모두 펼쳐 인쇄">🖨 인쇄</button><button type="button" data-x="word" title="이 회사 화면 전체를 Word(.doc)로 저장 — 차트는 그림으로">📝 Word 저장</button><button type="button" data-x="pdf" title="인쇄 창에서 'PDF로 저장'을 고르세요">📄 PDF 저장</button></div>`;   // 2026-11-18 사용자: 개별 업체 화면 내려받기(pdf·word)·인쇄
   h+=flagStrip;
   if(FXC) h+=`<div class="src" style="margin:6px 0 10px;padding:8px 12px;border:1px solid var(--warn);color:var(--fg);background:var(--panel)"><b>외화 공시</b> · 이 회사는 재무제표를 <b>${FXC}</b>로 공시합니다. 재무 금액은 <b>백만 ${FXC}</b>(원화 환산 아님)로 표시하고, 원화 시가총액과 섞이는 PER·EV/EBITDA·비교 회사는 표시하지 않습니다. 시가총액·주가·거래대금·메자닌은 원화입니다.</div>`;
   h+=`<div class="tiles">
@@ -659,6 +669,25 @@ async function open(code){
        const srcs=rows.map(r=>`${r.label||r.bsns_year} ${RN[r.reprt_code]||''}${r.kind!=='annual'?'(누적)':''}${r.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">${r.rcept_no}</a>`:''}`);
        if(srcs.length) h+=`<div class="src fsrc" style="margin-top:4px;margin-bottom:2px"><b>기준 보고서</b> · ${srcs.join(' · ')}</div>`;}
     }
+  }
+  if(d.ibk_fin&&(d.ibk_fin.CFS||d.ibk_fin.OFS)){   // 2026-11-18 사용자: 체크리스트 ⑥ 당사 양식 재무현황(접어 둠) + 엑셀 내려받기 — 유동·비유동 자산·부채별 규모 큰 계정
+    const IB=d.ibk_fin, fsList=[['CFS','연결'],['OFS','별도']].filter(([f])=>IB[f]);
+    h+=`<div class="ibkfin fold" id="ibkfin"><div class="cap2 ibkh" style="margin:14px 0 6px;cursor:pointer;user-select:none"><span class="tg">▸</span>재무현황 · 당사 양식 (체크리스트 ⑥) <span class="src" style="font-weight:400">${fsList.map(x=>x[1]).join(' · ')} · 단위 ${UNIT()} · 음수 ( )</span><span style="flex:1"></span><button type="button" class="mbtn" data-x="xlsx" style="font-size:11px;padding:3px 10px" title="연결·별도 시트로 엑셀 저장">📊 엑셀 내려받기</button></div><div class="ibkb">`;
+    const P=v=>v==null?'N/A':(x=>x<0?'('+Math.abs(x).toLocaleString('ko-KR')+')':x.toLocaleString('ko-KR'))(Math.round(v/1e8));
+    const P1=v=>v==null?'N/A':(v<0?'('+Math.abs(v).toFixed(1)+')':v.toFixed(1)), PX=v=>v==null?'N/A':v.toFixed(2)+'x';
+    const pct=(a,b)=>a.map((x,i)=>x!=null&&b[i]?x/b[i]*100:null), div=(a,b)=>a.map((x,i)=>x!=null&&b[i]?x/b[i]:null), sub=(a,b)=>a.map((x,i)=>x!=null&&b[i]!=null?x-b[i]:null);
+    for(const [fs,fl] of fsList){
+      const X=IB[fs], C=X.cols, B=X.base, G=X.groups, n=C.length;
+      const th=`<tr><th class="l">구 분</th>${C.map(c=>`<th>${esc(c.label)}${c.kind!=='annual'?'<small>누적</small>':''}</th>`).join('')}</tr>`;
+      const tr=(lb,vals,cls,fmt)=>`<tr class="${cls||''}"><td class="l">${lb}</td>${vals.map(v=>`<td>${(fmt||P)(v)}</td>`).join('')}</tr>`;
+      const grp=(lb,g)=>tr(lb,G[g].total,'g')+G[g].items.map(it=>tr(esc(it.nm),it.v,'sub')).join('');
+      let bs=th+tr('자산총계',B.total_assets,'tot')+grp('유동자산','ca')+grp('비유동자산','nca')+tr('부채총계',B.total_liab,'tot')+grp('유동부채','cl')+grp('비유동부채','ncl')+tr('총차입금 <small>차입금+사채+리스부채</small>',B.borrowings,'debt')+tr('자본총계',B.equity,'tot')+tr('자본금',B.capital,'sub');
+      const rev=B.revenue,op=B.op_income,eb=B.ebitda,fc=B.int_exp;
+      let is=th+`<tr class="hd"><td colspan="${n+1}">▸ 손익계산서</td></tr>`+tr('매출액',rev,'g')+tr('영업이익',op)+tr('EBITDA',eb)+tr('이자비용',fc)+tr('당기순이익',B.net_income)+tr('영업활동현금흐름(OCF)',B.cfo)
+        +`<tr class="hd"><td colspan="${n+1}">▸ 주요 재무비율 (%)</td></tr>`+tr('영업이익률',pct(op,rev),'',P1)+tr('EBITDA%',pct(eb,rev),'',P1)+tr('유동비율',pct(G.ca.total,G.cl.total),'',P1)+tr('부채비율',pct(B.total_liab,B.equity),'',P1)+tr('차입금의존도',pct(B.borrowings,B.total_assets),'',P1)+tr('EBITDA/금융비용',div(eb,fc),'',PX);
+      h+=`<div class="ibkfs" data-fs="${fs}"><div class="src" style="margin:6px 0 4px"><b>${fl}</b> 기준</div><div class="ibk2"><div><div class="ibkt">재무상태표</div><table class="ibk">${bs}</table></div><div><div class="ibkt">손익계산서 · 재무비율</div><table class="ibk">${is}</table></div></div></div>`;
+    }
+    h+=`<div class="src" style="margin-top:6px">출처 DART 정기보고서(XBRL) · 유동·비유동 자산·부채의 세부 계정은 최근 기간 기준 규모 순(그룹의 8% 이상, 2~5개) · 총차입금 = 단기·장기차입금 + 사채(CB·BW·EB·CP 포함) + 리스부채 · EBITDA = 영업이익 + 유무형상각비 · 분기 열은 누적(전년 동기 병기)</div></div></div>`;
   }
   h+=`</section>`;
   // 3-1 기발행 메자닌 (CB·BW·EB·종류주식): 미상환 현황(정기보고서) + 발행결정(주요사항보고서)을 회차로 합쳐 한 표
@@ -992,6 +1021,45 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
   btn.addEventListener('click',()=>panel.classList.contains('on')?closeP():openP()); document.getElementById('updClose').addEventListener('click',closeP); back.addEventListener('click',closeP);
   document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeP(); });
   fetch('data/updates.json').then(r=>r.ok?r.json():[]).then(j=>{ rows=j; const n=j.filter(d=>d.date>seen).length; if(n){ dot.textContent=n>9?'9+':n; dot.hidden=false; } }).catch(()=>{});
+})();
+</script>
+<script>
+// 2026-11-18 사용자: 개별 업체 화면 인쇄 · Word · PDF, 당사 양식 재무현황 접기/펼치기 · 엑셀 내려받기
+(function(){
+  const $m=()=>document.getElementById('main');
+  function unfoldAll(){ const f=[...$m().querySelectorAll('section.fold, .ibkfin.fold')]; f.forEach(e=>e.classList.remove('fold')); try{ fitTables(); }catch(e){} return ()=>f.forEach(e=>e.classList.add('fold')); }
+  function name(){ const h=$m().querySelector('h2'); return (h?h.childNodes[0].textContent:'회사').trim(); }
+  const today=()=>new Date().toISOString().slice(0,10);
+  function dl(blob,fn){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fn; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},1500); }
+  function doPrint(){ const back=unfoldAll(); const done=()=>{ back(); removeEventListener('afterprint',done); }; addEventListener('afterprint',done); setTimeout(()=>window.print(),150); }
+  function doWord(){ const back=unfoldAll(); setTimeout(()=>{ try{
+      const src=$m(), clone=src.cloneNode(true);
+      // 캔버스(차트)는 그림으로, 버튼·입력은 제거
+      const cv=src.querySelectorAll('canvas'), cc=clone.querySelectorAll('canvas');
+      cc.forEach((c,i)=>{ let img=document.createElement('img'); try{ img.src=cv[i].toDataURL('image/png'); }catch(e){} img.width=Math.min(640,cv[i].clientWidth||640); c.replaceWith(img); });
+      clone.querySelectorAll('button,input,select,#xbar,.xbar,.hint,[hidden]').forEach(e=>e.remove());
+      clone.querySelectorAll('[style]').forEach(e=>{ if(/display:\s*none/.test(e.getAttribute('style'))) e.remove(); });
+      clone.querySelectorAll('a').forEach(a=>{ if(a.href) a.setAttribute('href',a.href); });
+      const css=`body{font-family:'맑은 고딕',Malgun Gothic,Pretendard,sans-serif;font-size:10pt;color:#16233d}h2{font-size:18pt;margin:0 0 4pt}h3{font-size:12pt;background:#0f2547;color:#fff;padding:4pt 8pt;margin:14pt 0 6pt}table{border-collapse:collapse;width:100%;font-size:9pt;margin:4pt 0}th,td{border:1px solid #9aa7bd;padding:2pt 5pt}th{background:#2c5f8d;color:#fff}.src,.hint,.cap{color:#6b7488;font-size:8pt}.pill,.rt,.mk{display:inline-block;border:1px solid #cfd6e4;border-radius:4pt;padding:0 4pt;font-size:8pt}.cap2{font-weight:700;color:#1a3a6b;margin:8pt 0 3pt}`;
+      const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${name()}</title><style>${css}</style></head><body><p style="color:#6b7488;font-size:8pt">심사참고 DB · kosdaq-db.pages.dev · 출력 ${new Date().toLocaleString('ko-KR')} · 심사 참고용 요약, 원문은 DART·금감원</p>${clone.innerHTML}</body></html>`;
+      dl(new Blob(['\ufeff',html],{type:'application/msword'}),`${name()}_심사참고_${today()}.doc`);
+    } finally { back(); } },200); }
+  function doXlsx(){ const d=window.CURD; if(!d||!d.ibk_fin){ alert('당사 양식 재무현황 데이터가 없습니다.'); return; }
+    const go=()=>{ const wb=XLSX.utils.book_new(); const n=v=>v==null?null:Math.round(v/1e8*10)/10;
+      for(const [fs,fl] of [['CFS','연결'],['OFS','별도']]){ const X=d.ibk_fin[fs]; if(!X) continue; const C=X.cols.map(c=>c.label+(c.kind!=='annual'?'(누적)':'')), B=X.base, G=X.groups;
+        const rows=[[name()+' 재무현황 (당사 양식 · '+fl+' · 단위 억원)'],[],['재무상태표',...C],['자산총계',...B.total_assets.map(n)]];
+        const grp=(lb,g)=>{ rows.push([lb,...G[g].total.map(n)]); G[g].items.forEach(it=>rows.push(['  '+it.nm,...it.v.map(n)])); };
+        grp('유동자산','ca'); grp('비유동자산','nca'); rows.push(['부채총계',...B.total_liab.map(n)]); grp('유동부채','cl'); grp('비유동부채','ncl');
+        rows.push(['총차입금(차입금+사채+리스부채)',...B.borrowings.map(n)],['자본총계',...B.equity.map(n)],['자본금',...B.capital.map(n)],[],['손익계산서',...C],['매출액',...B.revenue.map(n)],['영업이익',...B.op_income.map(n)],['EBITDA',...B.ebitda.map(n)],['이자비용',...B.int_exp.map(n)],['당기순이익',...B.net_income.map(n)],['영업활동현금흐름(OCF)',...B.cfo.map(n)],[],['주요 재무비율(%)',...C]);
+        const r1=(a,b,k)=>a.map((x,i)=>x!=null&&b[i]?Math.round((k?x/b[i]:x/b[i]*100)*100)/100:null);
+        rows.push(['영업이익률',...r1(B.op_income,B.revenue)],['EBITDA%',...r1(B.ebitda,B.revenue)],['유동비율',...r1(G.ca.total,G.cl.total)],['부채비율',...r1(B.total_liab,B.equity)],['차입금의존도',...r1(B.borrowings,B.total_assets)],['EBITDA/금융비용(배)',...r1(B.ebitda,B.int_exp,1)],[],['출처 DART 정기보고서(XBRL) · 심사참고 DB kosdaq-db.pages.dev · '+today()]);
+        const ws=XLSX.utils.aoa_to_sheet(rows); ws['!cols']=[{wch:30},...C.map(()=>({wch:14}))];
+        const ref=XLSX.utils.decode_range(ws['!ref']); for(let R=0;R<=ref.e.r;R++) for(let Cc=1;Cc<=ref.e.c;Cc++){ const cell=ws[XLSX.utils.encode_cell({r:R,c:Cc})]; if(cell&&typeof cell.v==='number') cell.z='#,##0.0;(#,##0.0);"-"'; }
+        XLSX.utils.book_append_sheet(wb,ws,fl); }
+      XLSX.writeFile(wb,`${name()}_재무현황_당사양식_${today()}.xlsx`); };
+    if(window.XLSX) go(); else { const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload=go; sc.onerror=()=>alert('엑셀 라이브러리를 불러오지 못했습니다(네트워크).'); document.head.appendChild(sc); } }
+  document.addEventListener('click',e=>{ const b=e.target.closest('[data-x]'); if(b){ const x=b.dataset.x; if(x==='print'||x==='pdf') doPrint(); else if(x==='word') doWord(); else if(x==='xlsx'){ e.stopPropagation(); doXlsx(); } return; }
+    const hd=e.target.closest('.ibkh'); if(hd){ const box=hd.closest('.ibkfin'); box.classList.toggle('fold'); } });
 })();
 </script>
 </body>
