@@ -338,6 +338,7 @@ def company_detail(con, c):
         "quarters": _quarters(con, cc),
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
+        "ibk_fin": _ibk_fin(con, cc, kpi),
         "notes_raw": _notes_raw(con, cc),
         "borrow_bd": _safe(lambda: _borrow_bd(con, cc)),
         "notes_struct": (lambda r: {"rcept_no": r[0]["rcept_no"], "report_nm": r[0]["report_nm"], **json.loads(r[0]["json"])} if r else None)(
@@ -979,6 +980,82 @@ def _updates(con, index, days=14):
     return rows[0]["date"] if rows else None
 
 
+_SKIP_NM = re.compile(r"합계|소계|총계|^자산$|^부채$|^자본$|^유동자산$|^비유동자산$|^유동부채$|^비유동부채$|자본과부채|부채와자본|자본및부채|부채및자본")
+
+
+def _ibk_fin(con, cc, kpi):
+    """당사 양식 재무현황(체크리스트 ⑥, 2026-11-18 사용자): 재무현황 표와 같은 기간(연간 2개년 + 전년 동기 + 최근 분기, 분기 없으면 연간 3개년)에 대해
+    재무상태표 원문(fin_raw BS)에서 유동자산·비유동자산·유동부채·비유동부채별 규모 큰 계정을 뽑는다(최근 기간 기준 상위, 그룹 합계의 8% 이상·최대 5개·최소 2개).
+    계정 그룹은 XBRL 순번(ord)으로 판정: 소계(유동자산 등)가 세부보다 앞에 오는 표(헤더 선행)와 뒤에 오는 표 모두 처리(financials.borrow_items와 같은 규칙)"""
+    from financials import _norm_nm
+    out = {}
+    for fs, rows in (kpi or {}).items():
+        if not rows:
+            continue
+        per = []
+        for r in rows:
+            bs = [dict(x) for x in con.execute("SELECT account_nm, thstrm_amount AS v, ord FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND sj_div='BS' AND thstrm_amount IS NOT NULL ORDER BY ord",
+                                              (cc, r["bsns_year"], r["reprt_code"], fs))]
+            for x in bs:
+                x["nm"] = _norm_nm(x["account_nm"])
+            def o(name):
+                return next((x["ord"] for x in bs if x["nm"] == name and x["ord"] is not None), None)
+            o_ca, o_nca, o_ta, o_cl, o_ncl, o_tl = o("유동자산"), o("비유동자산"), o("자산총계"), o("유동부채"), o("비유동부채"), o("부채총계")
+            if o_ta is None:
+                o_ta = next((x["ord"] for x in bs if x["nm"] in ("자산", "자산합계") and x["ord"] is not None), None)
+            if o_tl is None:
+                o_tl = next((x["ord"] for x in bs if x["nm"] in ("부채", "부채합계") and x["ord"] is not None), None)
+            o_cash = next((x["ord"] for x in bs if "현금및현금성자산" in x["nm"] and x["ord"] is not None), None)
+            hdr_first = True if (o_ca is None or o_cash is None) else o_ca < o_cash
+            def grp(x):
+                oo = x["ord"]
+                if oo is None or _SKIP_NM.search(x["nm"]):
+                    return None
+                if hdr_first:
+                    if o_ca is not None and o_nca is not None and o_ca < oo < o_nca: return "ca"
+                    if o_nca is not None and o_ta is not None and o_nca < oo < o_ta: return "nca"
+                    if o_cl is not None and o_ncl is not None and o_cl < oo < o_ncl: return "cl"
+                    if o_ncl is not None and o_tl is not None and o_ncl < oo < o_tl: return "ncl"
+                else:
+                    if o_ca is not None and oo < o_ca and (o_ta is None or oo < o_ta): return "ca"
+                    if o_ca is not None and o_nca is not None and o_ca < oo < o_nca: return "nca"
+                    if o_ta is not None and o_cl is not None and o_ta < oo < o_cl: return "cl"
+                    if o_cl is not None and o_ncl is not None and o_cl < oo < o_ncl: return "ncl"
+                return None
+            items = {}
+            for x in bs:
+                g = grp(x)
+                if g and x["v"]:
+                    items.setdefault(g, {})
+                    if x["nm"] not in items[g]:
+                        items[g][x["nm"]] = x["v"]
+            tot = {"ca": r.get("cur_assets"), "nca": (r["total_assets"] - r["cur_assets"]) if r.get("total_assets") and r.get("cur_assets") else None,
+                   "cl": r.get("cur_liab"), "ncl": (r["total_liab"] - r["cur_liab"]) if r.get("total_liab") and r.get("cur_liab") else None}
+            per.append({"label": r.get("label"), "kind": r.get("kind"), "items": items, "tot": tot})
+        if not per:
+            continue
+        last = per[-1]
+        pick = {}
+        for g in ("ca", "nca", "cl", "ncl"):
+            cand = sorted(last["items"].get(g, {}).items(), key=lambda kv: -abs(kv[1]))
+            if not cand:      # 최근 분기 BS가 없으면(감사보고서만 등) 그 앞 기간에서
+                for pp in reversed(per[:-1]):
+                    cand = sorted(pp["items"].get(g, {}).items(), key=lambda kv: -abs(kv[1]))
+                    if cand: break
+            T = last["tot"].get(g) or (cand[0][1] if cand else 0)
+            chosen = []
+            for nm, v in cand:
+                if len(chosen) >= 5: break
+                if len(chosen) >= 2 and T and abs(v) < 0.08 * abs(T): break
+                chosen.append(nm)
+            pick[g] = chosen
+        cols = [{"label": p["label"], "kind": p["kind"]} for p in per]
+        groups = {g: {"total": [p["tot"].get(g) for p in per], "items": [{"nm": nm, "v": [p["items"].get(g, {}).get(nm) for p in per]} for nm in pick[g]]} for g in ("ca", "nca", "cl", "ncl")}
+        base = {k: [r.get(k) for r in rows] for k in ("total_assets", "total_liab", "equity", "capital", "borrowings", "cash", "revenue", "op_income", "ebitda", "int_exp", "net_income", "cfo")}
+        out[fs] = {"cols": cols, "groups": groups, "base": base}
+    return out or None
+
+
 def _downgrades(ratings, days=365):
     """최근 days일 안에 같은 평가사·같은 등급체계(장기/단기)·보증 아닌 평가에서 직전보다 낮아진 건 → [(평가사, 이전, 이후, 노치, 공시일)]"""
     from datetime import date, timedelta
@@ -1029,6 +1106,8 @@ def build():
     for fn in ("intro.mp4", "intro.jpg"):                                  # 첫 화면 소개 영상(2026-11-18)
         if (TEMPLATE.parent / fn).exists():
             shutil.copy(TEMPLATE.parent / fn, SITE / fn)
+    if (TEMPLATE.parent / "intro").is_dir():                               # 첫 화면 소개 슬라이드(HTML, 2026-11-18 — 영상 대체)
+        shutil.copytree(TEMPLATE.parent / "intro", SITE / "intro")
     for fn in ("manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):   # PWA(2026-10-29, 앱 이름 '심사DB')
         shutil.copy(TEMPLATE.parent / fn, SITE / fn)
     (SITE / "sw.js").write_text((TEMPLATE.parent / "sw.js").read_text(encoding="utf-8").replace("__BUILD__", __import__("datetime").datetime.now().strftime("%Y%m%d%H%M")), encoding="utf-8")
