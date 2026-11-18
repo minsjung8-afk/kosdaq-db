@@ -371,7 +371,7 @@ def company_detail(con, c):
                                ORDER BY trmend_book_amt DESC LIMIT 8""", cc, cc),   # 최신 보고서(접수번호 최대) 세트
     }
     # 2026-10-29 사용자 결정: 타사 보증부 등급(은행·계열사 지급보증·신용보강 사채·CP)은 대상회사 신용도가 아니므로 대표 등급·플래그·평가서 요약에서 제외(이력 표에는 '보증부'로 남김)
-    mark_guar(d["ratings"] or [])
+    mark_guar(d["ratings"] or [], (c.get("stock_code"), c.get("corp_code")))
     gfiles = {r.get("file_url") for r in d["ratings"] or [] if r["guar"] and r.get("file_url")}
     if d.get("rating_summary") and d["rating_summary"].get("file_url") in gfiles:
         d["rating_summary"] = None
@@ -729,15 +729,36 @@ def _issue_no(r):
     return re.sub(r"\s", "", m.group(1)) if m else None
 
 
-def mark_guar(ratings):
+def _guar_manual():
+    """rating_guar_manual.json — 평가대상 이름에 보증 표시가 없지만 실제로는 타사 보증 기준인 등급(사용자 확인분).
+    2026-11-18 사용자: NICE인프라 기업어음 A1은 신한은행 보증 기준 등급(공시 평가대상은 '기업어음'뿐이라 자동 판별 불가)"""
+    try:
+        return {k: v for k, v in json.loads((ROOT / "rating_guar_manual.json").read_text(encoding="utf-8")).items() if not k.startswith("_")}
+    except Exception:  # noqa  파일 없음
+        return {}
+
+
+_GUAR_MANUAL = _guar_manual()
+
+
+def mark_guar(ratings, codes=()):
     """보증부 표시. 2026-11-18 사용자 지적(이랜드리테일): 같은 회차를 한 평가사는 '제124-1회(한국자산관리공사 지급보증) 담보부사채',
-    다른 평가사는 '제124-1회 일반사채'로 공시해 뒤쪽이 대표 등급 AAA로 잡힘 → 한 곳이라도 보증부로 적힌 회차는 같은 회차 전부 보증부로"""
+    다른 평가사는 '제124-1회 일반사채'로 공시해 뒤쪽이 대표 등급 AAA로 잡힘 → 한 곳이라도 보증부로 적힌 회차는 같은 회차 전부 보증부로
+    codes: 종목코드·고유번호 — rating_guar_manual.json에 있으면 지정한 평가대상(정규식)을 보증부로"""
     for r in ratings:
         r["guar"] = _guar(r)
     gno = {_issue_no(r) for r in ratings if r["guar"]} - {None}
     for r in ratings:
         if not r["guar"] and _issue_no(r) in gno:
             r["guar"] = True
+    for k in codes:
+        m = _GUAR_MANUAL.get(k or "")
+        if not m:
+            continue
+        for r in ratings:
+            if re.search(m.get("target") or ".", r.get("target_type") or "") and (not m.get("agency") or r.get("agency") in m["agency"]):
+                r["guar"] = True
+                r["guar_note"] = m.get("note")
     return ratings
 
 
