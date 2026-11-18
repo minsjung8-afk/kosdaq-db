@@ -13,13 +13,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import connect, log, now, UA  # noqa: E402
 
-VER = 1
+VER = 2      # 2026-11-18 v2: 첫 스캔 866건 중 386건에 문구가 있었으나 '보증기관'(면책 문구)·'신용보강'·'매입약정'(사업 설명)이 대부분 → 평가 개요의 보증 표기만 STRONG으로 판정
+STRONG = re.compile(r"지\s*급\s*보\s*증\s*[이을]\s*감\s*안|기업어음\s*\(\s*보증|단기사채\s*\(\s*보증|어음\s*보증\s*\]|보증\s*제공자|"
+                    r"보증부\s*(?:기업어음|전자단기사채|단기사채)|(?:기업어음|단기사채)\s*\(\s*[^)]{0,25}(?:지급|연대)\s*보증\s*\)|(?:지급|연대)\s*보증부\s*(?:기업어음|전자단기사채|단기사채)")
 KW = re.compile(r"지\s*급\s*보\s*증|보\s*증\s*기\s*관|보\s*증\s*인|보\s*증\s*처|매\s*입\s*보\s*장|매\s*입\s*약\s*정|신\s*용\s*공\s*여|신\s*용\s*보\s*강|유\s*동\s*성\s*공\s*여|"
                 r"보\s*증\s*부|보\s*증\s*에\s*의|보\s*증\s*을\s*바\s*탕|보\s*증\s*(?:한|하는|하고)")
 
 
 def ensure(con):
     con.execute("""CREATE TABLE IF NOT EXISTS rating_guar (file_url TEXT PRIMARY KEY, corp_code TEXT, hits TEXT, snip TEXT, fetched_at TEXT, ver INTEGER)""")
+    cols = [r[1] for r in con.execute("PRAGMA table_info(rating_guar)")]
+    for c, t in (("strong", "INTEGER"), ("strong_snip", "TEXT"), ("agency", "TEXT"), ("disc_dt", "TEXT")):
+        if c not in cols:
+            con.execute(f"ALTER TABLE rating_guar ADD COLUMN {c} {t}")
 
 
 def targets(con, corp_codes=None):
@@ -42,14 +48,16 @@ def targets(con, corp_codes=None):
 
 
 def find(text):
-    """→ (문구 목록, 앞뒤 문맥 최대 3개)"""
+    """→ (문구 목록, 앞뒤 문맥 최대 3개, 보증 표기 문맥 | None)"""
     t = re.sub(r"\s+", " ", text or "")
+    m = STRONG.search(t)
+    strong = t[max(0, m.start() - 60): m.end() + 60] if m else None
     hits, snips = [], []
     for m in KW.finditer(t):
         hits.append(re.sub(r"\s", "", m.group(0)))
         if len(snips) < 3:
             snips.append(t[max(0, m.start() - 70): m.end() + 70])
-    return hits, snips
+    return hits, snips, strong
 
 
 def scan(con=None, corp_codes=None, limit=None, workers=4):
@@ -69,16 +77,16 @@ def scan(con=None, corp_codes=None, limit=None, workers=4):
         data = requests.get(r[6], headers=UA, timeout=(15, 60)).content
         if data[:4] != b"%PDF":
             raise RuntimeError("PDF 아님")
-        best = ([], [], "")
+        best = ([], [], "", None)
         for name, fn in _pdf_texts(data, pages=3):
             try:
                 t = fn()
             except Exception:  # noqa
                 continue
-            h, s = find(t)
-            if len(t or "") > 50 and (h or not best[2]):
-                best = (h, s, name)
-            if h:
+            h, s, st = find(t)
+            if len(t or "") > 50 and (st or (h and not best[3]) or not best[2]):
+                best = (h, s, name, st)
+            if st:
                 break
         return best
 
@@ -88,13 +96,13 @@ def scan(con=None, corp_codes=None, limit=None, workers=4):
         futs = [(r, ex.submit(work, r)) for r in todo]
         for i, (r, f) in enumerate(futs, 1):
             try:
-                h, s, name = f.result()
-                con.execute("INSERT OR REPLACE INTO rating_guar (file_url, corp_code, hits, snip, fetched_at, ver) VALUES (?,?,?,?,?,?)",
-                            (r[6], r[0], ",".join(h), " ‖ ".join(s)[:900], now(), VER))
-                if h:
+                h, s, name, st = f.result()
+                con.execute("INSERT OR REPLACE INTO rating_guar (file_url, corp_code, hits, snip, fetched_at, ver, strong, strong_snip, agency, disc_dt) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (r[6], r[0], ",".join(h), " ‖ ".join(s)[:900], now(), VER, 1 if st else 0, st, r[1], r[4]))
+                if st:
                     n_hit += 1
                     kc.update(set(h))
-                    print(f"[보증스캔] 문구 {nm.get(r[0], r[0])} | {r[1]} {r[2]} {r[5]} {r[4]} | {sorted(set(h))} | {(' ‖ '.join(s))[:420]}", flush=True)
+                    print(f"[보증스캔] 보증표기 {nm.get(r[0], r[0])} | {r[1]} {r[2]} {r[5]} {r[4]} | {st[:200]}", flush=True)
                 else:
                     n_no += 1
             except Exception as e:  # noqa
@@ -102,7 +110,7 @@ def scan(con=None, corp_codes=None, limit=None, workers=4):
                 log(con, r[0], "rating_guar", "fail", e)
             if i % 50 == 0:
                 con.commit()
-                print(f"[보증스캔] {i}/{len(todo)} · 문구 있음 {n_hit} · 없음 {n_no} · 실패 {fail}", flush=True)
+                print(f"[보증스캔] {i}/{len(todo)} · 보증 표기 {n_hit} · 그 외 {n_no} · 실패 {fail}", flush=True)
     con.commit()
-    print(f"[보증스캔] 완료 {len(todo)}건 · 문구 있음 {n_hit} · 없음 {n_no} · 실패 {fail} · 문구별 {dict(kc.most_common())}", flush=True)
+    print(f"[보증스캔] 완료 {len(todo)}건 · 보증 표기 {n_hit} · 그 외 {n_no} · 실패 {fail} · 문구별 {dict(kc.most_common())}", flush=True)
     return n_hit
