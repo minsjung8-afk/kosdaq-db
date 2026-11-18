@@ -998,30 +998,24 @@ def _ibk_fin(con, cc, kpi):
                                               (cc, r["bsns_year"], r["reprt_code"], fs))]
             for x in bs:
                 x["nm"] = _norm_nm(x["account_nm"])
-            def o(name):
-                return next((x["ord"] for x in bs if x["nm"] == name and x["ord"] is not None), None)
-            o_ca, o_nca, o_ta, o_cl, o_ncl, o_tl = o("유동자산"), o("비유동자산"), o("자산총계"), o("유동부채"), o("비유동부채"), o("부채총계")
-            if o_ta is None:
-                o_ta = next((x["ord"] for x in bs if x["nm"] in ("자산", "자산합계") and x["ord"] is not None), None)
-            if o_tl is None:
-                o_tl = next((x["ord"] for x in bs if x["nm"] in ("부채", "부채합계") and x["ord"] is not None), None)
+            HDR = {"유동자산": "ca", "비유동자산": "nca", "자산총계": "ta", "자산": "ta", "자산합계": "ta", "유동부채": "cl", "비유동부채": "ncl", "부채총계": "tl", "부채": "tl", "부채합계": "tl",
+                   "자본": "eq", "자본총계": "eq", "자본합계": "eq", "지배기업소유주지분": "eq", "지배기업의소유주에게귀속되는자본": "eq"}
+            hdrs = sorted(((x["ord"], HDR[x["nm"]]) for x in bs if x["nm"] in HDR and x["ord"] is not None), key=lambda t: t[0])
+            o_ca = next((o for o, k in hdrs if k == "ca"), None)
             o_cash = next((x["ord"] for x in bs if "현금및현금성자산" in x["nm"] and x["ord"] is not None), None)
-            hdr_first = True if (o_ca is None or o_cash is None) else o_ca < o_cash
+            hdr_first = True if (o_ca is None or o_cash is None) else o_ca < o_cash     # 소계(헤더)가 세부보다 앞에 오는 표인지
             def grp(x):
+                """2026-11-19: 바로 앞(헤더 선행) 또는 바로 뒤(소계 후행)의 소계 행으로 그룹 판정 — CJ CGV처럼 자산총계 순번이 비유동자산보다 앞에 오는 표도 처리"""
                 oo = x["ord"]
-                if oo is None or _SKIP_NM.search(x["nm"]):
+                if oo is None or _SKIP_NM.search(x["nm"]) or x["nm"] in HDR:
                     return None
                 if hdr_first:
-                    if o_ca is not None and o_nca is not None and o_ca < oo < o_nca: return "ca"
-                    if o_nca is not None and o_ta is not None and o_nca < oo < o_ta: return "nca"
-                    if o_cl is not None and o_ncl is not None and o_cl < oo < o_ncl: return "cl"
-                    if o_ncl is not None and o_tl is not None and o_ncl < oo < o_tl: return "ncl"
+                    prev = [k for o, k in hdrs if o < oo]
+                    k = prev[-1] if prev else None
                 else:
-                    if o_ca is not None and oo < o_ca and (o_ta is None or oo < o_ta): return "ca"
-                    if o_ca is not None and o_nca is not None and o_ca < oo < o_nca: return "nca"
-                    if o_ta is not None and o_cl is not None and o_ta < oo < o_cl: return "cl"
-                    if o_cl is not None and o_ncl is not None and o_cl < oo < o_ncl: return "ncl"
-                return None
+                    nxt = [k for o, k in hdrs if o > oo]
+                    k = nxt[0] if nxt else None
+                return k if k in ("ca", "nca", "cl", "ncl") else None
             items = {}
             for x in bs:
                 g = grp(x)
