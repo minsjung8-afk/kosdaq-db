@@ -699,7 +699,7 @@ def _site_meta(con, index):
             m["latest_q"] = lq[0] + "." + {"11013": "03", "11012": "06", "11014": "09"}.get(lq[1], "")
     except Exception:  # noqa
         pass
-    m["rated"] = one("SELECT COUNT(DISTINCT corp_code) FROM credit_rating")
+    m["rated"] = sum(1 for i in index if i.get("rating") or i.get("rt_sub")) if index else one("SELECT COUNT(DISTINCT corp_code) FROM credit_rating")   # 2026-11-18: 보증부 등급만 있는 회사는 등급보유에서 제외(대표 등급과 같은 기준)
     m["rating_asof"] = one("SELECT MAX(disc_dt) FROM credit_rating")
     m["subst_dd"] = one("SELECT MAX(trd_dd) FROM subst_price") or one("SELECT MAX(subst_dd) FROM price_summary")
     m["mezz"] = one("SELECT COUNT(DISTINCT corp_code) FROM mezz_outstanding") or one("SELECT COUNT(DISTINCT corp_code) FROM mezzanine")
@@ -1000,6 +1000,7 @@ def build():
                       "industry": (d["business"]["summary"] or {}).get("industry") if d["business"]["summary"] else None,
                       "rating": cur_rt["grade"] if cur_rt else None, "rt_st": (d.get("rating_status") or {}).get("label"), "rt_aux": (f"{d['rating_aux']['grade']} {d['rating_aux']['label'].replace('유효기간 ', '').replace('등급 ', '')}" if d.get("rating_aux") and d["rating_aux"].get("kind") != "sub" else None),
                       "rt_sub": (d["rating_aux"]["grade"] if d.get("rating_aux") and d["rating_aux"].get("kind") == "sub" else None), "manual": MANUAL.get(c["corp_code"]),
+                      "rt_guar": (None if cur_rt else next((r["grade"] for r in d["ratings"] or [] if r.get("guar") and r.get("grade") not in ("취소", "철회", "WD", "NR", "-")), None)),   # 2026-11-18 사용자: 보증부 등급만 있는 회사는 등급 뱃지 대신 '보증부 A1'로
                       "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"), "cur": _CUR,
                       "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber")})
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
