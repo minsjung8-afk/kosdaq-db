@@ -47,7 +47,7 @@ header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6}
 #band{grid-column:1/-1;display:grid;grid-template-columns:1.5fr repeat(5,minmax(0,1fr));gap:9px;padding:11px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
 #band .bc{padding:8px 12px 9px;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 2px rgba(15,41,66,.05),0 4px 14px rgba(15,41,66,.05)}
 #band .bc:first-child{border-left:3px solid var(--gold)}
-#band .k{font-size:10px;letter-spacing:.06em;color:var(--ink2);font-weight:700;white-space:nowrap}
+#band .k{font-size:10px;letter-spacing:.06em;color:var(--ink2);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #band .v{font-size:15.5px;font-weight:800;color:var(--navy-deep);font-variant-numeric:tabular-nums;margin-top:2px;letter-spacing:-.3px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #band .s{font-size:10.5px;color:var(--mute);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #band .s.wrap{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}   /* 수록 회사 구성은 두 줄로 전부 표시(2026-10-30) */
@@ -361,7 +361,8 @@ function renderBand(m){
   const qn={'03':'1분기','06':'반기','09':'3분기'};
   const lq=m.latest_q?`${m.latest_q.slice(0,4)} ${qn[m.latest_q.slice(5)]||''}보고서`:'';
   const cells=[
-    ['수록 회사',`${n(m.count)}개사`,(()=>{const ur=items.filter(i=>i.market==='UNLISTED'&&i.rating).length, lr=items.filter(i=>i.market!=='UNLISTED'&&i.rating).length;   // 2026-10-30 사용자 요청: 구성 전부, 안 잘리게(두 줄 허용)
+    [`수록 회사 <span style="font-weight:600;letter-spacing:0;color:#9a6b12">· 수동 추가 ${n(items.filter(i=>i.manual).length)}사 포함, 추가할수록 늘어남</span>`,`${n(m.count)}개사`,(()=>{   // 2026-11-18 사용자: 수동 추가하면 계속 늘어난다고 표시
+      const ur=items.filter(i=>i.market==='UNLISTED'&&i.rating).length, lr=items.filter(i=>i.market!=='UNLISTED'&&i.rating).length;   // 2026-10-30 사용자 요청: 구성 전부, 안 잘리게(두 줄 허용)
       return (['KOSPI','KOSDAQ','KONEX'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준')
         +(bm.UNLISTED?` · 비상장 ${n(bm.UNLISTED)}`:'')+`<br>등급보유 ${n(m.rated)}(상장 ${n(lr)}·비상장 ${n(ur)})`+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'');})()],
     ['재무 기준',m.fin_year?`${m.fin_year} 사업보고서`:'-',(lq?`최신 ${lq.replace('보고서','')} · `:'')+`${n(m.fin_annual)}사 · DART`],
