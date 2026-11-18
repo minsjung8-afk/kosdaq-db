@@ -861,6 +861,33 @@ def main():
         cls["미판정"] = sum(unj.values())
         print(f"[정확도점검] 의심 {len(rows2):,}행 분류 {dict(cls)} · 미판정 폭 {dict(unj)}", flush=True)
         print(f"[정확도점검] 미판정 중 실제 오류 추정 약 {est:,.0f}행(구간별 판정표본 오류율 적용)", flush=True)
+    elif a.job == "rawdump" and a.type == "분할점검":   # 2026-11-18 사용자: SK하이닉스 52주 최고 2,943,380원(소수점) — 수정주가 배율 오검출 범위 확인(DART·KRX·AI 0콜)
+        import prices as _pr, math
+        old = lambda r, pr: abs(pr / r - 1) < 0.25
+        codes = [r[0] for r in con.execute("SELECT DISTINCT stock_code FROM _krx_latest")]
+        nm = {r[0]: r[1] for r in con.execute("SELECT stock_code, corp_name FROM company WHERE stock_code IS NOT NULL")}
+        n_old = n_new = 0; drop = []; keep = []
+        for sc in codes:
+            o = _pr.split_factors(con, sc, rule=old); n = _pr.split_factors(con, sc)
+            n_old += len(o); n_new += len(n)
+            ns = {d for d, _ in n}
+            for d, r in o:
+                (keep if d in ns else drop).append((sc, nm.get(sc, "?"), d, round(r, 4)))
+        aff = len({x[0] for x in drop})
+        print(f"[분할점검] 종목 {len(codes):,} · 예전 규칙 배율 {n_old:,}건 · 새 규칙 {n_new:,}건 · 빠지는 오검출 {len(drop):,}건({aff:,}종목)", flush=True)
+        for x in keep[:60]:
+            print(f"[분할점검] 유지 {x}", flush=True)
+        for x in sorted(drop, key=lambda x: -abs(math.log(x[3])))[:60]:
+            print(f"[분할점검] 제외 {x}", flush=True)
+        for sc in ("000660", "005930"):
+            o = _pr.split_factors(con, sc, rule=old)
+            cum = 1.0
+            for _, r in o: cum *= r
+            print(f"[분할점검] {sc} 예전 배율 {len(o)}건 누적 {cum:.4f} {o[:20]}", flush=True)
+            print(f"[분할점검] {sc} 새 배율 {_pr.split_factors(con, sc)}", flush=True)
+            rows = _pr.adjusted_rows(con, sc, since="2025-11-17")
+            hi = max(rows, key=lambda x: x["high"] or 0) if rows else None
+            print(f"[분할점검] {sc} 새 규칙 52주 최고 {hi['high'] if hi else None} ({hi['dt'] if hi else None}) · 최근 {[(x['dt'], x['close']) for x in rows[-3:]]}", flush=True)
     elif a.job == "rawdump" and a.type == "3Q현황":   # 2026-11-14 사용자 '진행상황': 2026 3Q 반영·상각비 채움 현황(DART·AI 0)
         import collections as _co
         st = con.execute("SELECT bsns_year||' '||reprt_code, status, COUNT(*) FROM periodic_new GROUP BY 1,2 ORDER BY 1,2").fetchall()
