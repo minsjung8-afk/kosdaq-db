@@ -981,6 +981,7 @@ def _updates(con, index, days=14):
 
 
 _SKIP_NM = re.compile(r"합계|소계|총계|^자산$|^부채$|^자본$|^유동자산$|^비유동자산$|^유동부채$|^비유동부채$|자본과부채|부채와자본|자본및부채|부채및자본")
+_EQ_NM = re.compile(r"자본금|자본잉여금|이익잉여금|결손금|기타자본|자본조정|기타포괄손익누계|자기주식|주식발행초과금|비지배지분|지배기업|신종자본증권|자본구성요소")   # 별도 재무제표에서 자본 항목이 비유동자산 뒤에 붙는 표 → 자산·부채 그룹에서 제외(2026-11-19)
 
 
 def _ibk_fin(con, cc, kpi):
@@ -1001,13 +1002,14 @@ def _ibk_fin(con, cc, kpi):
             HDR = {"유동자산": "ca", "비유동자산": "nca", "자산총계": "ta", "자산": "ta", "자산합계": "ta", "유동부채": "cl", "비유동부채": "ncl", "부채총계": "tl", "부채": "tl", "부채합계": "tl",
                    "자본": "eq", "자본총계": "eq", "자본합계": "eq", "지배기업소유주지분": "eq", "지배기업의소유주에게귀속되는자본": "eq"}
             hdrs = sorted(((x["ord"], HDR[x["nm"]]) for x in bs if x["nm"] in HDR and x["ord"] is not None), key=lambda t: t[0])
-            o_ca = next((o for o, k in hdrs if k == "ca"), None)
-            o_cash = next((x["ord"] for x in bs if "현금및현금성자산" in x["nm"] and x["ord"] is not None), None)
-            hdr_first = True if (o_ca is None or o_cash is None) else o_ca < o_cash     # 소계(헤더)가 세부보다 앞에 오는 표인지
+            o_items = [x["ord"] for x in bs if x["nm"] not in HDR and x["ord"] is not None and not _SKIP_NM.search(x["nm"])]
+            hdr_first = bool(hdrs) and bool(o_items) and hdrs[0][0] < min(o_items)      # 첫 행이 소계(헤더)면 헤더 선행형, 아니면 소계 후행형
+            nocur = not any(k in ("ca", "cl") for _, k in hdrs)                           # 유동·비유동 구분 없는 표(은행·보험·여전사 등) → 자산·부채 바로 아래 주요 계정
+            allow = ("ta", "tl") if nocur else ("ca", "nca", "cl", "ncl")
             def grp(x):
                 """2026-11-19: 바로 앞(헤더 선행) 또는 바로 뒤(소계 후행)의 소계 행으로 그룹 판정 — CJ CGV처럼 자산총계 순번이 비유동자산보다 앞에 오는 표도 처리"""
                 oo = x["ord"]
-                if oo is None or _SKIP_NM.search(x["nm"]) or x["nm"] in HDR:
+                if oo is None or _SKIP_NM.search(x["nm"]) or x["nm"] in HDR or _EQ_NM.search(x["nm"]):
                     return None
                 if hdr_first:
                     prev = [k for o, k in hdrs if o < oo]
@@ -1015,7 +1017,7 @@ def _ibk_fin(con, cc, kpi):
                 else:
                     nxt = [k for o, k in hdrs if o > oo]
                     k = nxt[0] if nxt else None
-                return k if k in ("ca", "nca", "cl", "ncl") else None
+                return k if k in allow else None
             items = {}
             for x in bs:
                 g = grp(x)
@@ -1024,13 +1026,16 @@ def _ibk_fin(con, cc, kpi):
                     if x["nm"] not in items[g]:
                         items[g][x["nm"]] = x["v"]
             tot = {"ca": r.get("cur_assets"), "nca": (r["total_assets"] - r["cur_assets"]) if r.get("total_assets") and r.get("cur_assets") else None,
-                   "cl": r.get("cur_liab"), "ncl": (r["total_liab"] - r["cur_liab"]) if r.get("total_liab") and r.get("cur_liab") else None}
-            per.append({"label": r.get("label"), "kind": r.get("kind"), "items": items, "tot": tot})
+                   "cl": r.get("cur_liab"), "ncl": (r["total_liab"] - r["cur_liab"]) if r.get("total_liab") and r.get("cur_liab") else None,
+                   "ta": r.get("total_assets"), "tl": r.get("total_liab")}
+            per.append({"label": r.get("label"), "kind": r.get("kind"), "items": items, "tot": tot, "nocur": nocur})
         if not per:
             continue
         last = per[-1]
+        nocur = all(p["nocur"] for p in per)
+        GK = ("ta", "tl") if nocur else ("ca", "nca", "cl", "ncl")
         pick = {}
-        for g in ("ca", "nca", "cl", "ncl"):
+        for g in GK:
             cand = sorted(last["items"].get(g, {}).items(), key=lambda kv: -abs(kv[1]))
             if not cand:      # 최근 분기 BS가 없으면(감사보고서만 등) 그 앞 기간에서
                 for pp in reversed(per[:-1]):
@@ -1039,14 +1044,14 @@ def _ibk_fin(con, cc, kpi):
             T = last["tot"].get(g) or (cand[0][1] if cand else 0)
             chosen = []
             for nm, v in cand:
-                if len(chosen) >= 5: break
-                if len(chosen) >= 2 and T and abs(v) < 0.08 * abs(T): break
+                if len(chosen) >= (6 if nocur else 5): break
+                if len(chosen) >= 2 and T and abs(v) < (0.05 if nocur else 0.08) * abs(T): break
                 chosen.append(nm)
             pick[g] = chosen
         cols = [{"label": p["label"], "kind": p["kind"]} for p in per]
-        groups = {g: {"total": [p["tot"].get(g) for p in per], "items": [{"nm": nm, "v": [p["items"].get(g, {}).get(nm) for p in per]} for nm in pick[g]]} for g in ("ca", "nca", "cl", "ncl")}
+        groups = {g: {"total": [p["tot"].get(g) for p in per], "items": [{"nm": nm, "v": [p["items"].get(g, {}).get(nm) for p in per]} for nm in pick.get(g, [])]} for g in ("ca", "nca", "cl", "ncl") + (("ta", "tl") if nocur else ())}
         base = {k: [r.get(k) for r in rows] for k in ("total_assets", "total_liab", "equity", "capital", "borrowings", "cash", "revenue", "op_income", "ebitda", "int_exp", "net_income", "cfo")}
-        out[fs] = {"cols": cols, "groups": groups, "base": base}
+        out[fs] = {"cols": cols, "groups": groups, "base": base, "nocur": nocur}   # nocur: 유동·비유동 구분 없는 표(금융사) → 자산·부채 주요 계정(ta/tl)
     return out or None
 
 
