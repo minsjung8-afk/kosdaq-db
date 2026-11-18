@@ -741,6 +741,7 @@ def _guar_manual():
 
 _GUAR_MANUAL = _guar_manual()
 _GUAR_PDF = None
+_GUAR_PDF_NOT = re.compile(r"보증\s*제공\s*자료|사채\s*\(\s*보증\s*\)\s*는")
 
 
 def _guar_pdf(con):
@@ -750,6 +751,8 @@ def _guar_pdf(con):
         _GUAR_PDF = {}
         try:
             for cc, ag, dt, sn in con.execute("SELECT corp_code, agency, disc_dt, strong_snip FROM rating_guar WHERE strong=1 AND agency IS NOT NULL"):
+                if _GUAR_PDF_NOT.search(sn or ""):      # 2026-11-18 v2 점검: 한국금융지주('…CP에 대해 지급보증 제공자료') = 보증 제공자, 아이엠캐피탈('무보증사채(보증)는 …지급보증이 감안') = 사채만 보증부
+                    continue
                 if (cc, ag) not in _GUAR_PDF or dt > _GUAR_PDF[(cc, ag)][0]:
                     _GUAR_PDF[(cc, ag)] = (dt, re.sub(r"\s+", " ", sn or "").strip()[:120])
         except Exception:  # noqa  표 없음(스캔 전)
