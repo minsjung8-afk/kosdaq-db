@@ -455,7 +455,7 @@ async function open(code){
   const fl=d.flags||[];
   const flagStrip=fl.length?`<div class="flags">${fl.map(([n,l,t])=>`<span class="flag ${l}" title="${esc(t)}">${esc(n)}${t?` <small>${esc(t)}</small>`:''}</span>`).join('')}</div>`:`<div class="flags"><span class="flag ok">경고 플래그 없음</span></div>`;
   let h=`<h2>${esc(c.corp_name)}${c.delisted_dt?'<span class="dl" style="font-size:12px;vertical-align:middle">상장폐지</span>':''}${rtBadge}</h2><div class="sub-title">${c.market==='UNLISTED'?'비상장 · DART '+esc(c.corp_code):c.stock_code+' · '+esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
-  h+=`<div class="xbar" id="xbar"><button type="button" data-x="print" title="브라우저 인쇄 — 접힌 섹션을 모두 펼쳐 인쇄">🖨 인쇄</button><button type="button" data-x="word" title="이 회사 화면 전체를 Word(.doc)로 저장 — 차트는 그림으로">📝 Word 저장</button><button type="button" data-x="pdf" title="인쇄 창에서 'PDF로 저장'을 고르세요">📄 PDF 저장</button></div>`;   // 2026-11-18 사용자: 개별 업체 화면 내려받기(pdf·word)·인쇄
+  h+=`<div class="xbar" id="xbar"><button type="button" data-x="print" title="브라우저 인쇄 — 접힌 섹션을 모두 펼쳐 인쇄">🖨 인쇄</button><button type="button" data-x="word" title="보이는 화면 그대로 Word(.docx, A4 가로)로 저장 — 각 블록을 그림으로">📝 Word 저장</button><button type="button" data-x="pdf" title="보이는 화면 그대로 PDF(A4 가로)로 저장">📄 PDF 저장</button></div>`;   // 2026-11-18 사용자: 개별 업체 화면 내려받기(pdf·word)·인쇄
   h+=flagStrip;
   if(FXC) h+=`<div class="src" style="margin:6px 0 10px;padding:8px 12px;border:1px solid var(--warn);color:var(--fg);background:var(--panel)"><b>외화 공시</b> · 이 회사는 재무제표를 <b>${FXC}</b>로 공시합니다. 재무 금액은 <b>백만 ${FXC}</b>(원화 환산 아님)로 표시하고, 원화 시가총액과 섞이는 PER·EV/EBITDA·비교 회사는 표시하지 않습니다. 시가총액·주가·거래대금·메자닌은 원화입니다.</div>`;
   h+=`<div class="tiles">
@@ -1033,18 +1033,49 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
   const today=()=>new Date().toISOString().slice(0,10);
   function dl(blob,fn){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fn; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},1500); }
   function doPrint(){ const back=unfoldAll(); const done=()=>{ back(); removeEventListener('afterprint',done); }; addEventListener('afterprint',done); setTimeout(()=>window.print(),150); }
-  function doWord(){ const back=unfoldAll(); setTimeout(()=>{ try{
-      const src=$m(), clone=src.cloneNode(true);
-      // 캔버스(차트)는 그림으로, 버튼·입력은 제거
-      const cv=src.querySelectorAll('canvas'), cc=clone.querySelectorAll('canvas');
-      cc.forEach((c,i)=>{ let img=document.createElement('img'); try{ img.src=cv[i].toDataURL('image/png'); }catch(e){} img.width=Math.min(640,cv[i].clientWidth||640); c.replaceWith(img); });
-      clone.querySelectorAll('button,input,select,#xbar,.xbar,.hint,[hidden]').forEach(e=>e.remove());
-      clone.querySelectorAll('[style]').forEach(e=>{ if(/display:\s*none/.test(e.getAttribute('style'))) e.remove(); });
-      clone.querySelectorAll('a').forEach(a=>{ if(a.href) a.setAttribute('href',a.href); });
-      const css=`body{font-family:'맑은 고딕',Malgun Gothic,Pretendard,sans-serif;font-size:10pt;color:#16233d}h2{font-size:18pt;margin:0 0 4pt}h3{font-size:12pt;background:#0f2547;color:#fff;padding:4pt 8pt;margin:14pt 0 6pt}table{border-collapse:collapse;width:100%;font-size:9pt;margin:4pt 0}th,td{border:1px solid #9aa7bd;padding:2pt 5pt}th{background:#2c5f8d;color:#fff}.src,.hint,.cap{color:#6b7488;font-size:8pt}.pill,.rt,.mk{display:inline-block;border:1px solid #cfd6e4;border-radius:4pt;padding:0 4pt;font-size:8pt}.cap2{font-weight:700;color:#1a3a6b;margin:8pt 0 3pt}`;
-      const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${name()}</title><style>${css}</style></head><body><p style="color:#6b7488;font-size:8pt">심사참고 DB · kosdaq-db.pages.dev · 출력 ${new Date().toLocaleString('ko-KR')} · 심사 참고용 요약, 원문은 DART·금감원</p>${clone.innerHTML}</body></html>`;
-      dl(new Blob(['\ufeff',html],{type:'application/msword'}),`${name()}_심사참고_${today()}.doc`);
-    } finally { back(); } },200); }
+  // 2026-11-19 사용자 'Word·PDF는 보이는 화면 그대로(포맷 유지)': 화면 블록(제목·카드·각 섹션)을 html2canvas로 그려 그대로 PDF(jsPDF, A4 가로)·Word(docx, A4 가로)에 넣는다. 긴 블록은 페이지 높이로 잘라 이어 붙임
+  const LIBS={h2c:'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', jspdf:'https://cdnjs.cloudflare.com/ajax/libs/jspdf/3.0.1/jspdf.umd.min.js', docx:'https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.js'};
+  function loadLib(key,test){ return new Promise((ok,fail)=>{ if(test()) return ok(); const sc=document.createElement('script'); sc.src=LIBS[key]; sc.onload=()=>test()?ok():fail(new Error(key)); sc.onerror=()=>fail(new Error(key)); document.head.appendChild(sc); }); }
+  function busy(on,msg){ let b=document.getElementById('xbusy'); if(!on){ if(b) b.remove(); return; } if(!b){ b=document.createElement('div'); b.id='xbusy'; b.style.cssText='position:fixed;inset:0;z-index:99;background:rgba(15,37,71,.35);display:flex;align-items:center;justify-content:center;font:700 14px var(--font);color:#fff'; document.body.appendChild(b); } b.textContent=msg||'만드는 중…'; }
+  async function snapBlocks(maxH){   // → [{canvas,w,h}] 화면 폭 기준 2배 해상도. 블록 = .mdbody의 직계 요소(제목·카드·각 섹션), 높이 maxH(px, 화면 기준)를 넘으면 빈 줄(흰 행)에서 잘라 분할
+    const m=$m(); const body=m.querySelector('.mdbody');
+    const kids=[...body.children].filter(e=>!(e.matches('.xbar,[hidden],.hint')||getComputedStyle(e).display==='none'||e.offsetHeight<2));
+    const out=[]; 
+    const whiteRow=(ctx,y,w)=>{ const d=ctx.getImageData(0,y,w,1).data; let n=0; for(let i=0;i<d.length;i+=16){ if(d[i]>245&&d[i+1]>245&&d[i+2]>245) n++; } return n>=Math.floor(d.length/16)*0.985; };
+    for(const e of kids){
+      const cv=await html2canvas(e,{scale:2,backgroundColor:'#ffffff',useCORS:true,logging:false,ignoreElements:el=>el.matches&&el.matches('.xbar,#xbusy')});
+      const sc=cv.width/(e.clientWidth||cv.width/2)||2, cutH=Math.floor(maxH*sc), ctx=cv.getContext('2d');
+      let y=0; while(y<cv.height){ let h=Math.min(cutH,cv.height-y);
+        if(y+h<cv.height){ for(let yy=y+h-2;yy>y+h*0.6;yy-=2){ if(whiteRow(ctx,yy,cv.width)){ h=yy-y; break; } } }   // 가능하면 흰 행(표 행 사이·여백)에서 자름
+        const c=document.createElement('canvas'); c.width=cv.width; c.height=h; c.getContext('2d').drawImage(cv,0,y,cv.width,h,0,0,cv.width,h); out.push({canvas:c,w:c.width/sc,h:h/sc}); y+=h; }
+    }
+    return out; }
+  async function doPdf(){ const back=unfoldAll(); busy(true,'PDF 만드는 중… (화면 그대로)'); try{
+      await loadLib('h2c',()=>window.html2canvas); await loadLib('jspdf',()=>window.jspdf&&window.jspdf.jsPDF);
+      await new Promise(r=>setTimeout(r,250));
+      const PW=297, PH=210, M=8, AW=PW-2*M, AH=PH-2*M-6;    // A4 가로(mm), 상단 6mm는 머리글
+      const m=$m(), W=Math.max(900,m.querySelector('.mdbody').clientWidth), k=AW/W;   // mm per px
+      const parts=await snapBlocks(Math.floor(AH/k));
+      const pdf=new jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4',compress:true}); let y=M+6, page=1;
+      const hdr=()=>{ pdf.setFontSize(7); pdf.setTextColor(120); pdf.text(`${name()} · 심사참고 DB kosdaq-db.pages.dev · ${today()} · 심사 참고용 요약, 원문은 DART·금감원 · ${page}`,M,M+2); };
+      hdr();
+      for(const p of parts){ const h=p.h*k; if(y+h>PH-M&&y>M+6){ pdf.addPage(); page++; hdr(); y=M+6; } pdf.addImage(p.canvas.toDataURL('image/jpeg',0.92),'JPEG',M,y,p.w*k,h); y+=h+2; }
+      pdf.save(`${name()}_심사참고_${today()}.pdf`);
+    } catch(e){ alert('PDF 생성 실패: '+(e&&e.message||e)+'\n(사내망에서 라이브러리 차단 시 🖨 인쇄 → PDF로 저장을 이용하세요)'); } finally { busy(false); back(); } }
+  async function doWord(){ const back=unfoldAll(); busy(true,'Word 만드는 중… (화면 그대로)'); try{
+      await loadLib('h2c',()=>window.html2canvas); await loadLib('docx',()=>window.docx&&window.docx.Document);
+      await new Promise(r=>setTimeout(r,250));
+      const PW=297, PH=210, M=10, AW=PW-2*M, AH=PH-2*M-8; const px=mm=>Math.round(mm/25.4*96);   // docx 그림 크기는 96dpi px
+      const m=$m(), W=Math.max(900,m.querySelector('.mdbody').clientWidth), k=AW/W;
+      const parts=await snapBlocks(Math.floor(AH/k));
+      const {Document,Packer,Paragraph,ImageRun,TextRun,PageOrientation,Header,AlignmentType}=docx;
+      const b64=c=>{ const s=c.toDataURL('image/png').split(',')[1], bin=atob(s), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return u; };
+      const children=parts.map(p=>new Paragraph({spacing:{after:60},children:[new ImageRun({type:'png',data:b64(p.canvas),transformation:{width:px(p.w*k),height:px(p.h*k)}})]}));
+      const doc=new Document({sections:[{properties:{page:{size:{orientation:PageOrientation.LANDSCAPE,width:px(PH)*15,height:px(PW)*15},margin:{top:px(M)*15,bottom:px(M)*15,left:px(M)*15,right:px(M)*15}}},
+        headers:{default:new Header({children:[new Paragraph({alignment:AlignmentType.RIGHT,children:[new TextRun({text:`${name()} · 심사참고 DB kosdaq-db.pages.dev · ${today()} · 심사 참고용 요약, 원문은 DART·금감원`,size:14,color:'6B7488'})]})]})},
+        children}]});
+      const blob=await Packer.toBlob(doc); dl(blob,`${name()}_심사참고_${today()}.docx`);
+    } catch(e){ alert('Word 생성 실패: '+(e&&e.message||e)); } finally { busy(false); back(); } }
   function doXlsx(){ const d=window.CURD; if(!d||!d.ibk_fin){ alert('당사 양식 재무현황 데이터가 없습니다.'); return; }
     // 2026-11-19 사용자: 내려받기도 화면과 같은 배치(좌 재무상태표 · 우 손익계산서/재무비율, 같은 색 구분). 서식은 xlsx-js-style(SheetJS 0.18.5 포크), 못 불러오면 서식 없이 같은 배치로
     const go=()=>{ const X_=window.XLSXS||window.XLSX, wb=X_.utils.book_new(); const n=v=>v==null?null:Math.round(v/1e8*10)/10;
@@ -1083,7 +1114,7 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
     if(window.XLSXS||window.XLSX) go();
     else load('https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js',()=>{ window.XLSXS=window.XLSX; go(); },
               ()=>load('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',go,()=>alert('엑셀 라이브러리를 불러오지 못했습니다(네트워크).'))); }
-  document.addEventListener('click',e=>{ const b=e.target.closest('[data-x]'); if(b){ const x=b.dataset.x; if(x==='print'||x==='pdf') doPrint(); else if(x==='word') doWord(); else if(x==='xlsx'){ e.stopPropagation(); doXlsx(); } return; }
+  document.addEventListener('click',e=>{ const b=e.target.closest('[data-x]'); if(b){ const x=b.dataset.x; if(x==='print') doPrint(); else if(x==='pdf') doPdf(); else if(x==='word') doWord(); else if(x==='xlsx'){ e.stopPropagation(); doXlsx(); } return; }
     const hd=e.target.closest('.ibkh'); if(hd){ const box=hd.closest('.ibkfin'); box.classList.toggle('fold'); } });
 })();
 </script>
