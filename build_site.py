@@ -892,6 +892,9 @@ def build():
     (SITE / "data" / "c").mkdir(parents=True)
     shutil.copy(TEMPLATE, SITE / "index.html")
     shutil.copytree(TEMPLATE.parent / "lib", SITE / "lib")          # 차트 라이브러리(Lightweight Charts, Apache-2.0)
+    for fn in ("intro.mp4", "intro.jpg"):                                  # 첫 화면 소개 영상(2026-11-18)
+        if (TEMPLATE.parent / fn).exists():
+            shutil.copy(TEMPLATE.parent / fn, SITE / fn)
     for fn in ("manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):   # PWA(2026-10-29, 앱 이름 '심사DB')
         shutil.copy(TEMPLATE.parent / fn, SITE / fn)
     (SITE / "sw.js").write_text((TEMPLATE.parent / "sw.js").read_text(encoding="utf-8").replace("__BUILD__", __import__("datetime").datetime.now().strftime("%Y%m%d%H%M")), encoding="utf-8")
