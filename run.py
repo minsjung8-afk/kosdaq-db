@@ -78,6 +78,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill", "da_ai", "periodic_new"])
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--min-equity", type=float, help="unlisted_add 감사보고서: 자본총계 하한(억원) — 2026-11-18 사용자 '3천억 이상부터 asap'")
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
     ap.add_argument("--years", type=int, nargs="*")
     ap.add_argument("--period", default="m1", help="hk: d7/m1/m6/y1")
@@ -254,8 +255,13 @@ def main():
             con.commit()
         if a.type == "감사보고서":            # 2026-10-29 사용자 요청: 감사보고서만 내는 비상장 자본총계 500억↑(일반기업+여전사) — audit_scan으로 선별된 명단에서 큰 순 --limit개
             import audit_filers
-            rows = audit_filers.eligible(con)[:a.limit or 60]
+            el = audit_filers.eligible(con)
+            if a.min_equity:
+                el = [r for r in el if (r[3] or 0) >= a.min_equity * 1e8]
+            rows = el[:a.limit or 60]
             seed = [{"corp_code": r[0], "corp_name": r[1], "grade": ""} for r in rows]
+            if a.min_equity:
+                print(f"[unlisted_add] 자본총계 {a.min_equity:,.0f}억↑ 남은 대상 {len(el)}사 · 이번 {len(rows)}사", flush=True)
             print(f"[unlisted_add] 감사보고서 제출 비상장(자본총계 500억↑) 이번 {len(seed)}사 / 대상 누적 {len(audit_filers.eligible(con))}사", flush=True)
         if a.type in ("사업보고서", "사업보고서시범"):   # 2026-10-28 사용자 결정: 사업보고서 제출 비상장 자본총계 500억↑ — 일반기업 + 금융 중 여전사만, 시범 10곳 확인 후 큰 회사부터 --limit개씩
             import annual_filers
@@ -429,7 +435,15 @@ def main():
                 except Exception:  # noqa
                     _c["v"] = set()
             return _c["v"]
-        steps = [("periodic", lambda: __import__("periodic_new").process(con)),   # 2026-11-13: 새로 공시된 분기·반기·사업보고서를 과거 보강(da_backfill)보다 먼저 — 한도를 백필이 다 쓰기 전에
+        def _audit_add(n=200, min_eq=3000):
+            """2026-11-18 사용자 '3천억 이상부터 asap': 감사보고서만 내는 비상장 자본총계 3,000억↑를 큰 순으로 매일 밤 n사씩(정기보고서 반영 다음 순위)"""
+            import subprocess
+            con.commit()
+            subprocess.run([sys.executable, str(Path(__file__).resolve()), "unlisted_add", "--type", "감사보고서", "--limit", str(n), "--min-equity", str(min_eq)],
+                           env={**_os.environ, "KOSDAQ_IN_CHAIN": "1"}, check=False)
+        import os as _os
+        steps = [("periodic", lambda: __import__("periodic_new").process(con)),
+                 ("audit_add", lambda: _audit_add()),   # 2026-11-13: 새로 공시된 분기·반기·사업보고서를 과거 보강(da_backfill)보다 먼저 — 한도를 백필이 다 쓰기 전에
                  ("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=90 * 60)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
                  ("da_direct", lambda: __import__("notes_v2").direct_backfill(con, years=4, limit=2000, budget_sec=50 * 60)),   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정(XBRL 일부 항목 누락·분기 3개월 열 오독) — 하루 2,000건씩, 약 2주
                  ("da_ai", lambda: __import__("da_ai").run(con, limit=1500)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 1,500건·예산 40달러, 2026-10-30 사용자 "예산 올려줄게")
@@ -471,7 +485,7 @@ def main():
                 break
             except Exception as e:  # noqa
                 print(f"[catchup] {name} 오류: {e}", flush=True)
-            if name in ("periodic", "biz", "summarize", "fin", "fin_ofs", "fin_yoy", "da", "da_notes", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
+            if name in ("periodic", "audit_add", "biz", "summarize", "fin", "fin_ofs", "fin_yoy", "da", "da_notes", "quarters", "invest", "notes"):    # 단계가 끝날 때마다 사이트 반영
                 con.commit(); publish(f"catchup {name}")
         else:   # 모든 단계 정상 완료 → 이어하기 불필요
             if _cont.exists() and not _os.environ.get("KOSDAQ_IN_CHAIN"):
