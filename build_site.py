@@ -377,6 +377,10 @@ def company_detail(con, c):
     if d.get("rating_summary") and d["rating_summary"].get("file_url") in gfiles:
         d["rating_summary"] = None
     d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], [r for r in d["ratings"] or [] if not r["guar"]])
+    try:
+        RT_UPD.extend((dt, c["corp_name"], c["stock_code"], ag, x, y, k) for dt, ag, x, y, k in _rt_changes(d["ratings"]))
+    except Exception:  # noqa
+        pass
     rv = d.get("review")
     if rv and rv.get("opinion") and not re.match(r"^\s*적정", rv["opinion"]):     # 반기·분기 검토의견 비적정 — 다음 연말 감사의견의 선행 신호
         d["flags"].insert(0, (f"{rv['period']} 검토의견 비적정", "red", f"{rv['bsns_year']} {rv['period']} {rv['opinion']} ({rv.get('adtor') or ''})"))
@@ -892,6 +896,89 @@ _GL = ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "BBB-", "BB+",
 _GS = ["A1", "A2+", "A2", "A2-", "A3+", "A3", "A3-", "B+", "B", "B-", "C", "D"]
 
 
+RT_UPD = []   # 업데이트 소식(2026-11-18 사용자): 최근 14일 신용등급 변동 [(공시일, 회사, 종목코드, 평가사, 이전, 이후, 방향)]
+
+
+def _rt_changes(ratings, days=14):
+    """최근 days일 공시 중 같은 평가사·같은 등급체계(장기/단기)·보증 아닌 평가의 등급 변동(상향/하향/신규)"""
+    from datetime import date, timedelta
+    cut = (date.today() - timedelta(days=days)).isoformat()
+    last, out = {}, []
+    for r in sorted(ratings or [], key=lambda x: str(x.get("disc_dt") or "")):
+        tt = r.get("target_type") or ""
+        if r.get("guar") or "신종" in tt or "후순위" in tt or "파생" in tt or "정정" in (r.get("eval_kind") or ""):
+            continue
+        g = (r.get("grade") or "").strip().split(" ")[0]
+        short = bool(re.search(r"기업어음|전자단기|단기사채|CP", tt))
+        sc = _GS if short else _GL
+        if g not in sc:
+            continue
+        k = (r.get("agency"), short)
+        v = len(sc) - sc.index(g)
+        dt = str(r.get("disc_dt") or "")[:10]
+        if dt >= cut:
+            if k not in last:
+                out.append((dt, r.get("agency"), None, g, "신규"))
+            elif v != last[k][0]:
+                out.append((dt, r.get("agency"), last[k][1], g, "상향" if v > last[k][0] else "하향"))
+        last[k] = (v, g)
+    return out
+
+
+def _updates(con, index, days=14):
+    """data/updates.json — 날짜별 업데이트 소식: 기능·수정(updates_manual.json) + 새 정기보고서 반영 + 신용등급 변동 + 신규 수록 회사"""
+    from datetime import date, timedelta
+    names = {i["code"]: i["name"] for i in index}
+    by_cc = {}
+    for r in con.execute("SELECT corp_code, stock_code FROM company"):
+        by_cc[r[0]] = r[1]
+    today = date.today()
+    cut = (today - timedelta(days=days)).isoformat()
+    out = {}
+    def day(d):
+        return out.setdefault(d, {"date": d, "notes": [], "reports": {}, "ratings": [], "new": []})
+    try:
+        man = json.loads((ROOT / "updates_manual.json").read_text(encoding="utf-8"))
+        for m in man:
+            if m.get("date", "") >= cut:
+                day(m["date"])["notes"].append(m.get("text", ""))
+    except Exception as e:  # noqa
+        print("[site] updates_manual.json 없음/오류:", e)
+    try:
+        for cc, dt, rc in con.execute("SELECT corp_code, substr(done_at,1,10), reprt_code FROM periodic_new WHERE status='반영' AND done_at >= ?", (cut,)):
+            sc = by_cc.get(cc)
+            if sc in names:
+                k = {"11013": "1분기", "11012": "반기", "11014": "3분기", "11011": "사업"}.get(rc, rc)
+                day(dt)["reports"].setdefault(k, []).append([sc, names[sc]])
+    except Exception as e:  # noqa
+        print("[site] 업데이트 소식 — 정기보고서 집계 실패:", e)
+    for dt, nm, sc, ag, a, b, kind in RT_UPD:
+        if dt >= cut:
+            day(dt)["ratings"].append({"code": sc, "name": nm, "agency": ag, "from": a, "to": b, "kind": kind})
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS company_seen (corp_code TEXT PRIMARY KEY, first_seen TEXT)")
+        if not con.execute("SELECT 1 FROM company_seen LIMIT 1").fetchone():      # 첫 빌드: 기존 회사는 기준선(신규로 표시하지 않음)
+            con.executemany("INSERT OR IGNORE INTO company_seen VALUES (?, '2000-01-01')", [(cc,) for cc in by_cc])
+        con.executemany("INSERT OR IGNORE INTO company_seen VALUES (?, ?)", [(cc, today.isoformat()) for cc in by_cc])
+        con.commit()
+        for cc, dt in con.execute("SELECT corp_code, first_seen FROM company_seen WHERE first_seen >= ?", (cut,)):
+            sc = by_cc.get(cc)
+            if sc in names:
+                day(dt)["new"].append([sc, names[sc]])
+    except Exception as e:  # noqa
+        print("[site] 업데이트 소식 — 신규 수록 집계 실패:", e)
+    rows = []
+    for d in sorted(out, reverse=True):
+        x = out[d]
+        if not (x["notes"] or x["reports"] or x["ratings"] or x["new"]):
+            continue
+        x["ratings"].sort(key=lambda r: ({"하향": 0, "상향": 1, "신규": 2}.get(r["kind"], 3), r["name"]))
+        rows.append(x)
+    (SITE / "data" / "updates.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    print(f"[site] 업데이트 소식 {len(rows)}일치 · 등급 변동 {sum(len(x['ratings']) for x in rows)}건 · 신규 수록 {sum(len(x['new']) for x in rows)}사", flush=True)
+    return rows[0]["date"] if rows else None
+
+
 def _downgrades(ratings, days=365):
     """최근 days일 안에 같은 평가사·같은 등급체계(장기/단기)·보증 아닌 평가에서 직전보다 낮아진 건 → [(평가사, 이전, 이후, 노치, 공시일)]"""
     from datetime import date, timedelta
@@ -1009,6 +1096,10 @@ def build():
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
             "price_asof": max((r["asof"] for r in q(con, "SELECT asof FROM price_summary")), default=None)}
     meta.update(_site_meta(con, index))
+    try:
+        meta["upd_latest"] = _updates(con, index)
+    except Exception as e:  # noqa
+        print("[site] 업데이트 소식 생성 실패:", e)
     (SITE / "data" / "companies.json").write_text(json.dumps({"meta": meta, "items": index}, ensure_ascii=False), encoding="utf-8")
     try:   # 데이터 품질 점검 결과(site/data/dq.json) + 점검 페이지(dq.html)
         sys.path.insert(0, str(Path(__file__).resolve().parent / "collect"))
