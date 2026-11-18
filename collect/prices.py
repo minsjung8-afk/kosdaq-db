@@ -65,9 +65,20 @@ def fetch_prices_range(con, start: date, end: date, market="KOSDAQ", only_codes=
     return n
 
 
-def split_factors(con, stock_code):
-    """액면분할·병합 감지: 상장주식수가 하루 사이 2% 이상 바뀌고 주가가 그 역수만큼 움직인 날.
-    반환 [(dt, ratio)] — dt 이전 가격은 ratio로 나누고 거래량은 곱한다(수정주가)."""
+def is_split(r, pr):
+    """주식수 배율 r(새/옛)과 주가 배율 pr(전일/당일)이 액면분할·병합으로 볼 만큼 맞물리는지.
+    2026-11-18 사용자 지적(SK하이닉스 52주 최고 2,943,380원·소수점 종가): 예전 규칙(주식수 2%↑ 변동 + 주가 배율 ±25% 이내)은
+    자사주 소각·신주 상장처럼 주식수가 몇 % 바뀐 날의 평범한 등락도 분할로 잡아 과거 시세 전체를 잘못된 배율로 나눴다.
+    → 주식수가 9% 이상 바뀌고, 주가 배율이 주식수 배율과 로그 기준 min(15%, 변동폭의 절반) 이내로 맞을 때만"""
+    if not r or not pr or r <= 0 or pr <= 0:
+        return False
+    lr = abs(math.log(r))
+    return lr >= math.log(1.09) and abs(math.log(pr / r)) <= min(0.15, lr / 2)
+
+
+def split_factors(con, stock_code, rule=None):
+    """액면분할·병합 감지: 상장주식수가 하루 사이 크게 바뀌고 주가가 그 역수만큼 움직인 날(is_split).
+    반환 [(dt, ratio)] — dt 이전 가격은 ratio로 나누고 거래량은 곱한다(수정주가). rule: 진단용 대체 판정 함수"""
     try:
         sh = con.execute("SELECT dt, shares FROM _krx_latest WHERE stock_code=? AND shares>0 ORDER BY dt", (stock_code,)).fetchall()
     except Exception:  # noqa  _krx_latest 없음
@@ -83,7 +94,7 @@ def split_factors(con, stock_code):
         if abs(r - 1) < 0.02 or d0 not in px or d1 not in px:
             continue
         pr = px[d0] / px[d1]                     # 분할이면 주가도 r배 하락
-        if abs(pr / r - 1) < 0.25:
+        if (rule or is_split)(r, pr):
             out.append((d1, r))
     return out
 
