@@ -73,6 +73,10 @@ aside input:focus{outline:2px solid var(--navy2);outline-offset:-1px}
 /* 본문 */
 main{overflow:auto;min-width:0;padding:18px 24px 48px}
 .empty{color:var(--mute);padding:40px 0;max-width:60ch}
+.empty.intro{max-width:1100px;padding:20px 0}
+.empty.intro video{display:block;width:100%;aspect-ratio:16/9;background:#0b1b33;border-radius:12px;box-shadow:0 8px 28px rgba(10,25,48,.25)}
+.empty.intro p{margin:14px 2px 0;max-width:80ch}
+@media (prefers-reduced-motion:reduce){.empty.intro video{display:none}}
 h2{font-size:22px;margin:0 0 2px;font-weight:800;letter-spacing:-.01em;color:var(--fg)}
 .sub-title{color:var(--ink2);font-size:12.5px;margin-bottom:14px}
 section{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px;padding:0 0 14px;overflow:hidden}
@@ -291,7 +295,9 @@ sup.est{font-size:9px;color:var(--mute);margin-left:2px;cursor:pointer;font-weig
   <div class="search"><input id="q" placeholder="회사명 · 종목코드 · 업종" autocomplete="off"><div class="mkts" id="mkts"><button class="mbtn on" data-m="">전체</button><button class="mbtn" data-m="KOSDAQ">코스닥</button><button class="mbtn" data-m="KOSPI">코스피</button><button class="mbtn" data-m="KONEX">코넥스</button><button class="mbtn" data-m="UNLISTED">비상장</button><button class="mbtn" data-m="MANUAL" id="mbtnManual" title="사이트 '회사 추가'로 넣은 회사 — 추가한 순서대로">수동 추가</button></div><div class="sorts" id="sorts"><span class="lbl">정렬</span><button class="sbtn on" data-s="name">이름</button><button class="sbtn" data-s="market">시장</button><button class="sbtn" data-s="mcap">시총</button><button class="sbtn" data-s="per">PER</button><button class="sbtn" data-s="ev">EV/EBITDA</button><button class="sbtn" data-s="rating">신용등급</button><button class="sbtn" data-s="sector">업종</button></div><div class="hint" id="cnt"></div><button class="mbtn" id="addBtn" style="margin-top:6px" title="DB에 없는 회사(감사보고서 제출 법인)를 관리자 비밀번호로 추가">＋ 회사 추가</button></div>
   <div id="list"></div>
 </aside>
-<main id="main"><div class="empty">왼쪽에서 종목을 고르세요. 재무는 DART 사업보고서(연결 우선), 주가는 KRX 일별시세 기준이며 심사 참고용 요약입니다. 원문은 각 항목의 DART 링크로 확인하세요.</div></main>
+<main id="main"><div class="empty intro"><!-- 2026-11-18 사용자 요청: 첫 화면 빈칸에 소개 영상(40초, 무음·자동재생·반복) -->
+<video poster="intro.jpg" autoplay muted loop playsinline preload="auto" aria-label="심사참고 DB 소개 영상(40초, 자막)"><source src="intro.mp4" type="video/mp4" onerror="this.parentNode.style.display='none'"></video>
+<p>왼쪽에서 종목을 고르세요. 재무는 DART 사업보고서(연결 우선), 주가는 KRX 일별시세 기준이며 심사 참고용 요약입니다. 원문은 각 항목의 DART 링크로 확인하세요.</p></div></main>
 <div id="addModal" style="display:none;position:fixed;inset:0;background:rgba(15,25,45,.45);z-index:50;align-items:flex-start;justify-content:center;padding-top:8vh">
   <div style="background:#fff;border-radius:12px;width:min(640px,94vw);max-height:80vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.25)">
     <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">회사 추가 <span class="src">· DART 감사보고서 제출 법인</span></b><button class="mbtn" id="addClose">닫기</button></div>
