@@ -214,10 +214,20 @@ def main():
     if a.job == "unlisted_add":              # 비상장 등급사 추가(사용자 결정 2026-10-25: 1군 일반기업 77사부터): data/unlisted_seed.csv → company(market=UNLISTED, stock_code='U'+고유번호) → 미니 파이프라인
         import csv, listing, financials, quarters, business, mezz, fss_rating
         seed = list(csv.DictReader(open(Path(__file__).resolve().with_name("unlisted_seed.csv"), encoding="utf-8")))
-        if a.type == "전체등급":            # 2026-10-25 사용자 결정: 1군 기준(비금융·비공공·비SPC) + ICR·회사채·CP 중 하나라도 있는 비상장사 전부 추가
-            import unlisted2
+        if a.type in ("전체등급", "리츠"):   # 2026-10-25 사용자 결정: 1군 기준(비금융·비공공·비SPC) + ICR·회사채·CP 중 하나라도 있는 비상장사 전부 추가
+            import unlisted2                 # 2026-11-18 사용자 '리츠만 포함시키자(등급 있고 고객)': --type 리츠 = 등급 보유 비상장 리츠(SPC 분류에서 분리)
+            allr = unlisted2.run(days=a.limit or 456)
+            want = "리츠" if a.type == "리츠" else "일반기업"
+            if a.type == "리츠":
+                for r in allr:
+                    if r["구분"] == "리츠":
+                        print(f"[unlisted_add] 리츠 후보 {r['회사명']} | {r['대표등급']} | ICR {r['ICR'] or '-'} 사채 {r['회사채'] or '-'} CP {r['CP'] or '-'} | {r['DART고유번호'] or '-'} {r['비고']}", flush=True)
+                if a.dry_run:
+                    print("[unlisted_add] --dry-run: 리츠 명단만 출력, DB 변경 없음", flush=True)
+                    return
+                seed = []                    # 기존 시드(일반기업)는 다시 보지 않음
             extra = [{"corp_code": r["DART고유번호"], "corp_name": r["회사명"], "grade": r["대표등급"]}
-                     for r in unlisted2.run(days=a.limit or 456) if r["구분"] == "일반기업" and r["DART고유번호"]]
+                     for r in allr if r["구분"] == want and r["DART고유번호"]]
             known = {r["corp_code"] for r in seed}
             for r in extra:                       # 같은 회사가 표기 2가지로 잡히는 경우(대륜E&S·대륜이엔에스) 1번만
                 if r["corp_code"] not in known:
