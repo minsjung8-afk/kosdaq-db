@@ -371,8 +371,7 @@ def company_detail(con, c):
                                ORDER BY trmend_book_amt DESC LIMIT 8""", cc, cc),   # 최신 보고서(접수번호 최대) 세트
     }
     # 2026-10-29 사용자 결정: 타사 보증부 등급(은행·계열사 지급보증·신용보강 사채·CP)은 대상회사 신용도가 아니므로 대표 등급·플래그·평가서 요약에서 제외(이력 표에는 '보증부'로 남김)
-    for r in d["ratings"] or []:
-        r["guar"] = _guar(r)
+    mark_guar(d["ratings"] or [])
     gfiles = {r.get("file_url") for r in d["ratings"] or [] if r["guar"] and r.get("file_url")}
     if d.get("rating_summary") and d["rating_summary"].get("file_url") in gfiles:
         d["rating_summary"] = None
@@ -715,12 +714,31 @@ _SUB_RE = re.compile(r"신종자본|후순위|조건부자본|영구채|하이�
 _SHORT_RE = re.compile(r"기업어음|단기사채|CP|전단채")
 
 
-_GUAR_RE = re.compile(r"(?<!무)보증|신용보강|지급확약")
+_GUAR_RE = re.compile(r"(?<!무)보증|신용보강|지급확약|담보부")
+_ISSUE_RE = re.compile(r"제\s*(\d+(?:\s*-\s*\d+)?)\s*(?:\([^)]*\))?\s*회")
 
 
 def _guar(r):
-    """타사 보증부 등급인지: 평가대상 종류에 '보증'(무보증 제외)·'신용보강'·'지급확약'이 있으면 True — 예: '제57(ORIX 지급보증)회 외 금융채', '보증사채'"""
+    """타사 보증부 등급인지: 평가대상 종류에 '보증'(무보증 제외)·'신용보강'·'지급확약'·'담보부'가 있으면 True — 예: '제57(ORIX 지급보증)회 외 금융채', '보증사채'
+    2026-11-18: 담보부사채(자산·보증 담보) 등급도 회사 신용도가 아님(이랜드리테일 KAMCO 보증 담보부사채 AAA)"""
     return bool(_GUAR_RE.search(r.get("target_type") or ""))
+
+
+def _issue_no(r):
+    m = _ISSUE_RE.search(r.get("target_type") or "")
+    return re.sub(r"\s", "", m.group(1)) if m else None
+
+
+def mark_guar(ratings):
+    """보증부 표시. 2026-11-18 사용자 지적(이랜드리테일): 같은 회차를 한 평가사는 '제124-1회(한국자산관리공사 지급보증) 담보부사채',
+    다른 평가사는 '제124-1회 일반사채'로 공시해 뒤쪽이 대표 등급 AAA로 잡힘 → 한 곳이라도 보증부로 적힌 회차는 같은 회차 전부 보증부로"""
+    for r in ratings:
+        r["guar"] = _guar(r)
+    gno = {_issue_no(r) for r in ratings if r["guar"]} - {None}
+    for r in ratings:
+        if not r["guar"] and _issue_no(r) in gno:
+            r["guar"] = True
+    return ratings
 
 
 def _cls(r):
@@ -834,7 +852,7 @@ def _downgrades(ratings, days=365):
     last, out = {}, []
     for r in sorted(ratings, key=lambda x: str(x.get("disc_dt") or "").replace("-", "")):
         tt = r.get("target_type") or ""
-        if "보증" in tt or "신종" in tt or "후순위" in tt or "파생" in tt:
+        if r.get("guar") or _guar(r) or "신종" in tt or "후순위" in tt or "파생" in tt:
             continue
         g = (r.get("grade") or "").strip().split(" ")[0] if r.get("grade") else ""
         short = bool(re.search(r"기업어음|전자단기|단기사채|CP", tt))
