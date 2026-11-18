@@ -371,6 +371,7 @@ def company_detail(con, c):
                                ORDER BY trmend_book_amt DESC LIMIT 8""", cc, cc),   # 최신 보고서(접수번호 최대) 세트
     }
     # 2026-10-29 사용자 결정: 타사 보증부 등급(은행·계열사 지급보증·신용보강 사채·CP)은 대상회사 신용도가 아니므로 대표 등급·플래그·평가서 요약에서 제외(이력 표에는 '보증부'로 남김)
+    _guar_pdf(con)
     mark_guar(d["ratings"] or [], (c.get("stock_code"), c.get("corp_code")))
     gfiles = {r.get("file_url") for r in d["ratings"] or [] if r["guar"] and r.get("file_url")}
     if d.get("rating_summary") and d["rating_summary"].get("file_url") in gfiles:
@@ -739,6 +740,21 @@ def _guar_manual():
 
 
 _GUAR_MANUAL = _guar_manual()
+_GUAR_PDF = None
+
+
+def _guar_pdf(con):
+    """rating_guar(평가서 본문 스캔, 2026-11-18) — {(corp_code, 평가사): (공시일, 근거 문맥)}: 그 평가사의 최신 단기 평가서 개요에 보증 표기가 있는 경우"""
+    global _GUAR_PDF
+    if _GUAR_PDF is None:
+        _GUAR_PDF = {}
+        try:
+            for cc, ag, dt, sn in con.execute("SELECT corp_code, agency, disc_dt, strong_snip FROM rating_guar WHERE strong=1 AND agency IS NOT NULL"):
+                if (cc, ag) not in _GUAR_PDF or dt > _GUAR_PDF[(cc, ag)][0]:
+                    _GUAR_PDF[(cc, ag)] = (dt, re.sub(r"\s+", " ", sn or "").strip()[:120])
+        except Exception:  # noqa  표 없음(스캔 전)
+            pass
+    return _GUAR_PDF
 
 
 def mark_guar(ratings, codes=()):
@@ -751,6 +767,13 @@ def mark_guar(ratings, codes=()):
     for r in ratings:
         if not r["guar"] and _issue_no(r) in gno:
             r["guar"] = True
+    for (cc, ag), (dt, sn) in (_GUAR_PDF or {}).items():   # 평가서 본문에 보증 표기 → 그 평가사의 그 날짜까지 단기(CP·전단채) 등급 전부 보증부
+        if cc not in codes:
+            continue
+        for r in ratings:
+            if r.get("agency") == ag and re.search(r"기업어음|단기사채", r.get("target_type") or "") and (r.get("disc_dt") or "") <= dt and not r.get("guar"):
+                r["guar"] = True
+                r["guar_note"] = f"평가서 본문 보증 표기(자동 판독): …{sn}…"
     for k in codes:
         m = _GUAR_MANUAL.get(k or "")
         if not m:
