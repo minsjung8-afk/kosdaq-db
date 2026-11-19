@@ -434,10 +434,9 @@ def _int_fallback(rows, k):
 
 def _pick(rows, ids, names, sj=None):
     """rows: fin_raw dict 목록. account_id 우선, 없으면 계정명 정확/포함 매칭."""
-    for aid in ids:                           # 2026-11-19: ids 순서가 우선순위(행 순서가 아님) — 이자비용 < 금융비용 뒤바뀜 방지
-        for r in rows:
-            if r["account_id"] == aid and (sj is None or r["sj_div"] in sj):
-                return r["thstrm_amount"]
+    for r in rows:                            # 행 순서(재무제표에 먼저 나온 줄) 우선 — 2026-11-19 ids 순서 우선으로 바꿨다가 되돌림: 이자비용은 ids를 하나로 줄여 해결했고, 다른 계정(매출·채권·매입채무 등)의 검증된 동작을 바꿀 이유가 없음
+        if r["account_id"] in ids and (sj is None or r["sj_div"] in sj):
+            return r["thstrm_amount"]
     for nm in names:
         for r in rows:
             an = _norm_nm(r["account_nm"])
