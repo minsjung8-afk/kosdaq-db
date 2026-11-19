@@ -892,6 +892,53 @@ def main():
         if a.codes:
             cc = {r[0] for r in con.execute(f"SELECT corp_code FROM company WHERE corp_code IN ({','.join('?' * len(a.codes))}) OR stock_code IN ({','.join('?' * len(a.codes))})", (*a.codes, *a.codes))}
         rating_guar.scan(con, corp_codes=cc, limit=a.limit)
+    elif a.job == "rawdump" and a.type == "차입점검":   # 2026-11-19 사용자 '총차입금 매칭이 우선': 전 회사 최근 연간 BS의 차입성 줄 vs 총차입금에 들어간 줄 전수 대조
+        import financials as _fi, collections as _co, re as _re2
+        broad = _re2.compile(r"(차입|사채|리스부채|유동성장기부채|어음|전자단기)")
+        nm = {r[0]: (r[1], r[2]) for r in con.execute("SELECT corp_code, corp_name, stock_code FROM company")}
+        keys = con.execute("""SELECT corp_code, MAX(bsns_year) y FROM fin_raw WHERE reprt_code='11011' AND sj_div='BS' GROUP BY corp_code""").fetchall()
+        dropped, used, dbl, mism, nocand = _co.Counter(), _co.Counter(), [], [], 0
+        ex_dropped = {}
+        for cc, y in keys:
+            fs = "CFS" if con.execute("SELECT 1 FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div='CFS' AND sj_div='BS' LIMIT 1", (cc, y)).fetchone() else "OFS"
+            rows = [dict(r) for r in con.execute("SELECT * FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=? AND sj_div='BS'", (cc, y, fs))]
+            items = _fi.borrow_items(rows)
+            inn = {(i["nm"], i["amt"]) for i in items}
+            cands = [(_fi._norm_nm(r["account_nm"]), r["thstrm_amount"]) for r in rows if r.get("thstrm_amount") and broad.search(_fi._norm_nm(r["account_nm"]))]
+            if not cands:
+                nocand += 1
+            for n_, v in cands:
+                if (n_, v) not in inn:
+                    dropped[n_] += 1
+                    ex_dropped.setdefault(n_, (nm.get(cc, ("?", None))[0], y, fs, round(v / 1e8, 1)))
+            for i in items:
+                used[i["nm"]] += 1
+            names = [i["nm"] for i in items]
+            for n_ in names:
+                if "및" in n_ or _re2.search(r"(합계|총계)", n_):
+                    parts = [p for p in _re2.split(r"및|합계|총계", n_) if p]
+                    if any(any(p and p in m and m != n_ for p in parts) for m in names):
+                        dbl.append((nm.get(cc, ("?",))[0], y, fs, n_, [(m, round(i["amt"] / 1e8, 1)) for m, i in zip(names, items)]))
+                        break
+            k = con.execute("SELECT borrowings FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=?", (cc, y, fs)).fetchone()
+            tot = sum(i["amt"] for i in items) if items else 0
+            if k and k[0] is not None and abs((k[0] or 0) - tot) > 1e6:
+                mism.append((nm.get(cc, ("?",))[0], y, fs, round((k[0] or 0) / 1e8, 1), round(tot / 1e8, 1)))
+        print(f"[차입점검] 회사 {len(keys):,} · 후보 없는 회사 {nocand:,} · 제외된 줄 이름 {len(dropped):,}종 {sum(dropped.values()):,}행 · KPI≠세부합 {len(mism):,}사 · '및/합계' 줄과 구성 줄 동시 포함(중복 의심) {len(dbl):,}사", flush=True)
+        for n_, c in dropped.most_common(80):
+            print(f"[차입점검] 제외 {c:4d}  {n_}  예) {ex_dropped[n_]}", flush=True)
+        for n_, c in used.most_common(60):
+            print(f"[차입점검] 포함 {c:4d}  {n_}", flush=True)
+        for x in dbl[:40]:
+            print(f"[차입점검] 중복의심 {x}", flush=True)
+        for x in mism[:30]:
+            print(f"[차입점검] KPI불일치 {x}", flush=True)
+        if a.codes:
+            for cc in ccs:
+                for y, fs in con.execute("SELECT DISTINCT bsns_year, fs_div FROM fin_raw WHERE corp_code=? AND reprt_code='11011' AND sj_div='BS' ORDER BY bsns_year DESC LIMIT 4", (cc,)):
+                    rows = [dict(r) for r in con.execute("SELECT * FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=? AND sj_div='BS'", (cc, y, fs))]
+                    print(f"[차입점검] {nm.get(cc,('?',))[0]} {y} {fs} 후보: {[(_fi._norm_nm(r['account_nm']), round(r['thstrm_amount']/1e8,1)) for r in rows if r.get('thstrm_amount') and broad.search(_fi._norm_nm(r['account_nm']))]}", flush=True)
+                    print(f"[차입점검]   포함: {[(i['nm'], round(i['amt']/1e8,1), i['cur']) for i in _fi.borrow_items(rows)]}", flush=True)
     elif a.job == "rawdump" and a.type == "분할점검":   # 2026-11-18 사용자: SK하이닉스 52주 최고 2,943,380원(소수점) — 수정주가 배율 오검출 범위 확인(DART·KRX·AI 0콜)
         import prices as _pr, math
         old = lambda r, pr: abs(pr / r - 1) < 0.25
