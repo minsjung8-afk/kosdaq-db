@@ -33,7 +33,7 @@ TAG_RE = re.compile(r"<[^>]+>")
 UNIT = {"원": 1, "천원": 1_000, "백만원": 1_000_000, "십억원": 1_000_000_000, "억원": 100_000_000, "만원": 10_000}
 UNIT_RE = re.compile(r"단위\s*[:：]?\s*([천백십억만]*원)")
 TITLE_RE = re.compile(r"신종\s*자본\s*증권\s*미상환\s*잔액")
-END_RE = re.compile(r"조건부\s*자본\s*증권\s*미상환|사채관리계약|증권의\s*발행을\s*통해\s*조달된\s*자금")
+END_RE = re.compile(r"조건부\s*자본\s*증권\s*미상환|사채관리계약|증권의\s*발행을\s*통해\s*조달된\s*자금|기업어음증권\s*미상환|단기사채\s*미상환|회사채\s*미상환")   # 목차에 적힌 제목(타임X AI)에서 시작하면 다음 표 제목에서 끊고 진짜 제목을 다시 찾는다
 
 
 def _txt(x):
@@ -297,7 +297,7 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False, workers=6, budg
     from datetime import date
     year0 = year0 or date.today().year - 2
     tg = targets(con, year0, codes)
-    done = {r[0] for r in con.execute("SELECT rcept_no FROM hybrid_out_log")}
+    done = {r[0] for r in con.execute("SELECT rcept_no FROM hybrid_out_log WHERE how NOT LIKE 'API 불일치%'")}      # 불일치로 미저장한 보고서는 규칙이 바뀌면 다시 시도
     todo = [t for t in tg if dry or t[4] not in done]
     work = todo[: (limit or len(todo))]
     print(f"[신종잔액] 대상 {len({t[0] for t in tg})}사 · {len(tg)}기간 · 이번 실행 {len(work)}기간 · 동시 {workers}" + (" (점검만)" if dry else ""), flush=True)
@@ -324,8 +324,9 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False, workers=6, budg
                 tables, api = r["tables"], r["api"]
                 res = classify(tables, name)
                 n_ok += 1
-                first = tables[0].get("amt") if tables else None
-                chk = "미대조" if api is None or first is None else ("일치" if abs(api - first) < 1 else "불일치")
+                amts = [t.get("amt") for t in tables if t.get("amt") is not None]
+                first = amts[0] if amts else None
+                chk = "미대조" if api is None or not amts else ("일치" if any(abs(api - x) < 1 for x in amts) else "불일치")   # 정형 API는 '첫 표'가 아니라 개별(자기 회사) 표를 주기도 한다(콘텐트리중앙·SKC: 연결 표가 앞, API는 뒤의 별도 표) → 어느 표든 맞으면 일치
                 n_bad += chk == "불일치"
                 print(f"[신종잔액] {name} {y} {rc}: 연결 {_e(res['CFS'])} · 별도 {_e(res['OFS'])} · 기준없음 {_e(res['ANY'])} · 자기회사 {_e(res['OWN'])} · {res['how']} · API {_e(api)} {chk} · 표 "
                       + " / ".join(f"[{t['label'][:18] or '-'}|{t.get('ctx') or '-'}] {_e(t.get('amt'))}({t.get('unit')}{'·' + t['note'] if t.get('note') else ''})" for t in tables), flush=True)
