@@ -897,6 +897,27 @@ def main():
     elif a.job == "rawdump" and a.type == "거래소공시재스캔":   # 2026-11-19 상장유지 위험 뱃지: 최근 1년 거래소공시(pblntf_ty=I) 이벤트 보강
         import delta as _dl
         _dl.rescan_krx(days=a.limit or 365)
+    elif a.job == "rawdump" and a.type == "신종SCE":   # 2026-11-19: 재무상태표에 신종자본증권 줄이 없는 회사(SK텔레콤·한전·CJ대한통운 등) — 자본변동표 열(account_detail)에 신종 잔액이 있는지 DART 원자료 확인(--codes 필수)
+        import financials as _fi, re as _re2
+        hy = _re2.compile(r"신종|하이브리드|영구채|영구사채|영구전환|Hybrid|Perpetual", _re2.I)
+        nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        for cc in (ccs if a.codes else []):
+            for fs in ("CFS", "OFS"):
+                try:
+                    lst = _fi._fetch_list(cc, a.year - 1, "11011", fs)
+                except Exception as e:  # noqa
+                    print(f"[신종SCE] {nm.get(cc, cc)} {fs} 실패 {str(e)[:80]}", flush=True); continue
+                sce = [r for r in lst if r.get("sj_div") == "SCE"]
+                det = sorted({(r.get("account_detail") or "") for r in sce})
+                print(f"[신종SCE] {nm.get(cc, cc)} {a.year - 1} {fs}: 전체 {len(lst)}행 · SCE {len(sce)}행 · 열(account_detail) {len(det)}종 · 키 {sorted(sce[0].keys()) if sce else '-'}", flush=True)
+                for d in det:
+                    print(f"[신종SCE]    열: {d}", flush=True)
+                for r in sce:
+                    if hy.search((r.get("account_detail") or "") + (r.get("account_nm") or "") + (r.get("account_id") or "")) and (r.get("thstrm_amount") or "").strip() not in ("", "-", "0"):
+                        print(f"[신종SCE]    {r.get('account_nm')} | {r.get('account_detail')} | 당기 {r.get('thstrm_amount')} | 전기 {r.get('frmtrm_amount')} | {r.get('account_id')} | ord {r.get('ord')}", flush=True)
+                for r in lst:
+                    if r.get("sj_div") == "BS" and _re2.search(r"자본", r.get("account_nm") or "") and not _re2.search(r"부채", r.get("account_nm") or ""):
+                        print(f"[신종SCE]    BS {r.get('account_nm')} = {r.get('thstrm_amount')} ({r.get('account_id')})", flush=True)
     elif a.job == "rawdump" and a.type == "신종점검":   # 2026-11-19 사용자 '누락 없도록 꼼꼼하게': 신종자본증권 관련 계정명 전수(재무상태표 잔액·현금흐름표 분배금·자본변동표) vs 현재 규칙이 잡는 것
         import financials as _fi, collections as _co, re as _re2
         broad = _re2.compile(r"신종|하이브리드|영구채|영구사채|영구전환|영구교환|영구후순위|조건부자본|상각형|hybrid|perpetual", _re2.I)
