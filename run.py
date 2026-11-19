@@ -901,6 +901,69 @@ def main():
         _dl.rescan_krx(days=a.limit or 365)
     elif a.job == "rawdump" and a.type in ("신종잔액", "신종잔액점검"):   # 2026-11-19: 재무상태표에 신종자본증권 줄이 없는 회사 — 정기보고서 「신종자본증권 미상환 잔액」 표(단위 문구 포함)로 잔액 채움. 점검은 출력만
         __import__("hybrid_out").run(con, year0=a.year - 2, codes=set(ccs) if a.codes else None, limit=a.limit, dry=(a.type == "신종잔액점검"))
+    elif a.job == "rawdump" and a.type == "영구채점검":   # 2026-11-19 사용자 '영구채는 테스트부터': 자본 분류 영구CB·후순위채 중 이름에 신종·영구가 없어 못 잡는 것과 조건부자본증권 규모를 표본으로 측정(DB 변경 없음)
+        import financials as _fi, re as _re2, random as _rd
+        from common import dart_get as _dg
+        nm = {r[0]: (r[1], r[2] or "") for r in con.execute("SELECT corp_code, corp_name, market FROM company")}
+        # A. 재무상태표 자본 구간(부채총계 뒤 ~ 자본총계)의 사채·전환·교환·후순위 계정 — 이름에 신종·영구가 없는 것
+        hy_seen = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM fin_raw WHERE bsns_year>='2024' AND (account_nm LIKE '%신종%' OR account_nm LIKE '%영구%' OR account_nm LIKE '%하이브리드%')")}
+        cand = {}
+        for cc, y in con.execute("SELECT corp_code, MAX(bsns_year) FROM fin_raw WHERE reprt_code='11011' AND sj_div='BS' GROUP BY corp_code").fetchall():
+            for fs in ("CFS", "OFS"):
+                rows = [dict(r) for r in con.execute("SELECT account_nm, account_id, thstrm_amount, ord FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=? AND sj_div='BS' ORDER BY ord", (cc, y, fs))]
+                if not rows:
+                    continue
+                o = {_fi._norm_nm(r["account_nm"]): r["ord"] for r in rows if r["ord"] is not None}
+                o_tl, o_te = o.get("부채총계"), o.get("자본총계")
+                if o_tl is None or o_te is None or o_te <= o_tl:
+                    continue
+                for r in rows:
+                    an = _fi._norm_nm(r["account_nm"]); od = r["ord"]
+                    if od is None or not (o_tl < od <= o_te) or not r["thstrm_amount"]:
+                        continue
+                    if _re2.search(r"사채|전환|교환|후순위|채권|증권", an) and not _fi._HY_NM.search(an) and not _re2.search(r"자기주식|주식발행|출자|지분|우선주", an):
+                        cand.setdefault(cc, []).append((y, fs, r["account_nm"], r["thstrm_amount"]))
+                break
+        print(f"[영구채] A. 자본 구간에 사채·전환·교환·후순위 이름 계정(신종·영구 아님) {len(cand)}사", flush=True)
+        for cc, L in list(cand.items())[:60]:
+            print(f"[영구채]    {nm.get(cc, (cc,))[0]} {nm.get(cc, ('', ''))[1]}: " + " / ".join(f"{y} {fs} {an} {amt / 1e8:,.0f}억" for y, fs, an, amt in L[:3]), flush=True)
+        # B. A 후보 + 신종 흔적 없는 상장사 무작위 표본에 DART 정형 API(신종자본증권 미상환 잔액) 1콜씩 → 표에 금액이 있으면 '놓친 회사'
+        _rd.seed(7)
+        listed = [c for c, (n, m) in nm.items() if m in ("KOSPI", "KOSDAQ") and c not in hy_seen and c not in cand]
+        sample = list(cand)[:60] + _rd.sample(listed, min(60, len(listed)))
+        miss = []
+        for cc in sample:
+            api_cc = cc[1:] if cc.startswith("U") else cc
+            try:
+                js = _dg("newCaplScritsNrdmpBlce", corp_code=api_cc, bsns_year=str(a.year - 1), reprt_code="11011")
+            except Exception as e:  # noqa
+                print(f"[영구채]    API 실패 {nm.get(cc, (cc,))[0]} {str(e)[:60]}", flush=True); continue
+            tot = next((r.get("sm") for r in js.get("list", []) if (r.get("remndr_exprtn2") or "").replace(" ", "") == "합계"), None)
+            v = float(str(tot).replace(",", "")) if tot and str(tot).replace(",", "").isdigit() else 0.0
+            if v > 0:
+                miss.append((cc, v))
+                print(f"[영구채]    놓침: {nm.get(cc, (cc,))[0]} — 표상 {v / 1e8:,.0f}억 · 재무제표 흔적 {'A후보' if cc in cand else '없음'} · 계정 {cand.get(cc, [('', '', '-', 0)])[0][2]}", flush=True)
+        print(f"[영구채] B. 표본 {len(sample)}사(A 후보 {min(60, len(cand))} + 흔적 없는 상장사 {len(sample) - min(60, len(cand))}) 중 미상환 잔액 표에 금액 있는데 못 잡은 회사 {len(miss)}사", flush=True)
+        # C. 조건부자본증권: 금융지주·은행·보험·증권(재무제표에 신종 흔적 있는 금융업) 표본에 정형 API(조건부자본증권 미상환 잔액) → 재무상태표 신종 줄과 비교
+        fin = [r[0] for r in con.execute("SELECT corp_code FROM company WHERE market IN ('KOSPI','KOSDAQ') AND (induty_code LIKE '64%' OR induty_code LIKE '65%' OR induty_code LIKE '66%')")]
+        fin = [c for c in fin if c in hy_seen][:40]
+        n_c = 0
+        for cc in fin:
+            api_cc = cc[1:] if cc.startswith("U") else cc
+            try:
+                js = _dg("cndlCaplScritsNrdmpBlce", corp_code=api_cc, bsns_year=str(a.year - 1), reprt_code="11011")
+            except Exception as e:  # noqa
+                print(f"[영구채]    조건부 API 실패 {nm.get(cc, (cc,))[0]} {str(e)[:60]}", flush=True); continue
+            tot = next((r.get("sm") for r in js.get("list", []) if (r.get("remndr_exprtn2") or "").replace(" ", "") == "합계"), None)
+            v = float(str(tot).replace(",", "")) if tot and str(tot).replace(",", "").isdigit() else 0.0
+            try:
+                k = con.execute("SELECT hybrid_eq, hybrid_note FROM fin_kpi WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div='CFS'", (cc, str(a.year - 1))).fetchone()
+            except Exception:  # noqa
+                k = None
+            if v > 0:
+                n_c += 1
+            print(f"[영구채]    조건부 {nm.get(cc, (cc,))[0]}: 표 {v / 1e8:,.0f}억 · 재무상태표 신종 줄 {(k[0] / 1e8 if k and k[0] else 0):,.0f}억 {(k[1] or '') if k else ''}", flush=True)
+        print(f"[영구채] C. 금융업 표본 {len(fin)}사 중 조건부자본증권 잔액 있음 {n_c}사", flush=True)
     elif a.job == "rawdump" and a.type == "신종공시":   # 2026-11-19: 잔액이 재무상태표에 없는 회사(풀무원식품 포함 150건) — DART 정기보고서 '신종자본증권 미상환 잔액'(newCaplScritsNrdmpBlce) 원자료 확인(--codes 필수). --limit를 주면 이어서 fn_ai 표본 실행
         from common import dart_get as _dg
         nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
