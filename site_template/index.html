@@ -421,7 +421,7 @@ function sortList(l){
   return back(out);
 }
 // 2026-11-19 상장유지 위험 뱃지(공식: 관리종목·실질심사·환기종목 / 자체: 위험·주의)
-window.lrBadges=function(lr){ if(!lr) return ''; let h=''; if(lr.m) h+='<span class="lrb m" title="KRX 관리종목 지정">관리종목</span>'; if(lr.r) h+=`<span class="lrb r" title="상장적격성 실질심사 ${esc(lr.r)}">실질심사${lr.r==='검토 중'?'·검토':''}</span>`; if(lr.c) h+='<span class="lrb c" title="KRX 투자주의환기종목">환기</span>'; if(lr.u) h+=`<span class="lrb w1" title="거래소 관리종목 지정 우려 공시${typeof lr.u==='string'?' '+lr.u.slice(0,4)+'-'+lr.u.slice(4,6)+'-'+lr.u.slice(6,8):''}">지정 우려</span>`; else if(lr.w) h+=`<span class="lrb w2" title="자체 점검: 관리종목 지정 요건(시총·주가·매출·자본잠식·감사의견 등) 미달 상태 — 거래소 공시는 아직 없음">요건 미달</span>`; return h; };
+window.lrBadges=function(lr){ if(!lr) return ''; let h=''; if(lr.m) h+='<span class="lrb m" title="KRX 관리종목 지정">관리종목</span>'; if(lr.r) h+=`<span class="lrb r" title="상장적격성 실질심사 ${esc(lr.r)}">실질심사${lr.r==='검토 중'?'·검토':''}</span>`; if(lr.c) h+='<span class="lrb c" title="KRX 투자주의환기종목">환기</span>'; if(lr.u) h+=`<span class="lrb w1" title="거래소 관리종목 지정 우려 공시${typeof lr.u==='string'?' '+lr.u.slice(0,4)+'-'+lr.u.slice(4,6)+'-'+lr.u.slice(6,8):''}">지정 우려</span>`; else if(lr.w&&!lr.m&&!lr.r) h+=`<span class="lrb w2" title="자체 점검: 관리종목 지정 요건(시총·주가·매출·자본잠식·감사의견 등) 미달 상태 — 거래소 공시는 아직 없음">요건 미달</span>`; return h; };
 let lrf='';
 document.querySelectorAll('.lbtn').forEach(b=>b.onclick=()=>{lrf=b.dataset.l;document.querySelectorAll('.lbtn').forEach(x=>x.classList.toggle('on',x===b));applyFilter()});
 function applyFilter(){
