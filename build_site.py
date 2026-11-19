@@ -379,6 +379,11 @@ def company_detail(con, c):
         d["rating_summary"] = None
     d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], [r for r in d["ratings"] or [] if not r["guar"]])
     try:
+        d["listing_risk"] = _listing_risk(c, kpi, prices, d["price_summary"], d["audit"], d.get("review"), d["events"]) if (c.get("market") or "").upper() in ("KOSPI", "KOSDAQ") else None
+    except Exception as e:  # noqa
+        print("[site] listing_risk 실패", c.get("stock_code"), e); d["listing_risk"] = None
+    LR_IDX[c["stock_code"]] = d.get("listing_risk")
+    try:
         RT_UPD.extend((dt, c["corp_name"], c["stock_code"], ag, x, y, k) for dt, ag, x, y, k in _rt_changes(d["ratings"]))
     except Exception:  # noqa
         pass
@@ -897,6 +902,7 @@ _GL = ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "BBB-", "BB+",
 _GS = ["A1", "A2+", "A2", "A2-", "A3+", "A3", "A3-", "B+", "B", "B-", "C", "D"]
 
 
+LR_IDX = {}   # 상장유지 위험(2026-11-19): 종목코드 → listing_risk (목록 뱃지용)
 RT_UPD = []   # 업데이트 소식(2026-11-18 사용자): 최근 14일 신용등급 변동 [(공시일, 회사, 종목코드, 평가사, 이전, 이후, 방향)]
 
 
@@ -1055,6 +1061,134 @@ def _ibk_fin(con, cc, kpi):
     return out or None
 
 
+_MGMT_RULES = None
+
+
+def _mgmt_rules():
+    global _MGMT_RULES
+    if _MGMT_RULES is None:
+        try:
+            _MGMT_RULES = json.loads((ROOT / "mgmt_rules.json").read_text(encoding="utf-8"))
+        except Exception as e:  # noqa
+            print("[site] mgmt_rules.json 없음/오류:", e); _MGMT_RULES = {}
+    return _MGMT_RULES
+
+
+def _rule_at(lst, day, nxt=False):
+    """적용일자별 기준 목록에서 day에 적용되는 값(nxt=True면 그 다음 단계)"""
+    cur = [x for x in (lst or []) if x["from"] <= day]
+    fut = [x for x in (lst or []) if x["from"] > day]
+    if nxt:
+        return fut[0] if fut else None
+    return cur[-1] if cur else None
+
+
+def _lr_compact(lr):
+    if not lr:
+        return None
+    o = lr.get("official") or {}
+    out = {}
+    if o.get("mgmt"): out["m"] = 1
+    if o.get("review") and o["review"].get("status") != "종료": out["r"] = o["review"]["status"]
+    if o.get("caution"): out["c"] = 1
+    if lr.get("own"): out["w"] = lr["own"]
+    return out or None
+
+
+def _listing_risk(c, kpi, prices, ps, audit, review, events):
+    """상장유지 위험 분석(2026-11-19 사용자·GPT 의견 반영): ① 공식 상태(KRX 소속부·거래소공시) ② 요건별 자체 판정(mgmt_rules.json, 별도 기준)
+    ③ 시총·주가는 기준 미달 연속 거래일 수 ④ 연도별 추세. 공식(관리종목·실질심사·환기)과 자체 추정(위험·주의)을 분리해 표시한다.
+    반환 {official:{mgmt,caution,review:{status,dt,title,rcept_no}}, level, items:[{k,label,value,judge,note}], trend:[...], asof}"""
+    from datetime import date, timedelta
+    mkt = (c.get("market") or "").upper()
+    R = _mgmt_rules().get(mkt)
+    today = date.today().isoformat()
+    st = c.get("sect_tp") or ""
+    off = {"mgmt": "관리종목" in st, "caution": "환기" in st, "review": None}
+    cut = (date.today() - timedelta(days=400)).strftime("%Y%m%d")
+    rv = sorted([e for e in events or [] if e.get("flag") == "실질심사" and (e.get("rcept_dt") or "") >= cut], key=lambda e: e.get("rcept_dt") or "")
+    if rv:
+        e = rv[-1]; t = (e.get("report_nm") or "").replace(" ", "")
+        status = "종료" if re.search(r"해제|미해당|제외|종료|상장유지|유지결정", t) else "검토 중" if "대상여부" in t or "사유발생" in t else "심사 중"
+        off["review"] = {"status": status, "dt": e.get("rcept_dt"), "title": (e.get("report_nm") or "").strip(), "rcept_no": e.get("rcept_no")}
+    if not off["mgmt"] and any(e.get("flag") == "관리종목" and (e.get("rcept_dt") or "") >= cut and "해제" not in (e.get("report_nm") or "") for e in events or []):
+        off["mgmt"] = True
+    items, trend = [], []
+    if not R:
+        return {"official": off, "level": "관리종목" if off["mgmt"] else ("실질심사" if off["review"] and off["review"]["status"] != "종료" else ("환기종목" if off["caution"] else None)), "items": items, "trend": trend, "asof": today, "rules": None}
+    rows = kpi.get("OFS") or kpi.get("CFS") or []
+    basis = "별도" if kpi.get("OFS") else "연결"
+    ann = [r for r in rows if r.get("kind") == "annual"]
+    last = ann[-1] if ann else None
+    def add(k, label, value, judge, note=""):
+        items.append({"k": k, "label": label, "value": value, "judge": judge, "note": note})
+    # ① 시가총액 · 주가(연속 거래일)
+    mc = _rule_at(R.get("mcap"), today); mc_n = _rule_at(R.get("mcap"), today, nxt=True)
+    pr = _rule_at(R.get("price"), today)
+    sh = ps.get("shares_out") if ps else None
+    daily = [r for r in (prices or []) if r.get("close")][-250:]
+    def streak(fn):
+        n = 0
+        for r in reversed(daily):
+            if fn(r): n += 1
+            else: break
+        return n
+    if ps and ps.get("mcap") and mc:
+        m = ps["mcap"]; need = mc["min"]
+        n = streak(lambda r: sh and r["close"] * sh < need) if sh else 0
+        j = "red" if (m < need and n >= R.get("mcap_watch_days", 20)) else "amber" if (m < need or m < need * 1.2) else "ok"
+        add("mcap", "시가총액", f"{m/1e8:,.0f}억", j, f"기준 {need/1e8:,.0f}억" + (f" · 미달 {n}거래일 연속(지정 {R.get('mcap_days',30)}일)" if m < need else "") + (f" · {mc_n['from'][:4]}년부터 {mc_n['min']/1e8:,.0f}억" if mc_n else ""))
+    if ps and ps.get("close") and pr:
+        pc = ps["close"]; n = streak(lambda r: r["close"] < pr["min"])
+        add("price", "주가", f"{pc:,.0f}원", "red" if (pc < pr["min"] and n >= R.get("mcap_watch_days", 20)) else "amber" if pc < pr["min"] * 1.2 else "ok",
+            f"기준 {pr['min']:,}원(동전주)" + (f" · 미달 {n}거래일 연속" if pc < pr["min"] else ""))
+    # ② 매출액(별도 최근 사업연도)
+    rr = _rule_at(R.get("revenue"), today); rr_n = _rule_at(R.get("revenue"), today, nxt=True)
+    if last and last.get("revenue") is not None and rr:
+        rev = last["revenue"]; exempt = any(x in st for x in R.get("revenue_exempt_sect", [])) or (ps and ps.get("mcap") and R.get("revenue_exempt_mcap") and ps["mcap"] >= R["revenue_exempt_mcap"])
+        j = "na" if exempt else "red" if rev < rr["min"] else "amber" if (rr_n and rev < rr_n["min"]) else "ok"
+        add("revenue", f"매출액({last['bsns_year']} {basis})", f"{rev/1e8:,.0f}억", j,
+            ("기술성장·시총 특례로 적용 제외" if exempt else f"기준 {rr['min']/1e8:,.0f}억" + (f" · {rr_n['from'][:4]}년 {rr_n['min']/1e8:,.0f}억" if rr_n else "")))
+    # ③ 자본잠식 · 자기자본
+    if last and last.get("capital") and last.get("equity") is not None:
+        cap, eq = last["capital"], last["equity"]; ir = (cap - eq) / cap if cap else None
+        if eq < 0:
+            add("impair", f"자본잠식({last['bsns_year']})", "완전잠식", "red", f"자본총계 {eq/1e8:,.0f}억 — 사업연도 말 완전잠식은 즉시 상장폐지 사유")
+        elif ir is not None and ir > 0:
+            add("impair", f"자본잠식률({last['bsns_year']})", f"{ir*100:.1f}%", "red" if ir >= R.get("impair_ratio", 0.5) else "amber" if ir >= R.get("impair_watch", 0.3) else "ok", f"자본금 {cap/1e8:,.0f}억 · 자본총계 {eq/1e8:,.0f}억 (기준 50%)")
+        else:
+            add("impair", f"자본잠식률({last['bsns_year']})", "0%", "ok", f"자본총계 {eq/1e8:,.0f}억 ≥ 자본금 {cap/1e8:,.0f}억")
+        if R.get("equity_min"):
+            add("equity", f"자기자본({last['bsns_year']})", f"{eq/1e8:,.0f}억", "red" if eq < R["equity_min"] else "amber" if (R.get("equity_watch") and eq < R["equity_watch"]) else "ok", f"기준 {R['equity_min']/1e8:,.0f}억")
+    # ④ 법차손(코스닥): 최근 3년 중 2회 자기자본 50% 초과
+    if R.get("pretax_ratio") and ann:
+        last3 = ann[-3:]
+        if any(r.get("pretax") is None for r in last3):
+            add("pretax", "법차손/자기자본", "확인 필요", "na", "세전손익 계정 미수집 연도 있음")
+        else:
+            hits = [r for r in last3 if (r["pretax"] or 0) < 0 and r.get("equity") and abs(r["pretax"]) > R["pretax_ratio"] * r["equity"] and abs(r["pretax"]) >= R.get("pretax_abs", 0)]
+            cnt = len(hits); lastc = ann[-1] in hits
+            v = " · ".join(f"{r['bsns_year']} {r['pretax']/1e8:,.0f}억({abs(r['pretax'])/r['equity']*100:.0f}%)" for r in last3 if r.get("equity"))
+            add("pretax", "법차손/자기자본 50%↑", f"{cnt}회/3년", "red" if (cnt >= 2 and lastc) else "amber" if cnt >= 1 else "ok", v)
+    # ⑤ 감사의견 · 검토의견
+    if audit:
+        a = audit[0]; op = a.get("adt_opinion") or ""
+        bad = bool(op) and ("적정" not in op or op.startswith("한정") or "부적정" in op or "거절" in op)
+        add("audit", f"감사의견({a.get('bsns_year')})", op or "-", "red" if bad else "ok", "비적정은 즉시 상장폐지 절차(2회 연속)·관리종목 사유" if bad else "")
+    if review and review.get("opinion") and not re.match(r"^\s*적정", review["opinion"]):
+        add("review", f"{review.get('period','')} 검토의견", review["opinion"], "red", f"{review.get('bsns_year')} — 반기 검토의견 비적정은 관리종목 사유")
+    # 추세(연간 3개년)
+    for r in ann[-3:]:
+        cap, eq = r.get("capital"), r.get("equity")
+        trend.append({"y": r["bsns_year"], "equity": eq, "impair": ((cap - eq) / cap * 100) if cap and eq is not None and eq < cap else 0, "op": r.get("op_income"), "revenue": r.get("revenue"), "pretax": r.get("pretax"),
+                      "pretax_ratio": (abs(r["pretax"]) / eq * 100) if r.get("pretax") is not None and r["pretax"] < 0 and eq else None})
+    judges = [i["judge"] for i in items]
+    own = "위험" if "red" in judges else "주의" if "amber" in judges else None
+    level = "관리종목" if off["mgmt"] else ("실질심사" if off["review"] and off["review"]["status"] != "종료" else own or ("환기종목" if off["caution"] else None))
+    return {"official": off, "level": level, "own": own, "items": items, "trend": trend, "asof": today, "basis": basis,
+            "rules": {"mcap": mc and mc["min"], "price": pr and pr["min"], "revenue": rr and rr["min"]}}
+
+
 def _downgrades(ratings, days=365):
     """최근 days일 안에 같은 평가사·같은 등급체계(장기/단기)·보증 아닌 평가에서 직전보다 낮아진 건 → [(평가사, 이전, 이후, 노치, 공시일)]"""
     from datetime import date, timedelta
@@ -1170,7 +1304,8 @@ def build():
                       "rt_sub": (d["rating_aux"]["grade"] if d.get("rating_aux") and d["rating_aux"].get("kind") == "sub" else None), "manual": MANUAL.get(c["corp_code"]),
                       "rt_guar": (None if cur_rt else next((r["grade"] for r in d["ratings"] or [] if r.get("guar") and r.get("grade") not in ("취소", "철회", "WD", "NR", "-")), None)),   # 2026-11-18 사용자: 보증부 등급만 있는 회사는 등급 뱃지 대신 '보증부 A1'로
                       "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"), "cur": _CUR,
-                      "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber")})
+                      "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber"),
+                      "lr": _lr_compact(d.get("listing_risk"))})   # 2026-11-19 상장유지 위험 뱃지: m 관리종목 · r 실질심사(상태) · c 환기 · w 위험/주의
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
             "price_asof": max((r["asof"] for r in q(con, "SELECT asof FROM price_summary")), default=None)}
     meta.update(_site_meta(con, index))

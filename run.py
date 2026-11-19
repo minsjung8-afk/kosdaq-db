@@ -892,6 +892,9 @@ def main():
         if a.codes:
             cc = {r[0] for r in con.execute(f"SELECT corp_code FROM company WHERE corp_code IN ({','.join('?' * len(a.codes))}) OR stock_code IN ({','.join('?' * len(a.codes))})", (*a.codes, *a.codes))}
         rating_guar.scan(con, corp_codes=cc, limit=a.limit)
+    elif a.job == "rawdump" and a.type == "거래소공시재스캔":   # 2026-11-19 상장유지 위험 뱃지: 최근 1년 거래소공시(pblntf_ty=I) 이벤트 보강
+        import delta as _dl
+        _dl.rescan_krx(days=a.limit or 365)
     elif a.job == "rawdump" and a.type == "시세요약":   # 2026-11-19: 시세 재수집 없이 price_summary만 다시 계산(52주 고저 기준 변경 등 정의 변경 시)
         import prices as _pr
         n = 0
