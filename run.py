@@ -897,6 +897,24 @@ def main():
     elif a.job == "rawdump" and a.type == "거래소공시재스캔":   # 2026-11-19 상장유지 위험 뱃지: 최근 1년 거래소공시(pblntf_ty=I) 이벤트 보강
         import delta as _dl
         _dl.rescan_krx(days=a.limit or 365)
+    elif a.job == "rawdump" and a.type == "신종공시":   # 2026-11-19: 잔액이 재무상태표에 없는 회사(풀무원식품 포함 150건) — DART 정기보고서 '신종자본증권 미상환 잔액'(newCaplScritsNrdmpBlce) 원자료 확인(--codes 필수). --limit를 주면 이어서 fn_ai 표본 실행
+        from common import dart_get as _dg
+        nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        for cc in (ccs if a.codes else []):
+            api_cc = cc[1:] if cc.startswith("U") else cc
+            for y, rc in ((a.year - 1, "11011"), (a.year - 2, "11011"), (a.year, "11014")):
+                try:
+                    js = _dg("newCaplScritsNrdmpBlce", corp_code=api_cc, bsns_year=str(y), reprt_code=rc)
+                except Exception as e:  # noqa
+                    print(f"[신종공시] {nm.get(cc, cc)} {y} {rc} 실패 {str(e)[:90]}", flush=True); continue
+                rows = js.get("list", [])
+                print(f"[신종공시] {nm.get(cc, cc)} {y} {rc}: status {js.get('status')} · {len(rows)}행", flush=True)
+                for r in rows:
+                    print("[신종공시]    " + " | ".join(f"{k}={v}" for k, v in r.items() if k not in ("corp_cls", "corp_code", "corp_name")), flush=True)
+            for r in con.execute("SELECT bsns_year, reprt_code, fs_div, equity, borrowings, hybrid_eq, hybrid_dist, hybrid_src, hybrid_note, int_exp, int_src, interest_cover FROM fin_kpi WHERE corp_code=? AND bsns_year>=? ORDER BY fs_div, bsns_year, reprt_code", (cc, str(a.year - 2))):
+                print(f"[신종공시]    KPI {tuple(r)}", flush=True)
+        if a.limit:
+            __import__("fn_ai").run(con, limit=a.limit)
     elif a.job == "rawdump" and a.type in ("신종SCE보정", "신종현황"):   # 2026-11-19 사용자 '누락 없도록': 분배금이 현금흐름표에 없고 자본변동표에만 있는 회사 — 자본변동표를 합계 열 기준으로 다시 받아(_sce_pick) KPI 재계산 + 전체 현황 출력
         import financials as _fi, collections as _co
         hyq = "(account_nm LIKE '%신종%' OR account_nm LIKE '%하이브리드%' OR account_nm LIKE '%영구채%' OR account_nm LIKE '%영구사채%' OR account_nm LIKE '%영구전환%' OR account_nm LIKE '%영구교환%')"
