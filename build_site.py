@@ -1123,10 +1123,19 @@ def _listing_risk(c, kpi, prices, ps, audit, review, events):
     rv = sorted([e for e in events or [] if e.get("flag") == "실질심사" and (e.get("rcept_dt") or "") >= cut], key=lambda e: e.get("rcept_dt") or "")
     if rv:
         e = rv[-1]; t = (e.get("report_nm") or "").replace(" ", "")
-        status = "종료" if re.search(r"해제|미해당|제외|종료|상장유지|유지결정", t) else "검토 중" if "대상여부" in t or "사유발생" in t else "심사 중"
+        status = "종료" if re.search(r"해제|미해당|제외|종료|상장유지|유지결정|미진행", t) else "검토 중" if "대상여부" in t or "사유발생" in t else "심사 중"   # 2026-11-19 '절차 미진행 안내'는 심사로 가지 않은 것 → 종료
         off["review"] = {"status": status, "dt": e.get("rcept_dt"), "title": (e.get("report_nm") or "").strip(), "rcept_no": e.get("rcept_no")}
-    if not off["mgmt"] and any(e.get("flag") == "관리종목" and (e.get("rcept_dt") or "") >= cut and "해제" not in (e.get("report_nm") or "") for e in events or []):
-        off["mgmt"] = True
+    # 2026-11-19 실측: 제목에 '관리종목'이 들어간 거래소공시 대부분이 '지정 우려 안내·투자유의안내·해제·미진행'이라 그대로 쓰면 오지정 94사.
+    # 코스닥은 KRX 소속부(관리종목(소속부없음))가 공식 상태 → 공시로는 지정하지 않는다. 소속부가 없는 시장(코스피)만 '관리종목지정' 공시 중 우려·예고·해제·미진행·내부결산을 뺀 최신 건으로 판단.
+    mg = sorted([e for e in events or [] if e.get("flag") == "관리종목" and (e.get("rcept_dt") or "") >= cut], key=lambda e: e.get("rcept_dt") or "")
+    def _mt(e):
+        return (e.get("report_nm") or "").replace(" ", "")
+    if not off["mgmt"] and mkt != "KOSDAQ":
+        fin = [e for e in mg if re.search(r"관리종목(지정|해제)", _mt(e)) and not re.search(r"우려|예고|미진행|내부결산|유의|사유발생|안내\(.*가능", _mt(e))]
+        if fin and "해제" not in _mt(fin[-1]):
+            off["mgmt"] = True
+    warn = [e for e in mg if re.search(r"우려|예고|내부결산|사유발생", _mt(e)) and "해제" not in _mt(e)]
+    off["mgmt_warn"] = ({"dt": warn[-1].get("rcept_dt"), "title": (warn[-1].get("report_nm") or "").strip(), "rcept_no": warn[-1].get("rcept_no")} if warn and not off["mgmt"] else None)   # 거래소의 '지정 우려' 공시(공식 지정은 아님)
     items, trend = [], []
     if not R:
         return {"official": off, "level": "관리종목" if off["mgmt"] else ("실질심사" if off["review"] and off["review"]["status"] != "종료" else ("환기종목" if off["caution"] else None)), "items": items, "trend": trend, "asof": today, "rules": None}
