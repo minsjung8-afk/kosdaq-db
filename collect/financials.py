@@ -11,6 +11,8 @@ KPI_MAP = {
     "cogs":         (["ifrs-full_CostOfSales"], ["매출원가", "영업원가"]),
     "net_income":   (["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실", "연결당기순이익", "연결당기순이익(손실)",
                                                "연결당기순손익", "당기순이익(순손실)", "당기순손실(이익)", "연결당기순손실"]),   # 감사보고서 표(표준계정코드 없음) 대응
+    "pretax":       (["ifrs-full_ProfitLossBeforeTax"], ["법인세비용차감전순이익", "법인세비용차감전순이익(손실)", "법인세비용차감전순손익", "법인세비용차감전순손실", "법인세차감전순이익", "법인세차감전순이익(손실)",
+                                                       "법인세비용차감전계속사업이익", "법인세비용차감전계속사업이익(손실)", "법인세비용차감전계속사업손익", "법인세비용차감전이익", "법인세비용차감전이익(손실)", "법인세차감전계속사업이익"]),   # 2026-11-19 관리종목 요건(법차손) 산출용
     "total_assets": (["ifrs-full_Assets"], ["자산총계", "자산합계", "자산총액", "총자산"]),
     "total_liab":   (["ifrs-full_Liabilities"], ["부채총계", "부채합계", "부채총액", "총부채"]),
     "equity":       (["ifrs-full_Equity"], ["자본총계", "자본합계", "자본총액", "총자본"]),
@@ -353,10 +355,11 @@ _DA_SRC_COL = {"ok": False}
 
 def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
     if not _DA_SRC_COL["ok"]:
-        try:
-            con.execute("ALTER TABLE fin_kpi ADD COLUMN da_src TEXT")
-        except Exception:  # noqa — 이미 있음
-            pass
+        for _ddl in ("ALTER TABLE fin_kpi ADD COLUMN da_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN pretax REAL"):
+            try:
+                con.execute(_ddl)
+            except Exception:  # noqa — 이미 있음
+                pass
         _DA_SRC_COL["ok"] = True
     for fs_div in ("CFS", "OFS"):
         rows = [dict(r) for r in con.execute(
@@ -549,8 +552,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
             cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
             payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio,
-            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src, pretax)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
@@ -560,7 +563,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda"),
                      k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op"),
                      k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio"),
-                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None), k.get("da_src")))
+                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None), k.get("da_src"), k.get("pretax")))
     con.commit()
 
 

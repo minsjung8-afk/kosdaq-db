@@ -94,7 +94,7 @@ def run(days=None, bgn=None, end=None):
                     n_major += 1
                 except Exception as e:  # noqa
                     log(con, cc, "delta_major", "fail", e)
-            flag = next((v for k, v in EVENT_FLAGS.items() if k in r.get("report_nm", "")), None)
+            flag = next((v for k, v in EVENT_FLAGS.items() if k in (r.get("report_nm") or "").replace(" ", "")), None)
             if flag:
                 con.execute("INSERT OR REPLACE INTO disclosure_event VALUES (?,?,?,?,?)",
                             (cc, r["rcept_no"], r["rcept_dt"], r["report_nm"], flag))
@@ -105,6 +105,33 @@ def run(days=None, bgn=None, end=None):
         page += 1
     log(con, "-", "delta", "ok", date.today().isoformat())
     print(f"[delta] {bgn}~{end}: 목록 {page}p, 대상회사 공시 {n_list}건 · 메자닌 이벤트 {n_mezz} · 5%보고 {n_major} · 이벤트 {n_evt}", flush=True)
+
+
+def rescan_krx(days=365):
+    """2026-11-19 상장유지 위험 뱃지: 거래소공시(pblntf_ty=I)만 최근 days일 다시 훑어 disclosure_event 보강(실질심사·관리종목·환기종목·상장폐지·거래정지).
+    메자닌·5%보고는 건드리지 않음 — DART 호출은 목록 페이지 수만큼(1년 ≈ 200~400콜)"""
+    con = connect()
+    cmap = {r["corp_code"]: r["stock_code"] for r in con.execute("SELECT corp_code, stock_code FROM company")}
+    bgn = (date.today() - timedelta(days=days)).strftime("%Y%m%d"); end = date.today().strftime("%Y%m%d")
+    page, n_evt, n_rows = 1, 0, 0
+    while True:
+        js = dart_get("list", bgn_de=bgn, end_de=end, pblntf_ty="I", page_no=page, page_count=100)
+        rows = js.get("list", [])
+        for r in rows:
+            cc = r.get("corp_code")
+            if cc not in cmap:
+                continue
+            n_rows += 1
+            flag = next((v for k, v in EVENT_FLAGS.items() if k in (r.get("report_nm") or "").replace(" ", "")), None)
+            if flag:
+                con.execute("INSERT OR REPLACE INTO disclosure_event VALUES (?,?,?,?,?)", (cc, r["rcept_no"], r["rcept_dt"], r["report_nm"], flag))
+                n_evt += 1
+        con.commit()
+        if page >= int(js.get("total_page") or 1) or not rows:
+            break
+        page += 1
+    print(f"[delta] 거래소공시 재스캔 {bgn}~{end}: {page}p · 대상회사 {n_rows:,}건 · 이벤트 {n_evt:,}건", flush=True)
+    return n_evt
 
 
 if __name__ == "__main__":
