@@ -143,8 +143,11 @@ def parse(xml):
                 iu = UNIT_RE.findall(flat)
                 unit = iu[-1] if iu else None
             tot, note = _table_total(body)
-            rec = {"label": " ".join(st["heads"])[-60:], "amt": None, "unit": unit, "dt": st["dt"], "ctx": _ctx_basis(xml, m.end() + tm.start()), "note": note}
-            if tot is not None and unit in UNIT:
+            hs_ = st["heads"]                                # 라벨 = 표에 가장 가까운 짧은 문단 1개(발행회사 이름 판정용), blabel = 가까운 2개(연결·별도 판정용)
+            rec = {"label": (hs_[-1] if hs_ else "")[-60:], "blabel": " ".join(hs_[-2:])[-80:], "amt": None, "unit": unit, "dt": st["dt"], "ctx": _ctx_basis(xml, m.end() + tm.start()), "note": note}
+            if tot is not None and unit in UNIT and (0 < tot * UNIT[unit] < 1e8 or tot * UNIT[unit] > 5e13):
+                rec["note"] = f"합계 {tot:,.0f}{unit} = 1억원 미만 또는 50조원 초과 — 단위 표기 오류 의심"      # SK이노베이션 2026 1분기 SK온 표: 단위 '원'에 500,000(실제 백만원) → 읽지 않는다
+            elif tot is not None and unit in UNIT:
                 rec["amt"] = tot * UNIT[unit]
             else:
                 rec["note"] = note or ("단위 문구 없음" if tot is not None else "합계 행 없음")
@@ -180,7 +183,7 @@ def _issuer(label):
 
 
 def _basis(x):
-    l = x.get("label") or ""
+    l = x.get("blabel") or x.get("label") or ""
     c, o = "연결" in l, bool(re.search(r"개별|별도", l))
     if c and o:
         return "B"
@@ -203,10 +206,10 @@ def classify(tables, corp_name):
     own = re.sub(r"주식회사|㈜|\(주\)|\s", "", corp_name or "")
     def is_own(x):
         i = _issuer(x["label"])
-        return bool(i) and len(i) >= 2 and (i in own or own in i)
-    def is_other(x):
+        return 2 <= len(i) <= 20 and (i in own or own in i)
+    def is_other(x):                                           # 회사 이름으로 볼 만한 짧은 라벨만(긴 주석 문구가 '다른 회사'로 잡혀 합산되는 것 방지)
         i = _issuer(x["label"])
-        return bool(i) and len(i) >= 2 and not (i in own or own in i)
+        return 2 <= len(i) <= 20 and not (i in own or own in i)
     if len({x.get("ctx") for x in t if x.get("ctx")}) < 2:      # 머리말 기준은 '별도 묶음·연결 묶음'이 둘 다 있을 때만 믿는다(표 1개짜리 보고서에서 엉뚱한 머리말을 집는 것 방지 — HL D&I 3분기)
         t = [{**x, "ctx": None} for x in t]
     bs = [_basis(x) for x in t]
@@ -268,8 +271,27 @@ def targets(con, year0, codes=None):
     return rows
 
 
-def run(con=None, year0=None, codes=None, limit=None, dry=False):
+def _fetch_one(item):
+    """(병렬 작업) 원문 내려받기 → 표 읽기 → DART 정형 API 대조값. DB에는 손대지 않는다."""
+    import time
     from business import fetch_document_xml
+    cc, name, y, rc, rcept = item
+    t0 = time.time()
+    try:
+        tables = parse(fetch_document_xml(rcept))
+    except Exception as e:  # noqa
+        return {"err": str(e)[:70], "tf": time.time() - t0, "ta": 0.0}
+    t1 = time.time()
+    api = _api_total(cc, y, rc) if tables else None        # 단위 대조: DART가 원 단위로 정규화한 첫 표 합계
+    return {"tables": tables, "api": api, "tf": t1 - t0, "ta": time.time() - t1}
+
+
+def run(con=None, year0=None, codes=None, limit=None, dry=False, workers=6, budget_sec=110 * 60):
+    """workers: 원문·API를 동시에 받는 수(2026-11-19 표본 168건이 순차로 건당 4~78초 — DART 응답 지연 — 걸려 병렬화).
+    budget_sec: 워크플로 제한(170분) 안에 끝나도록 이 시간을 넘기면 남은 보고서는 다음 실행으로 넘긴다(hybrid_out_log로 이어받기)."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    import common
     con = con or connect()
     _ensure(con)
     from datetime import date
@@ -277,43 +299,51 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False):
     tg = targets(con, year0, codes)
     done = {r[0] for r in con.execute("SELECT rcept_no FROM hybrid_out_log")}
     todo = [t for t in tg if dry or t[4] not in done]
-    print(f"[신종잔액] 대상 {len({t[0] for t in tg})}사 · {len(tg)}기간 · 이번 실행 {min(len(todo), limit or len(todo))}기간" + (" (점검만)" if dry else ""), flush=True)
-    n_ok = n_set = n_bad = 0
+    work = todo[: (limit or len(todo))]
+    print(f"[신종잔액] 대상 {len({t[0] for t in tg})}사 · {len(tg)}기간 · 이번 실행 {len(work)}기간 · 동시 {workers}" + (" (점검만)" if dry else ""), flush=True)
+    n_ok = n_set = n_bad = left = 0
+    tf = ta = 0.0
+    t_start = time.time()
     changed = set()
-    import common
-    for cc, name, y, rc, rcept in todo[: (limit or len(todo))]:
-        if common.QUOTA_HIT:
-            print("[신종잔액] DART 한도 도달 — 중단(다음 실행에서 이어서)", flush=True)
-            break
-        try:
-            tables = parse(fetch_document_xml(rcept))
-        except Exception as e:  # noqa
-            print(f"[신종잔액] {name} {y} {rc} 원문 실패 {str(e)[:70]}", flush=True)
-            continue
-        res = classify(tables, name)
-        n_ok += 1
-        api = _api_total(cc, y, rc) if tables else None        # 단위 대조: DART가 원 단위로 정규화한 첫 표 합계 vs 파서가 읽은 첫 표
-        first = tables[0].get("amt") if tables else None
-        chk = "미대조" if api is None or first is None else ("일치" if abs(api - first) < 1 else "불일치")
-        n_bad += chk == "불일치"
-        if dry or len(todo) <= 60 or chk == "불일치":
-            print(f"[신종잔액] {name} {y} {rc}: 연결 {_e(res['CFS'])} · 별도 {_e(res['OFS'])} · 기준없음 {_e(res['ANY'])} · 자기회사 {_e(res['OWN'])} · {res['how']} · API {_e(api)} {chk} · 표 "
-                  + " / ".join(f"[{t['label'][:18] or '-'}|{t.get('ctx') or '-'}] {_e(t.get('amt'))}({t.get('unit')}{'·' + t['note'] if t.get('note') else ''})" for t in tables), flush=True)
-        if dry:
-            continue
-        con.execute("DELETE FROM hybrid_out WHERE corp_code=? AND bsns_year=? AND reprt_code=?", (cc, y, rc))
-        if chk == "불일치":                                    # 단위·표 인식이 DART 값과 다르면 저장하지 않는다(화면은 '있음' 유지) — 기록만 남겨 매일 다시 받지 않게
-            con.execute("INSERT OR REPLACE INTO hybrid_out_log VALUES (?,?,?,?)", (rcept, len(tables), f"API 불일치(API {_e(api)} vs 첫 표 {_e(first)}) · " + res["how"], now()))
-            con.commit()
-            changed.add((cc, y, rc))
-            continue
-        for fs in ("CFS", "OFS", "ANY", "OWN"):
-            if res[fs] is not None:                       # 0도 저장(= 표상 기말 잔액 없음 — 화면에는 '공시 0'으로만 표시, HMM 2025: 기중 전환)
-                con.execute("INSERT OR REPLACE INTO hybrid_out VALUES (?,?,?,?,?,?,?,?)", (cc, y, rc, fs, res[fs], res["how"], rcept, now()))
-                n_set += 1
-        con.execute("INSERT OR REPLACE INTO hybrid_out_log VALUES (?,?,?,?)", (rcept, len(tables), res["how"], now()))
-        con.commit()
-        changed.add((cc, y, rc))
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        for b in range(0, len(work), 48):
+            if common.QUOTA_HIT:
+                left = len(work) - b
+                print(f"[신종잔액] DART 한도 도달 — 중단(남은 {left}기간은 다음 실행에서)", flush=True)
+                break
+            if time.time() - t_start > budget_sec:
+                left = len(work) - b
+                print(f"[신종잔액] 시간 예산 {budget_sec // 60}분 도달 — 남은 {left}기간은 다음 실행에서", flush=True)
+                break
+            batch = work[b:b + 48]
+            for (cc, name, y, rc, rcept), r in zip(batch, ex.map(_fetch_one, batch)):
+                tf += r["tf"]; ta += r["ta"]
+                if r.get("err"):
+                    print(f"[신종잔액] {name} {y} {rc} 원문 실패 {r['err']}", flush=True)
+                    continue
+                tables, api = r["tables"], r["api"]
+                res = classify(tables, name)
+                n_ok += 1
+                first = tables[0].get("amt") if tables else None
+                chk = "미대조" if api is None or first is None else ("일치" if abs(api - first) < 1 else "불일치")
+                n_bad += chk == "불일치"
+                print(f"[신종잔액] {name} {y} {rc}: 연결 {_e(res['CFS'])} · 별도 {_e(res['OFS'])} · 기준없음 {_e(res['ANY'])} · 자기회사 {_e(res['OWN'])} · {res['how']} · API {_e(api)} {chk} · 표 "
+                      + " / ".join(f"[{t['label'][:18] or '-'}|{t.get('ctx') or '-'}] {_e(t.get('amt'))}({t.get('unit')}{'·' + t['note'] if t.get('note') else ''})" for t in tables), flush=True)
+                if dry:
+                    continue
+                con.execute("DELETE FROM hybrid_out WHERE corp_code=? AND bsns_year=? AND reprt_code=?", (cc, y, rc))
+                if chk == "불일치":                            # 단위·표 인식이 DART 값과 다르면 저장하지 않는다(화면은 '있음' 유지) — 기록만 남겨 매일 다시 받지 않게
+                    con.execute("INSERT OR REPLACE INTO hybrid_out_log VALUES (?,?,?,?)", (rcept, len(tables), f"API 불일치(API {_e(api)} vs 첫 표 {_e(first)}) · " + res["how"], now()))
+                    con.commit()
+                    changed.add((cc, y, rc))
+                    continue
+                for fs in ("CFS", "OFS", "ANY", "OWN"):
+                    if res[fs] is not None:               # 0도 저장(= 표상 기말 잔액 없음 — 화면에는 '공시 0'으로만 표시, HMM 2025: 기중 전환)
+                        con.execute("INSERT OR REPLACE INTO hybrid_out VALUES (?,?,?,?,?,?,?,?)", (cc, y, rc, fs, res[fs], res["how"], rcept, now()))
+                        n_set += 1
+                con.execute("INSERT OR REPLACE INTO hybrid_out_log VALUES (?,?,?,?)", (rcept, len(tables), res["how"], now()))
+                con.commit()
+                changed.add((cc, y, rc))
     if not dry and changed:
         import financials
         for cc, y, rc in sorted(changed):
@@ -322,7 +352,8 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False):
             except Exception as e:  # noqa
                 print(f"[신종잔액] KPI 재계산 실패 {cc} {y} {rc} {str(e)[:60]}", flush=True)
         con.commit()
-    print(f"[신종잔액] 원문 {n_ok}건 · 저장 {n_set}건(연결/별도) · DART 정형 API와 불일치(저장 안 함) {n_bad}건 · KPI 재계산 {len(changed)}기간", flush=True)
+    print(f"[신종잔액] 원문 {n_ok}건 · 저장 {n_set}건(연결/별도) · DART 정형 API와 불일치(저장 안 함) {n_bad}건 · KPI 재계산 {len(changed)}기간 · 남은 {left}기간"
+          f" · 경과 {time.time() - t_start:.0f}초(내려받기 {tf:.0f}초 · API {ta:.0f}초 — 작업 시간 합)", flush=True)
     return n_set
 
 

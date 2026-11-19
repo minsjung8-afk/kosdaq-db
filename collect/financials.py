@@ -476,6 +476,9 @@ def _hybrid_disclosed(con, cc, y, rc, fs, k):
     if amt is None:
         return
     keep = ["분배금 미분리"] if (d is None and "분배금" in note) else []
+    ta = k.get("total_assets")
+    if amt > 0 and ta and amt > ta:                   # 공시 액면이 자산총계보다 크면 단위·표 오독 → 쓰지 않는다(화면은 '있음' 유지)
+        return
     if amt > 0:
         k["hybrid_eq"] = amt
         k["hybrid_note"] = " · ".join(["잔액 공시"] + keep)
