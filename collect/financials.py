@@ -432,20 +432,55 @@ def _int_fallback(rows, k):
     k["hybrid_note"] = " · ".join(note) or None
 
 
+_NA = object()
+
+
+def _other_dist(con, cc, y, rc, fs):
+    """다른 기준(연결↔별도) 재무제표의 신종자본증권 분배금 — 그 기준 재무제표가 없으면 _NA"""
+    o = "OFS" if fs == "CFS" else "CFS"
+    rows = [dict(r) for r in con.execute("SELECT * FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (cc, str(y), rc, o))]
+    if not rows:
+        return _NA
+    k2 = {}
+    _int_fallback(rows, k2)
+    return k2.get("hybrid_dist")
+
+
 def _hybrid_disclosed(con, cc, y, rc, fs, k):
     """재무상태표에 신종자본증권 줄이 없을 때(풀무원식품·SK텔레콤 등 과반) 정기보고서 「신종자본증권 미상환 잔액」 표(hybrid_out, 액면)로 잔액을 채운다.
-    재무상태표 금액이 있으면 그대로 두고, 공시 금액이 0이면 채우지 않는다(hybrid_out.py 설명 참조). hybrid_note에 '잔액 공시'를 남겨 화면에서 출처를 표시."""
-    if k.get("hybrid_eq") is not None or "총차입금에 포함" in (k.get("hybrid_note") or ""):
+    ① 그 기준(연결/별도)으로 명시된 금액 ② 연결: 기준 표시 없는 표(ANY, 관행상 연결) / 별도: 자기 회사 표(OWN)
+    ③ 별도에 ANY, 연결에 OWN은 두 기준의 분배금이 같을 때만(= 같은 증권) — 풀무원(별도)에 연결 합계 3,985억이 들어가는 것을 막는다. 연결 재무제표가 없는 회사는 ANY를 별도에 그대로.
+    금액 0은 '잔액 공시 0'으로만 남긴다(화면 '공시 0'). 재무상태표 금액이 있으면 손대지 않는다."""
+    note = k.get("hybrid_note") or ""
+    if k.get("hybrid_eq") is not None or "총차입금에 포함" in note:
         return
     try:
-        r = con.execute("SELECT amt FROM hybrid_out WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (cc, str(y), rc, fs)).fetchone()
+        rows = {r[0]: r[1] for r in con.execute("SELECT fs_div, amt FROM hybrid_out WHERE corp_code=? AND bsns_year=? AND reprt_code=?", (cc, str(y), rc))}
     except Exception:  # noqa — 표가 아직 없음
         return
-    if not r or not r[0] or r[0] <= 0:
+    if not rows:
         return
-    k["hybrid_eq"] = r[0]
-    keep = ["분배금 미분리"] if (k.get("hybrid_dist") is None and "분배금" in (k.get("hybrid_note") or "")) else []
-    k["hybrid_note"] = " · ".join(["잔액 공시"] + keep)
+    d = k.get("hybrid_dist")
+    def same():
+        o = _other_dist(con, cc, y, rc, fs)
+        if o is _NA:
+            return fs == "OFS"                      # 연결 재무제표가 없는 회사: 기준 없는 표 = 별도
+        return d is not None and o is not None and abs(d - o) <= 0.02 * max(d, o)
+    amt = rows.get(fs)
+    if amt is None:
+        first, second = ("ANY", "OWN") if fs == "CFS" else ("OWN", "ANY")
+        if rows.get(first) is not None:
+            amt = rows[first]
+        elif rows.get(second) is not None and same():
+            amt = rows[second]
+    if amt is None:
+        return
+    keep = ["분배금 미분리"] if (d is None and "분배금" in note) else []
+    if amt > 0:
+        k["hybrid_eq"] = amt
+        k["hybrid_note"] = " · ".join(["잔액 공시"] + keep)
+    elif note:                                        # 신종 흔적은 있는데 표상 기말 잔액 0(기중 상환·전환)
+        k["hybrid_note"] = " · ".join(["잔액 공시 0"] + keep)
 
 
 def _pick(rows, ids, names, sj=None):
