@@ -237,9 +237,9 @@ def borrow_items(rows):
     if not cand:
         return []
     cand = _drop_subtotals(cand)
-    agg = [c for c in cand if _BOR_AGG.search(c[0])]
-    detail = [c for c in cand if not _BOR_AGG.search(c[0])]
-    use = detail if (agg and any(_re.search(r"(차입금|사채|유동성장기부채)", c[0]) for c in detail)) else cand
+    # 2026-11-19 켄코아에어로스페이스: '단기차입금및사채'·'장기차입금및사채'가 소계가 아니라 실제 계정(그 아래 구성항목 없음)인데
+    # 이름에 '및'이 있다는 이유로 버려져 총차입금이 2025년 441억 → 241억으로 과소. 소계 여부는 _drop_subtotals가 금액(구성항목 합 일치)으로 판정하므로 이름 기준 제거는 하지 않는다
+    use = cand
     # 유동/비유동 구간(ord): DART 재무상태표 행은 소계(유동부채·비유동부채)가 먼저 오고 세부가 뒤따름(헤더 선행) — 아니면 반대로 해석
     def _ord(name):
         for r in bs:
