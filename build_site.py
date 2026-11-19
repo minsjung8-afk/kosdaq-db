@@ -352,7 +352,7 @@ def company_detail(con, c):
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
         "ibk_fin": _ibk_fin(con, cc, kpi),
-        "fn_ai": _safe(lambda: q(con, "SELECT fs, nm, label, reason, quote, rcept_no FROM fn_ai WHERE corp_code=? AND reason IS NOT NULL", cc)),   # 2026-11-19 사용자 승인 ②: 주석 인용이 있는 변동 사유(Haiku)
+        "fn_ai": _safe(lambda: q(con, "SELECT fs, nm, label, reason, quote, rcept_no FROM fn_ai WHERE corp_code=? AND reason IS NOT NULL AND model LIKE '%|v2'", cc)),   # v2(숫자·방향 대조 통과)만 — v1 표본 20사 결과는 오류가 많아 표시하지 않음(fn_ai.VER와 맞출 것)   # 2026-11-19 사용자 승인 ②: 주석 인용이 있는 변동 사유(Haiku)
         "notes_raw": _notes_raw(con, cc),
         "borrow_bd": _safe(lambda: _borrow_bd(con, cc)),
         "notes_struct": (lambda r: {"rcept_no": r[0]["rcept_no"], "report_nm": r[0]["report_nm"], **json.loads(r[0]["json"])} if r else None)(
@@ -393,7 +393,7 @@ def company_detail(con, c):
         d["rating_summary"] = None
     d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], [r for r in d["ratings"] or [] if not r["guar"]])
     try:
-        d["listing_risk"] = _listing_risk(c, kpi, prices, d["price_summary"], d["audit"], d.get("review"), d["events"]) if (c.get("market") or "").upper() in ("KOSPI", "KOSDAQ") else None
+        d["listing_risk"] = _listing_risk(c, kpi, prices, d["price_summary"], d["audit"], d.get("review"), d["events"], own_eq=_owner_equity(con, cc)) if (c.get("market") or "").upper() in ("KOSPI", "KOSDAQ") else None
     except Exception as e:  # noqa
         print("[site] listing_risk 실패", c.get("stock_code"), e); d["listing_risk"] = None
     LR_IDX[c["stock_code"]] = d.get("listing_risk")
@@ -1110,9 +1110,28 @@ def _lr_compact(lr):
     return out or None
 
 
-def _listing_risk(c, kpi, prices, ps, audit, review, events):
-    """상장유지 위험 분석(2026-11-19 사용자·GPT 의견 반영): ① 공식 상태(KRX 소속부·거래소공시) ② 요건별 자체 판정(mgmt_rules.json, 별도 기준)
+_OWN_EQ_NM = re.compile(r"^지배(기업|회사|주주)(의)?(소유주|소유지분|주주|소유주지분)?(에게|에)?(귀속되는|귀속)?(자본|지분)?(합계|총계)?$")
+
+
+def _owner_equity(con, cc):
+    """연결 재무상태표의 지배기업 소유주지분(사업보고서, 연도별) — 거래소 기준: 자본잠식·자기자본·법차손은 연결 재무제표, 자기자본은 비지배지분 제외"""
+    out = {}
+    try:
+        for y, nm, aid, amt in con.execute("""SELECT bsns_year, account_nm, account_id, thstrm_amount FROM fin_raw
+                WHERE corp_code=? AND fs_div='CFS' AND sj_div='BS' AND reprt_code='11011' AND thstrm_amount IS NOT NULL""", (cc,)):
+            if aid == "ifrs-full_EquityAttributableToOwnersOfParent" or _OWN_EQ_NM.match(re.sub(r"\s", "", nm or "")):
+                out.setdefault(str(y), amt)
+    except Exception:  # noqa
+        pass
+    return out
+
+
+def _listing_risk(c, kpi, prices, ps, audit, review, events, own_eq=None):
+    """상장유지 위험 분석(2026-11-19 사용자·GPT 의견 반영): ① 공식 상태(KRX 소속부·거래소공시) ② 요건별 자체 판정(mgmt_rules.json)
     ③ 시총·주가는 기준 미달 연속 거래일 수 ④ 연도별 추세. 공식(관리종목·실질심사·환기)과 자체 추정(위험·주의)을 분리해 표시한다.
+    적용 재무제표(거래소 2026.2 결산 유의사항): 매출액 = 별도(지주회사는 연결) / 자본잠식·자기자본·법차손 = 연결(지배지분, 종속회사 없으면 개별).
+    법차손은 기술성장기업 유예(신규상장 사업연도 포함 3개 사업연도 미적용) 반영. 리츠·인프라펀드·스팩은 일반 요건 대상이 아니라 공식 상태만.
+    (2026-11-19 실측: 전 항목 별도 기준이던 때 '요건 미달' 117사 중 법차손 25사가 대부분 기술성장기업 유예 대상·지주회사 별도 매출 등 오판)
     반환 {official:{mgmt,caution,review:{status,dt,title,rcept_no}}, level, items:[{k,label,value,judge,note}], trend:[...], asof}"""
     from datetime import date, timedelta
     mkt = (c.get("market") or "").upper()
@@ -1121,6 +1140,8 @@ def _listing_risk(c, kpi, prices, ps, audit, review, events):
     st = c.get("sect_tp") or ""
     if "SPAC" in st.upper() or re.search(r"스팩|기업인수목적", c.get("corp_name") or ""):
         R = None                                  # 2026-11-19 실측: 스팩 72사가 전부 시총·매출 '위험' — 스팩은 매출·시총 요건 적용 대상이 아님(공식 상태만 표시)
+    elif re.search(r"(?<!메)리츠|부동산투자회사|인프라투융자|인프라$|선박투자", c.get("corp_name") or ""):
+        R = None                                  # 리츠·인프라펀드: 결산기가 6개월이고 매출 요건이 달라 일반 기준으로 판정하면 오판(NH프라임리츠 반기 매출 40억 → '위험') — 공식 상태만
     off = {"mgmt": "관리종목" in st, "caution": "환기" in st, "review": None}
     cut = (date.today() - timedelta(days=400)).strftime("%Y%m%d")
     rv = sorted([e for e in events or [] if e.get("flag") == "실질심사" and (e.get("rcept_dt") or "") >= cut], key=lambda e: e.get("rcept_dt") or "")
@@ -1147,6 +1168,15 @@ def _listing_risk(c, kpi, prices, ps, audit, review, events):
     basis = "별도" if kpi.get("OFS") else "연결"
     ann = [r for r in rows if r.get("kind") == "annual"]
     last = ann[-1] if ann else None
+    cons = bool(kpi.get("CFS"))                   # 연결 재무제표 작성 법인
+    ann_c = [r for r in (kpi.get("CFS") or rows) if r.get("kind") == "annual"]      # 자본잠식·자기자본·법차손 판정 행(연결 우선)
+    last_c = ann_c[-1] if ann_c else None
+    hold = str(c.get("induty_code") or "").startswith("64992")                       # 지주회사(KSIC 64992): 매출액은 연결 기준
+    def eq_of(r):                                 # 연결이면 지배기업 소유주지분(비지배지분 제외), 못 찾으면 연결 자본총계
+        v = (own_eq or {}).get(str(r.get("bsns_year"))) if cons else None
+        return v if v is not None else r.get("equity")
+    eq_lab = ("연결 지배지분" if (cons and last_c and (own_eq or {}).get(str(last_c.get("bsns_year"))) is not None) else "연결 자본총계(비지배지분 포함)" if cons else "별도")
+    basis = f"매출액 {'연결(지주회사)' if (hold and cons) else basis} · 자본·손실 {'연결' if cons else basis}"
     def add(k, label, value, judge, note=""):
         items.append({"k": k, "label": label, "value": value, "judge": judge, "note": note})
     # ① 시가총액 · 주가(연속 거래일)
@@ -1171,32 +1201,53 @@ def _listing_risk(c, kpi, prices, ps, audit, review, events):
             f"기준 {pr['min']:,}원(동전주)" + (f" · 미달 {n}거래일 연속" if pc < pr["min"] else ""))
     # ② 매출액(별도 최근 사업연도)
     rr = _rule_at(R.get("revenue"), today); rr_n = _rule_at(R.get("revenue"), today, nxt=True)
-    if last and last.get("revenue") is not None and rr:
-        rev = last["revenue"]; exempt = any(x in st for x in R.get("revenue_exempt_sect", [])) or (ps and ps.get("mcap") and R.get("revenue_exempt_mcap") and ps["mcap"] >= R["revenue_exempt_mcap"])
+    rlast, rbasis = (last_c, "연결·지주회사") if (hold and cons and last_c) else (last, "별도" if kpi.get("OFS") else "연결")
+    if rlast and rlast.get("revenue") is not None and rr:
+        last_rev = rlast
+        rev = last_rev["revenue"]; exempt = any(x in st for x in R.get("revenue_exempt_sect", [])) or (ps and ps.get("mcap") and R.get("revenue_exempt_mcap") and ps["mcap"] >= R["revenue_exempt_mcap"])
         j = "na" if exempt else "red" if rev < rr["min"] else "amber" if (rr_n and rev < rr_n["min"]) else "ok"
-        add("revenue", f"매출액({last['bsns_year']} {basis})", f"{rev/1e8:,.0f}억", j,
-            ("기술성장·시총 특례로 적용 제외" if exempt else f"기준 {rr['min']/1e8:,.0f}억" + (f" · {rr_n['from'][:4]}년 {rr_n['min']/1e8:,.0f}억" if rr_n else "")))
+        rnote = ("기술성장·시총 특례로 적용 제외" if exempt else f"기준 {rr['min']/1e8:,.0f}억" + (f" · {rr_n['from'][:4]}년 {rr_n['min']/1e8:,.0f}억" if rr_n else ""))
+        if j == "red" and not hold and cons and last_c and re.search(r"홀딩스|지주", c.get("corp_name") or "") and (last_c.get("revenue") or 0) >= rr["min"]:
+            j = "amber"; rnote += f" · 지주회사면 연결 매출액 기준(연결 {last_c['revenue']/1e8:,.0f}억) — 업종코드가 지주회사(64992)가 아니라 확인 필요"   # 신송홀딩스(46201)
+        add("revenue", f"매출액({last_rev['bsns_year']} {rbasis})", f"{rev/1e8:,.0f}억", j, rnote)
     # ③ 자본잠식 · 자기자본
-    if last and last.get("capital") and last.get("equity") is not None:
-        cap, eq = last["capital"], last["equity"]; ir = (cap - eq) / cap if cap else None
+    if last_c and last_c.get("capital") and eq_of(last_c) is not None:
+        cap, eq = last_c["capital"], eq_of(last_c); ir = (cap - eq) / cap if cap else None
+        ly_ = last_c["bsns_year"]
         if eq < 0:
-            add("impair", f"자본잠식({last['bsns_year']})", "완전잠식", "red", f"자본총계 {eq/1e8:,.0f}억 — 사업연도 말 완전잠식은 즉시 상장폐지 사유")
+            add("impair", f"자본잠식({ly_})", "완전잠식", "red", f"{eq_lab} {eq/1e8:,.0f}억 — 사업연도 말 완전잠식은 즉시 상장폐지 사유")
         elif ir is not None and ir > 0:
-            add("impair", f"자본잠식률({last['bsns_year']})", f"{ir*100:.1f}%", "red" if ir >= R.get("impair_ratio", 0.5) else "amber" if ir >= R.get("impair_watch", 0.3) else "ok", f"자본금 {cap/1e8:,.0f}억 · 자본총계 {eq/1e8:,.0f}억 (기준 50%)")
+            add("impair", f"자본잠식률({ly_})", f"{ir*100:.1f}%", "red" if ir >= R.get("impair_ratio", 0.5) else "amber" if ir >= R.get("impair_watch", 0.3) else "ok", f"자본금 {cap/1e8:,.0f}억 · {eq_lab} {eq/1e8:,.0f}억 (기준 50%)")
         else:
-            add("impair", f"자본잠식률({last['bsns_year']})", "0%", "ok", f"자본총계 {eq/1e8:,.0f}억 ≥ 자본금 {cap/1e8:,.0f}억")
+            add("impair", f"자본잠식률({ly_})", "0%", "ok", f"{eq_lab} {eq/1e8:,.0f}억 ≥ 자본금 {cap/1e8:,.0f}억")
         if R.get("equity_min"):
-            add("equity", f"자기자본({last['bsns_year']})", f"{eq/1e8:,.0f}억", "red" if eq < R["equity_min"] else "amber" if (R.get("equity_watch") and eq < R["equity_watch"]) else "ok", f"기준 {R['equity_min']/1e8:,.0f}억")
+            add("equity", f"자기자본({ly_})", f"{eq/1e8:,.0f}억", "red" if eq < R["equity_min"] else "amber" if (R.get("equity_watch") and eq < R["equity_watch"]) else "ok", f"기준 {R['equity_min']/1e8:,.0f}억 · {eq_lab}")
     # ④ 법차손(코스닥): 최근 3년 중 2회 자기자본 50% 초과
-    if R.get("pretax_ratio") and ann:
-        last3 = ann[-3:]
-        if any(r.get("pretax") is None for r in last3):
-            add("pretax", "법차손/자기자본", "확인 필요", "na", "세전손익 계정 미수집 연도 있음")
+    if R.get("pretax_ratio") and ann_c:
+        last3 = ann_c[-3:]
+        ld = str(c.get("listed_dt") or "")
+        ly = int(ld[:4]) if re.match(r"(19|20)\d{2}", ld) else None
+        tech = "기술성장" in st
+        ex_until = (ly + 2) if (tech and ly) else None          # 기술성장기업: 신규상장일이 속한 사업연도 포함 3개 사업연도 미적용(2020년 상장 → 2023 사업연도부터 적용)
+        appl = [r for r in last3 if not (ex_until and int(r["bsns_year"]) <= ex_until)]
+        ex_note = (f" · 기술성장기업 유예: {ly}년 상장 → {ex_until} 사업연도까지 미적용" if (ex_until and len(appl) < len(last3)) else "")
+        if any(r.get("pretax") is None for r in appl):
+            add("pretax", "법차손/자기자본", "확인 필요", "na", "세전손익 계정 미수집 연도 있음" + ex_note)
+        elif not appl:
+            add("pretax", "법차손/자기자본 50%↑", "유예", "na", ex_note.lstrip(" ·"))
         else:
-            hits = [r for r in last3 if (r["pretax"] or 0) < 0 and r.get("equity") and abs(r["pretax"]) > R["pretax_ratio"] * r["equity"] and abs(r["pretax"]) >= R.get("pretax_abs", 0)]
-            cnt = len(hits); lastc = ann[-1] in hits
-            v = " · ".join(f"{r['bsns_year']} {r['pretax']/1e8:,.0f}억({abs(r['pretax'])/r['equity']*100:.0f}%)" for r in last3 if r.get("equity"))
-            add("pretax", "법차손/자기자본 50%↑", f"{cnt}회/3년", "red" if (cnt >= 2 and lastc) else "amber" if cnt >= 1 else "ok", v)
+            def _hit(r):
+                e = eq_of(r)
+                return (r["pretax"] or 0) < 0 and bool(e) and abs(r["pretax"]) > R["pretax_ratio"] * e and abs(r["pretax"]) >= R.get("pretax_abs", 0)
+            hits = [r for r in appl if _hit(r)]
+            cnt = len(hits); lastc = ann_c[-1] in hits
+            v = " · ".join(f"{r['bsns_year']} {r['pretax']/1e8:,.0f}억({abs(r['pretax'])/eq_of(r)*100:.0f}%)" for r in last3 if eq_of(r)) + f" · {eq_lab}" + ex_note
+            j = "red" if (cnt >= 2 and lastc) else "amber" if cnt >= 1 else "ok"
+            if tech and not ly and j == "red":
+                j = "amber"; v += " · 기술성장기업 — 상장일 미확인으로 유예 여부 확인 필요"
+            elif j == "red" and not tech and ly and any(int(r["bsns_year"]) <= ly + 2 for r in hits):
+                j = "amber"; v += f" · {ly}년 상장 후 3개 사업연도 안의 손실 포함 — 기술특례 상장이면 유예 대상(확인 필요)"
+            add("pretax", "법차손/자기자본 50%↑", f"{cnt}회/{len(appl)}개 연도" if ex_note else f"{cnt}회/3년", j, v)
     # ⑤ 감사의견 · 검토의견
     if audit:
         a = audit[0]; op = a.get("adt_opinion") or ""
@@ -1205,9 +1256,10 @@ def _listing_risk(c, kpi, prices, ps, audit, review, events):
     if review and review.get("opinion") and not re.match(r"^\s*적정", review["opinion"]):
         add("review", f"{review.get('period','')} 검토의견", review["opinion"], "red", f"{review.get('bsns_year')} — 반기 검토의견 비적정은 관리종목 사유")
     # 추세(연간 3개년)
-    for r in ann[-3:]:
-        cap, eq = r.get("capital"), r.get("equity")
-        trend.append({"y": r["bsns_year"], "equity": eq, "impair": ((cap - eq) / cap * 100) if cap and eq is not None and eq < cap else 0, "op": r.get("op_income"), "revenue": r.get("revenue"), "pretax": r.get("pretax"),
+    rev_by = {r["bsns_year"]: r.get("revenue") for r in (ann_c if (hold and cons) else ann)}
+    for r in ann_c[-3:]:
+        cap, eq = r.get("capital"), eq_of(r)
+        trend.append({"y": r["bsns_year"], "equity": eq, "impair": ((cap - eq) / cap * 100) if cap and eq is not None and eq < cap else 0, "op": r.get("op_income"), "revenue": rev_by.get(r["bsns_year"]), "pretax": r.get("pretax"),
                       "pretax_ratio": (abs(r["pretax"]) / eq * 100) if r.get("pretax") is not None and r["pretax"] < 0 and eq else None})
     judges = [i["judge"] for i in items]
     own = "위험" if "red" in judges else "주의" if "amber" in judges else None
