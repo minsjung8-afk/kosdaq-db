@@ -16,14 +16,15 @@ html,body{margin:0;height:100%;background:var(--navy0);overflow:hidden;font-fami
 /* 개발 배경 */
 .why{position:absolute;inset:0}.why .h0{position:absolute;left:0;right:0;top:96px;text-align:center;font-size:32px;font-weight:800;color:var(--gold)}
 .why .h1{position:absolute;left:0;right:0;top:150px;text-align:center;font-size:76px;font-weight:800}
-.why .pills{position:absolute;left:0;right:0;top:330px;height:200px}
+.why .pills{position:absolute;left:0;right:0;top:300px;height:90px}
 .why .pill{position:absolute;top:0;padding:16px 34px;border-radius:999px;border:2px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);font-size:30px;font-weight:700;color:#e1e9f5;white-space:nowrap;transform:translate(-50%,0) scale(.85);opacity:0;transition:all .7s cubic-bezier(.2,.8,.2,1)}
 .slide.on .why .pill{opacity:1;transform:translate(-50%,0) scale(1)}
-.why .box{position:absolute;left:50%;top:330px;transform:translate(-50%,0) scale(.6);width:560px;height:96px;border:3px solid var(--gold);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:800;color:var(--gold);opacity:0;transition:all .6s ease 2.4s;background:rgba(245,166,35,.08)}
+.why .box{position:absolute;left:50%;top:500px;transform:translate(-50%,0) scale(.6);width:640px;height:96px;border:3px solid var(--gold);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:800;color:var(--gold);opacity:0;transition:all .6s ease 2.2s;background:rgba(245,166,35,.08)}
+.why .arrow{position:absolute;left:0;right:0;top:405px;text-align:center;font-size:34px;font-weight:800;color:var(--gold);opacity:0;transition:opacity .5s ease 1.5s}.slide.on .why .arrow{opacity:1}
 .slide.on .why .box{opacity:1;transform:translate(-50%,0) scale(1)}
-.slide.on .why .pill{transition-delay:.2s}.slide.on .why .pill.go{transition:all .9s cubic-bezier(.4,0,.2,1) 1.6s;opacity:0;left:50%!important;top:12px;transform:translate(-50%,0) scale(.3)}
+.slide.on .why .pill{transition-delay:.2s}.slide.on .why .pill:nth-child(2){transition-delay:.4s}.slide.on .why .pill:nth-child(3){transition-delay:.6s}.slide.on .why .pill:nth-child(4){transition-delay:.8s}.slide.on .why .pill:nth-child(5){transition-delay:1s}   /* 2026-11-19 사용자: 타원들이 사라지면 뭘 합쳤는지 모름 → 그대로 두고 화살표로 합침 */
 .why .tail{position:absolute;left:0;right:0;text-align:center;opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
-.slide.on .why .tail{opacity:1;transform:none}.why .a{top:590px;font-size:38px;color:var(--sub);transition-delay:3.1s!important}.why .b{top:660px;font-size:46px;font-weight:800;transition-delay:3.5s!important}.why .c{top:780px;font-size:42px;font-weight:800;color:var(--gold);transition-delay:4.1s!important}
+.slide.on .why .tail{opacity:1;transform:none}.why .a{top:660px;font-size:36px;color:var(--sub);transition-delay:3s!important}.why .b{top:725px;font-size:44px;font-weight:800;transition-delay:3.4s!important}.why .c{top:830px;font-size:40px;font-weight:800;color:var(--gold);transition-delay:4s!important}
 /* 화면 캡처 */
 .shot{position:absolute;inset:0}.shot .frame{position:absolute;left:80px;top:40px;width:1760px;height:770px;border-radius:18px;overflow:hidden;background:#f4f6fa;box-shadow:0 30px 80px rgba(0,0,0,.45)}
 .shot .frame img{position:absolute;left:0;top:0;width:100%;display:block;transform-origin:0 0;transition:transform 3.4s linear}
@@ -39,9 +40,10 @@ html,body{margin:0;height:100%;background:var(--navy0);overflow:hidden;font-fami
 #dots{position:absolute;right:28px;top:22px;display:flex;gap:8px;z-index:5}#dots i{width:12px;height:12px;border-radius:50%;background:rgba(255,255,255,.25);cursor:pointer}#dots i.on{background:var(--gold)}
 </style></head><body>
 <div id="stage">
- <div class="slide on"><div class="card"><div class="l t1">상장사 및 신용등급 보유사<br>심사참고 DB</div><div class="l bar"></div><div class="l t2">재무 · 차입 · 메자닌 · 주가 · 신용등급을 한 화면에</div></div></div>
+ <div class="slide on"><div class="card"><div class="l t1">상장사 · 비상장사<br>심사참고 DB</div><div class="l bar"></div><div class="l t2">코스피 · 코스닥 · 코넥스 전 상장사 + 신용등급 보유 · 감사보고서 제출 비상장사</div><div class="l t2">재무 · 차입 · 메자닌 · 주가 · 신용등급을 한 화면에</div></div></div>
  <div class="slide"><div class="why"><div class="h0">개발 배경</div><div class="h1">흩어진 정보를 한눈에</div>
   <div class="pills"><span class="pill" style="left:14%">DART &nbsp;재무 · 공시</span><span class="pill" style="left:33%">거래소 &nbsp;시세 · 대용가</span><span class="pill" style="left:51%">신용평가 공시</span><span class="pill" style="left:68%">증권사 리포트</span><span class="pill" style="left:84%">뉴스</span></div>
+  <div class="arrow">⬇ &nbsp;다섯 곳을 따로 조회하던 것을 하나로</div>
   <div class="box">심사참고 DB · 한 화면</div>
   <div class="tail a">기업여신 · 주식담보 · 메자닌 심사 때마다 따로 조회하던 과정을 없애고</div>
   <div class="tail b">거래처 응대와 심사에 필요한 회사 정보를 한 화면에서 확인합니다</div>
@@ -56,7 +58,7 @@ const SHOTS=[
  {dur:3,img:'h1.jpg',W:3136,H:1562,crop:[0,462,1580,692],hl:[[20,480,600,670]],no:'02',tt:'회사명 · 종목코드 · 업종으로 검색',st:'시장 · 비상장 필터, 시총 · PER · EV/EBITDA · 신용등급순 정렬'},
  {dur:3,img:'h1.jpg',W:3136,H:1562,crop:[640,470,2496,1092],hl:[[676,500,2440,120],[700,625,2410,250]],no:'03',tt:'대표 신용등급 · 심사 경고 · 핵심 지표',st:'부채비율 · 순차입금/EBITDA · 밸류에이션 · 감사의견을 첫 화면에서'},
  {dur:3,img:'rating.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,20,2020,910]],no:'04',tt:'최근 3년 신용등급 추이',st:'평가서 PDF 바로 열기 · <b>보증부 등급은 대표 등급에서 자동 제외</b>'},
- {dur:3,img:'fin.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,100,1090,860],[1176,100,1080,860]],no:'05',tt:'별도 · 연결 재무 + 최신 분기',st:'EBITDA · 총차입금 · FCF — 연도를 누르면 DART 원문으로'},
+ {dur:3,img:'fin.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,100,1090,860],[1176,100,1080,860]],no:'05',tt:'별도 · 연결 재무 + 최신 분기',st:'EBITDA · 총차입금 · FCF — 연도를 누르면 DART 원문으로 · <b>당사 양식 재무현황(체크리스트 ⑥) 엑셀, 화면 전체 Word · PDF 내려받기</b>'},
  {dur:3,img:'borrow.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,100,1090,540],[66,810,2200,170]],no:'06',tt:'차입금 구조 · 기발행 메자닌',st:'유동 · 비유동 × 차입금 · 사채 · 리스 3개년 + CB · BW 잔액과 전환가 대비 현재가'},
  {dur:3,img:'chart.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,110,2180,660]],no:'07',tt:'주가 차트 · 대용가 · 담보가',st:'일 · 주 · 월봉 차트 위에 대용가와 <b>담보가(대용가 × 90%)</b> 선 표시'},
  {dur:3,img:'sim.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,330,2190,380],[66,765,2190,180]],no:'08',tt:'담보인정 시뮬레이션 · 대주주 담보제공',st:'현재가→담보가 낙폭 버퍼 · 52주 최저 대비 · 담보제공 공시 보고서 바로 열기'},
@@ -70,13 +72,12 @@ for(const sh of SHOTS){
    <div class="cap"><span class="no">${sh.no}</span><div><div class="tt">${sh.tt}</div><div class="st">${sh.st}</div></div></div></div>`;
   stage.appendChild(d);
 }
-const end=document.createElement('div'); end.className='slide'; end.innerHTML=`<div class="card end"><div class="l t1">kosdaq-db.pages.dev</div><div class="l t2">휴대폰 홈 화면에 앱으로 설치해 쓸 수 있습니다 (앱 설치 버튼)</div><div class="l t2">매일 06:00 시세 · 06:30 대용가 · 00:10 공시 · 재무 보충</div><div class="l t3">심사 참고용 요약입니다 — 판단은 반드시 DART · 금감원 원문으로 확인하세요</div></div>`; stage.appendChild(end);
+const end=document.createElement('div'); end.className='slide'; end.innerHTML=`<div class="card end"><div class="l t1">kosdaq-db.pages.dev</div><div class="l t2">휴대폰 홈 화면에 앱으로 설치해 쓸 수 있습니다 (앱 설치 버튼)</div><div class="l t2">매일 06:00 시세 · 06:30 대용가 · 00:10 공시 · 재무 보충</div><div class="l t2">회사 화면은 Word · PDF로, 당사 양식 재무현황은 엑셀로 내려받기</div><div class="l t3">심사 참고용 요약입니다 — 판단은 반드시 DART · 금감원 원문으로 확인하세요</div></div>`; stage.appendChild(end);
 const slides=[...stage.querySelectorAll('.slide')], DUR=[2.5,8].concat(SHOTS.map(s=>s.dur)).concat([3]);
 let cur=0, playing=true, t0=0, raf=0, timer=0;
 const dots=document.getElementById('dots'); slides.forEach((_,i)=>{ const d=document.createElement('i'); d.onclick=()=>go(i,true); dots.appendChild(d); });
 const prog=document.querySelector('#prog i'), cnt=document.getElementById('cnt'), bPlay=document.getElementById('bPlay');
 function show(i){ slides.forEach((s,j)=>s.classList.toggle('on',j===i)); dots.querySelectorAll('i').forEach((d,j)=>d.classList.toggle('on',j===i)); cnt.textContent=(i+1)+' / '+slides.length;
-  if(i===1){ const ps=slides[1].querySelectorAll('.pill'); ps.forEach(p=>p.classList.remove('go')); setTimeout(()=>ps.forEach(p=>p.classList.add('go')),50); }
   const sh=SHOTS[i-2]; const img=slides[i].querySelector('img'); if(img){ img.style.transition='none'; img.style.transform=img.dataset.base||img.style.transform; img.dataset.base=img.style.transform; }
   if(sh&&sh.zoom&&img){ const f=fit(sh.crop), z=sh.zoom, s2=Math.min(FW/z[2],FH/z[3]); requestAnimationFrame(()=>{ img.style.transition='transform '+(sh.dur-0.2)+'s linear'; img.style.width=(sh.W*s2)+'px'; img.style.transform=`translate(${(FW-z[2]*s2)/2-z[0]*s2}px,${(FH-z[3]*s2)/2-z[1]*s2}px)`; }); } }
 function arm(){ clearTimeout(timer); cancelAnimationFrame(raf); t0=performance.now(); const d=DUR[cur]*1000;
