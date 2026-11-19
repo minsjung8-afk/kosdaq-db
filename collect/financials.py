@@ -33,7 +33,10 @@ KPI_MAP = {
     "dep":          (["ifrs-full_DepreciationExpense", "ifrs-full_AdjustmentsForDepreciationExpense"], ["감가상각비", "유형자산감가상각비", "감가상각"]),
     "amort":        (["ifrs-full_AmortisationExpense", "ifrs-full_AdjustmentsForAmortisationExpense"], ["무형자산상각비", "무형자산상각"]),
     "rou_dep":      ([], ["사용권자산상각비", "사용권자산감가상각비"]),
-    "int_exp":      (["ifrs-full_InterestExpense", "ifrs-full_FinanceCosts"], ["이자비용", "금융비용", "금융원가"]),
+    "int_exp":      (["ifrs-full_InterestExpense"], ["이자비용", "이자비용(금융비용)", "이자비용등"]),   # 2026-11-19 풀무원식품: 금융비용 소계가 이자비용으로 잡힘 → 금융비용은 _int_fallback 3순위로만
+    "fin_cost":     (["ifrs-full_FinanceCosts"], ["금융비용", "금융원가", "금융비용(원가)"]),
+    "int_paid":     (["ifrs-full_InterestPaidClassifiedAsOperatingActivities", "ifrs-full_InterestPaidClassifiedAsFinancingActivities", "ifrs-full_InterestPaid"],
+                     ["이자의 지급", "이자지급", "이자지급액", "이자의지급액", "이자비용의 지급", "이자비용지급", "이자 지급", "이자지급(영업)"]),
     "cur_assets":   (["ifrs-full_CurrentAssets"], ["유동자산"]),
     "cur_liab":     (["ifrs-full_CurrentLiabilities"], ["유동부채"]),
     "receivables":  (["ifrs-full_TradeAndOtherCurrentReceivables", "ifrs-full_CurrentTradeReceivables"], ["매출채권", "매출채권및기타채권", "매출채권 및 기타채권", "매출채권및기타유동채권"]),
@@ -322,11 +325,39 @@ def _rev_fallback(rows, op):
     return None, None
 
 
+import re as _re_mod
+_HYBRID_RE = _re_mod.compile(r"(신종자본증권|신종자본|하이브리드|영구채|영구전환사채|영구사채)[^0-9]*(수익분배|분배금|배당|이자)")
+_HYBRID_EX = _re_mod.compile(r"발행|상환|취득|매입|수취|수입|미지급|부채|자산")
+
+
+def _int_fallback(rows, k):
+    """이자비용 출처 체인(2026-11-19 사용자 지적: 풀무원식품 금융비용 소계 138.6억이 이자비용으로 표시됨).
+    ① 손익계산서 본문 이자비용(발생) ② 현금흐름표 이자의 지급(현금) ③ 금융비용(출처 표기)
+    + 신종자본증권 수익분배금(현금흐름표 재무활동, 회계상 배당이나 실질은 이자) → hybrid_dist 별도 저장(커버리지 분모에 가산)"""
+    if k.get("int_exp") is not None:
+        k["int_src"] = "이자비용"
+    elif k.get("int_paid") is not None:
+        k["int_exp"], k["int_src"] = abs(k["int_paid"]), "이자지급(CF)"
+    elif k.get("fin_cost") is not None:
+        k["int_exp"], k["int_src"] = k["fin_cost"], "금융비용"
+    else:
+        k["int_src"] = None
+    hy = None
+    for r in rows:
+        if r["sj_div"] != "CF" or r.get("thstrm_amount") in (None, 0):
+            continue
+        nm = _norm_nm(r["account_nm"])
+        if _HYBRID_RE.search(nm) and not _HYBRID_EX.search(nm):
+            hy = (hy or 0) + abs(r["thstrm_amount"])
+    k["hybrid_dist"] = hy
+
+
 def _pick(rows, ids, names, sj=None):
     """rows: fin_raw dict 목록. account_id 우선, 없으면 계정명 정확/포함 매칭."""
-    for r in rows:
-        if r["account_id"] in ids and (sj is None or r["sj_div"] in sj):
-            return r["thstrm_amount"]
+    for aid in ids:                           # 2026-11-19: ids 순서가 우선순위(행 순서가 아님) — 이자비용 < 금융비용 뒤바뀜 방지
+        for r in rows:
+            if r["account_id"] == aid and (sj is None or r["sj_div"] in sj):
+                return r["thstrm_amount"]
     for nm in names:
         for r in rows:
             an = _norm_nm(r["account_nm"])
@@ -355,7 +386,8 @@ _DA_SRC_COL = {"ok": False}
 
 def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
     if not _DA_SRC_COL["ok"]:
-        for _ddl in ("ALTER TABLE fin_kpi ADD COLUMN da_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN pretax REAL"):
+        for _ddl in ("ALTER TABLE fin_kpi ADD COLUMN da_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN pretax REAL",
+                     "ALTER TABLE fin_kpi ADD COLUMN int_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN int_paid REAL", "ALTER TABLE fin_kpi ADD COLUMN hybrid_dist REAL", "ALTER TABLE fin_kpi ADD COLUMN fin_cost REAL"):
             try:
                 con.execute(_ddl)
             except Exception:  # noqa — 이미 있음
@@ -370,8 +402,9 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
         k = {}
         for key, (ids, names) in KPI_MAP.items():
             sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash", "cur_assets", "cur_liab", "receivables", "inventory", "capital", "payables", "contract_assets", "contract_liab", "advances") else \
-                 ("CF",) if key in ("cfo", "dep", "amort", "rou_dep", "cfi", "cff", "capex_ppe", "capex_int", "disp_ppe", "disp_int", "tax_paid") else ("IS", "CIS")
+                 ("CF",) if key in ("cfo", "dep", "amort", "rou_dep", "cfi", "cff", "capex_ppe", "capex_int", "disp_ppe", "disp_int", "tax_paid", "int_paid") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
+        _int_fallback(rows, k)                     # 2026-11-19 이자비용 출처 체인 + 신종자본증권 분배금
         if k.get("revenue") is None:              # 2026-10-28: 금융업(카드·캐피탈)·일부 비상장은 매출 합계 줄이 없음 → 영업이익+영업비용 또는 영업수익 구성 합
             k["revenue"], k["_rev_src"] = _rev_fallback(rows, k.get("op_income"))
         # 상각비: 계정명 패턴으로 재탐색 (합산 계정 '감가상각비와무형자산상각비' 우선, 없으면 감가+무형+사용권 합)
@@ -496,7 +529,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             pass
         k["ebitda"] = (k["op_income"] + k["da"]) if k.get("op_income") is not None and k["da"] is not None else None
         ie = abs(k["int_exp"]) if k.get("int_exp") else None
-        k["interest_cover"] = round(k["ebitda"] / ie, 1) if k.get("ebitda") is not None and ie else None   # EBITDA/이자비용
+        hy = abs(k["hybrid_dist"]) if k.get("hybrid_dist") else 0
+        k["interest_cover"] = round(k["ebitda"] / (ie + hy), 1) if k.get("ebitda") is not None and (ie or hy) else None   # EBITDA/(이자비용+신종자본증권 분배금) 2026-11-19
         k["borrow_dep"] = round(k["borrowings"] / k["total_assets"] * 100, 1) \
             if k.get("borrowings") is not None and k.get("total_assets") else None
         k["cur_ratio"] = round(k["cur_assets"] / k["cur_liab"] * 100, 1) if k.get("cur_assets") and k.get("cur_liab") else None
@@ -552,8 +586,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
             cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
             payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio,
-            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src, pretax)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src, pretax, int_src, int_paid, hybrid_dist, fin_cost)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
@@ -563,7 +597,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("cur_ratio"), k.get("recv_turn"), k.get("inv_turn"), k.get("nd_ebitda"),
                      k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op"),
                      k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio"),
-                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None), k.get("da_src"), k.get("pretax")))
+                     k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None), k.get("da_src"), k.get("pretax"),
+                     k.get("int_src"), (abs(k["int_paid"]) if k.get("int_paid") is not None else None), (abs(k["hybrid_dist"]) if k.get("hybrid_dist") is not None else None), (abs(k["fin_cost"]) if k.get("fin_cost") is not None else None)))
     con.commit()
 
 
