@@ -328,6 +328,8 @@ def _rev_fallback(rows, op):
 import re as _re_mod
 _HYBRID_RE = _re_mod.compile(r"(신종자본증권|신종자본|하이브리드|영구채|영구전환사채|영구사채)[^0-9]*(수익분배|분배금|배당|이자)")
 _HYBRID_EX = _re_mod.compile(r"발행|상환|취득|매입|수취|수입|미지급|부채|자산")
+_HYBRID_EQ_RE = _re_mod.compile(r"^(신종자본증권|신종자본|하이브리드(자본)?증권|영구채|영구사채|영구전환사채)(\(자본\))?$|^신종자본증권\(?자본")
+_HYBRID_EQ_EX = _re_mod.compile(r"부채|미지급|배당|분배|발행비용|이자|비지배")
 
 
 def _int_fallback(rows, k):
@@ -350,6 +352,14 @@ def _int_fallback(rows, k):
         if _HYBRID_RE.search(nm) and not _HYBRID_EX.search(nm):
             hy = (hy or 0) + abs(r["thstrm_amount"])
     k["hybrid_dist"] = hy
+    he = None                                                  # 2026-11-19 사용자: 재무상태표 자본 항목의 신종자본증권 잔액(연도별 표시용)
+    for r in rows:
+        if r["sj_div"] != "BS" or r.get("thstrm_amount") in (None, 0):
+            continue
+        nm = _norm_nm(r["account_nm"])
+        if _HYBRID_EQ_RE.search(nm) and not _HYBRID_EQ_EX.search(nm):
+            he = (he or 0) + r["thstrm_amount"]
+    k["hybrid_eq"] = he
 
 
 def _pick(rows, ids, names, sj=None):
@@ -387,7 +397,7 @@ _DA_SRC_COL = {"ok": False}
 def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
     if not _DA_SRC_COL["ok"]:
         for _ddl in ("ALTER TABLE fin_kpi ADD COLUMN da_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN pretax REAL",
-                     "ALTER TABLE fin_kpi ADD COLUMN int_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN int_paid REAL", "ALTER TABLE fin_kpi ADD COLUMN hybrid_dist REAL", "ALTER TABLE fin_kpi ADD COLUMN fin_cost REAL"):
+                     "ALTER TABLE fin_kpi ADD COLUMN int_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN int_paid REAL", "ALTER TABLE fin_kpi ADD COLUMN hybrid_dist REAL", "ALTER TABLE fin_kpi ADD COLUMN fin_cost REAL", "ALTER TABLE fin_kpi ADD COLUMN hybrid_eq REAL"):
             try:
                 con.execute(_ddl)
             except Exception:  # noqa — 이미 있음
@@ -586,8 +596,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
             cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
             payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio,
-            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src, pretax, int_src, int_paid, hybrid_dist, fin_cost)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src, pretax, int_src, int_paid, hybrid_dist, fin_cost, hybrid_eq)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
@@ -598,7 +608,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op"),
                      k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio"),
                      k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None), k.get("da_src"), k.get("pretax"),
-                     k.get("int_src"), (abs(k["int_paid"]) if k.get("int_paid") is not None else None), (abs(k["hybrid_dist"]) if k.get("hybrid_dist") is not None else None), (abs(k["fin_cost"]) if k.get("fin_cost") is not None else None)))
+                     k.get("int_src"), (abs(k["int_paid"]) if k.get("int_paid") is not None else None), (abs(k["hybrid_dist"]) if k.get("hybrid_dist") is not None else None), (abs(k["fin_cost"]) if k.get("fin_cost") is not None else None), k.get("hybrid_eq")))
     con.commit()
 
 
