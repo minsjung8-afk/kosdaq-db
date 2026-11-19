@@ -1070,7 +1070,7 @@ def _ibk_fin(con, cc, kpi):
             pick[g] = chosen
         cols = [{"label": p["label"], "kind": p["kind"]} for p in per]
         groups = {g: {"total": [p["tot"].get(g) for p in per], "items": [{"nm": nm, "v": [p["items"].get(g, {}).get(nm) for p in per]} for nm in pick.get(g, [])]} for g in ("ca", "nca", "cl", "ncl") + (("ta", "tl") if nocur else ())}
-        base = {k: [r.get(k) for r in rows] for k in ("total_assets", "total_liab", "equity", "capital", "borrowings", "cash", "revenue", "op_income", "ebitda", "int_exp", "net_income", "cfo")}
+        base = {k: [r.get(k) for r in rows] for k in ("total_assets", "total_liab", "equity", "capital", "borrowings", "cash", "revenue", "op_income", "ebitda", "int_exp", "int_src", "hybrid_dist", "net_income", "cfo")}
         out[fs] = {"cols": cols, "groups": groups, "base": base, "nocur": nocur}   # nocur: 유동·비유동 구분 없는 표(금융사) → 자산·부채 주요 계정(ta/tl)
     return out or None
 
