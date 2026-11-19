@@ -72,6 +72,23 @@ def _fetch_list(corp_code, bsns_year, reprt_code, fs_div):
     return dart_get("fnlttSinglAcntAll", corp_code=corp_code, bsns_year=str(bsns_year), reprt_code=reprt_code, fs_div=fs_div).get("list", [])
 
 
+def _sce_pick(lst):
+    """자본변동표는 같은 계정이 열(account_detail: 자본금·이익잉여금·비지배지분·합계 …)마다 반복되는데 fin_raw 키에는 열이 없어 마지막 행만 남는다.
+    2026-11-19 실측(신한지주 '신종자본증권배당' 1,979억이 빈 열에 덮여 사라짐, SK이노베이션은 지배지분 열 183억만 남음 ↔ 합계 905억)
+    → (account_id, account_nm)당 1행만 남긴다: 합계 열('연결/별도재무제표 [member]')에 금액이 있으면 그 행, 없으면 절대값이 가장 큰 열."""
+    out, best = [], {}
+    for r in lst:
+        if r.get("sj_div") != "SCE":
+            out.append(r); continue
+        key = (r.get("account_id"), r.get("account_nm"))
+        v = to_num(r.get("thstrm_amount"))
+        tot = "재무제표 [member]" in (r.get("account_detail") or "")
+        score = (2 if (tot and v) else 1 if v else 0, abs(v or 0))
+        if key not in best or score > best[key][0]:
+            best[key] = (score, r)
+    return out + [r for _, r in best.values()]
+
+
 def store_raw(con, corp_code, bsns_year, reprt_code, fs_div, lst, prev=True):
     """받은 목록 저장(손익은 누적). prev=True면 같은 보고서의 '전기' 열로 전년 같은 기간도 채운다(이미 그 보고서를 받았으면 건드리지 않음).
     - 연간: 전기 = 전년 사업보고서와 같은 기준(BS 포함) → 전 계정 저장
@@ -79,6 +96,7 @@ def store_raw(con, corp_code, bsns_year, reprt_code, fs_div, lst, prev=True):
     반환: (당기 저장 행 수, 전기 보충 여부)"""
     ensure_cum_table(con)
     y = str(bsns_year)
+    lst = _sce_pick(lst)
     con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, y, reprt_code, fs_div))
     ins = """INSERT OR REPLACE INTO fin_raw (corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm,
              thstrm_amount, frmtrm_amount, bfefrmtrm_amount, ord, rcept_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"""
@@ -326,16 +344,40 @@ def _rev_fallback(rows, op):
 
 
 import re as _re_mod
-_HYBRID_RE = _re_mod.compile(r"(신종자본증권|신종자본|하이브리드|영구채|영구전환사채|영구사채)[^0-9]*(수익분배|분배금|배당|이자)")
-_HYBRID_EX = _re_mod.compile(r"발행|상환|취득|매입|수취|수입|미지급|부채|자산")
-_HYBRID_EQ_RE = _re_mod.compile(r"^(신종자본증권|신종자본|하이브리드(자본)?증권|영구채|영구사채|영구전환사채)(\(자본\))?$|^신종자본증권\(?자본")
-_HYBRID_EQ_EX = _re_mod.compile(r"부채|미지급|배당|분배|발행비용|이자|비지배")
+# ── 신종자본증권(2026-11-19 전 회사 계정명 전수 점검: 재무상태표 7종·현금흐름표 87종·자본변동표 80종 계정명 기준) ──
+# 종류: 신종자본증권 / 하이브리드증권 / 영구채·영구사채·영구전환사채·영구교환사채 (아이톡시 '신종배당증권' 오기 포함)
+_HY_NM = _re_mod.compile(r"신종자본증권|신종자본|신종배당증권|하이브리드(자본)?증권|하이브리드채권|영구채|영구사채|영구전환사채|영구교환사채|영구후순위채")
+# 분배금 표기: 배당(47사)·이자지급(32사)·분배금(10사)·수익분배금·이익분배금·이익분여 …
+_HY_DIST = _re_mod.compile(r"수익분배|이익분배|분배|배당|이자|이익분여")
+# 분배가 아닌 거래: 발행·상환·발행비용·전환·교환·행사·상환손실·환입·증감·반환·거래원가·수수료, (금융사 투자자산) 취득·매입·수취
+_HY_NOTDIST = _re_mod.compile(r"발행|상환|취득|매입|수취|수입|전환|교환|행사|손실|환입|증가|감소|반환|거래원가|수수료")
+_HY_CF_IDS = {"dart_DividendsPaidToHybridBond", "dart_InterestPaidToHybridBond"}          # 표준계정코드: 계정명이 '신종자본증권 현금유출'(롯데카드)처럼 모호할 때만 보조
+_HY_SCE_IDS = {"dart_DividendToHybridBond", "dart_InterestExpenseForHybridBond"}         # 자본변동표 '신종자본증권 손익'(한국가스공사)
+_HY_EQ = _re_mod.compile(r"^(연결)?(신종자본증권|신종자본|하이브리드(자본)?증권|하이브리드채권|영구채|영구사채|영구전환사채|영구교환사채|영구후순위채)(\(자본\))?$")
+_HYBRID_RE, _HYBRID_EX, _HYBRID_EQ_RE, _HYBRID_EQ_EX = _HY_NM, _HY_NOTDIST, _HY_EQ, _re_mod.compile(r"$^")   # 진단(신종점검) 호환용 별칭
+
+
+def _hy_kind(nm, aid, sj):
+    """신종자본증권 관련 줄의 성격: 'dist'(분배금·배당·이자) | 'other'(발행·상환 등) | None(신종 아님).
+    종류 이름(예: 영구'전환'사채)을 먼저 떼고 나머지 말로 판정한다 — '영구전환사채 이자지급'이 '전환' 제외어에 걸리지 않게."""
+    m = _HY_NM.search(nm or "")
+    if not m:
+        return None
+    rest = nm[:m.start()] + nm[m.end():]
+    if _HY_NOTDIST.search(rest):
+        return "other"
+    if _HY_DIST.search(rest):
+        return "dist"
+    if (sj == "CF" and aid in _HY_CF_IDS) or (sj == "SCE" and aid in _HY_SCE_IDS):
+        return "dist"
+    return "other"
 
 
 def _int_fallback(rows, k):
     """이자비용 출처 체인(2026-11-19 사용자 지적: 풀무원식품 금융비용 소계 138.6억이 이자비용으로 표시됨).
     ① 손익계산서 본문 이자비용(발생) ② 현금흐름표 이자의 지급(현금) ③ 금융비용(출처 표기)
-    + 신종자본증권 수익분배금(현금흐름표 재무활동, 회계상 배당이나 실질은 이자) → hybrid_dist 별도 저장(커버리지 분모에 가산)"""
+    신종자본증권: hybrid_dist = 분배금(① 현금흐름표 ② 없으면 자본변동표 — hybrid_src에 출처), hybrid_eq = 재무상태표 잔액,
+    hybrid_note = 신종 흔적(발행·상환·분배)은 있는데 잔액·분배금이 계정명으로 분리되지 않은 경우의 안내(추정 금액은 넣지 않는다)"""
     if k.get("int_exp") is not None:
         k["int_src"] = "이자비용"
     elif k.get("int_paid") is not None:
@@ -344,22 +386,43 @@ def _int_fallback(rows, k):
         k["int_exp"], k["int_src"] = k["fin_cost"], "금융비용"
     else:
         k["int_src"] = None
-    hy = None
+    cf, sce, trace = {}, {}, False
     for r in rows:
-        if r["sj_div"] != "CF" or r.get("thstrm_amount") in (None, 0):
+        sj = r.get("sj_div")
+        if sj not in ("CF", "SCE") or r.get("thstrm_amount") in (None, 0):
             continue
         nm = _norm_nm(r["account_nm"])
-        if _HYBRID_RE.search(nm) and not _HYBRID_EX.search(nm):
-            hy = (hy or 0) + abs(r["thstrm_amount"])
-    k["hybrid_dist"] = hy
-    he = None                                                  # 2026-11-19 사용자: 재무상태표 자본 항목의 신종자본증권 잔액(연도별 표시용)
+        kind = _hy_kind(nm, r.get("account_id") or "", sj)
+        if kind is None:
+            continue
+        trace = True
+        if kind == "dist":
+            d = cf if sj == "CF" else sce
+            d[nm] = max(d.get(nm, 0), abs(r["thstrm_amount"]))      # 같은 이름이 여러 줄이면(자본변동표 열 반복) 큰 값 하나
+    if cf:
+        k["hybrid_dist"], k["hybrid_src"] = sum(cf.values()), "CF"
+    elif sce:
+        k["hybrid_dist"], k["hybrid_src"] = sum(sce.values()), "SCE"
+    else:
+        k["hybrid_dist"], k["hybrid_src"] = None, None
+    in_bor = {i["nm"] for i in borrow_items(rows)}                    # '영구전환사채'·'영구사채'는 이름의 '사채'로 이미 총차입금에 들어감 → 잔액에서 제외(이중 계상 방지)
+    he, inb = None, False
     for r in rows:
-        if r["sj_div"] != "BS" or r.get("thstrm_amount") in (None, 0):
+        if r.get("sj_div") != "BS" or r.get("thstrm_amount") in (None, 0):
             continue
         nm = _norm_nm(r["account_nm"])
-        if _HYBRID_EQ_RE.search(nm) and not _HYBRID_EQ_EX.search(nm):
-            he = (he or 0) + r["thstrm_amount"]
+        if _HY_EQ.match(nm):
+            trace = True
+            if nm in in_bor:
+                inb = True
+            else:
+                he = (he or 0) + r["thstrm_amount"]
     k["hybrid_eq"] = he
+    miss = [t for t, v in (("잔액", he if not inb else 1), ("분배금", k["hybrid_dist"])) if v is None]
+    note = [("·".join(miss) + " 미분리")] if (trace and miss) else []
+    if inb:
+        note.append("잔액은 총차입금에 포함")
+    k["hybrid_note"] = " · ".join(note) or None
 
 
 def _pick(rows, ids, names, sj=None):
@@ -397,7 +460,8 @@ _DA_SRC_COL = {"ok": False}
 def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
     if not _DA_SRC_COL["ok"]:
         for _ddl in ("ALTER TABLE fin_kpi ADD COLUMN da_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN pretax REAL",
-                     "ALTER TABLE fin_kpi ADD COLUMN int_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN int_paid REAL", "ALTER TABLE fin_kpi ADD COLUMN hybrid_dist REAL", "ALTER TABLE fin_kpi ADD COLUMN fin_cost REAL", "ALTER TABLE fin_kpi ADD COLUMN hybrid_eq REAL"):
+                     "ALTER TABLE fin_kpi ADD COLUMN int_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN int_paid REAL", "ALTER TABLE fin_kpi ADD COLUMN hybrid_dist REAL", "ALTER TABLE fin_kpi ADD COLUMN fin_cost REAL", "ALTER TABLE fin_kpi ADD COLUMN hybrid_eq REAL",
+                     "ALTER TABLE fin_kpi ADD COLUMN hybrid_src TEXT", "ALTER TABLE fin_kpi ADD COLUMN hybrid_note TEXT"):
             try:
                 con.execute(_ddl)
             except Exception:  # noqa — 이미 있음
@@ -596,8 +660,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             net_borrowings, da, ebitda, int_exp, interest_cover, borrow_dep, rcept_no,
             cur_assets, cur_liab, receivables, inventory, capital, cur_ratio, recv_turn, inv_turn, nd_ebitda,
             payables, nwc, net_margin, borrow_op, contract_assets, contract_liab, advances, nwc_proj, cogs, cogs_ratio,
-            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src, pretax, int_src, int_paid, hybrid_dist, fin_cost, hybrid_eq)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            cfi, cff, capex, capex_ppe, capex_int, fcf, capex_disp, tax_paid, da_src, pretax, int_src, int_paid, hybrid_dist, fin_cost, hybrid_eq, hybrid_src, hybrid_note)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (corp_code, bsns_year, reprt_code, fs_div, k.get("revenue"), k.get("op_income"),
                      k.get("net_income"), k.get("total_assets"), k.get("total_liab"), k.get("equity"),
                      k.get("cash"), k.get("borrowings"), k.get("cfo"), k.get("debt_ratio"),
@@ -608,7 +672,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                      k.get("payables"), k.get("nwc"), k.get("net_margin"), k.get("borrow_op"),
                      k.get("contract_assets"), k.get("contract_liab"), k.get("advances"), k.get("nwc_proj"), k.get("cogs"), k.get("cogs_ratio"),
                      k.get("cfi"), k.get("cff"), k.get("capex"), k.get("capex_ppe"), k.get("capex_int"), k.get("fcf"), k.get("capex_disp"), (abs(k["tax_paid"]) if k.get("tax_paid") is not None else None), k.get("da_src"), k.get("pretax"),
-                     k.get("int_src"), (abs(k["int_paid"]) if k.get("int_paid") is not None else None), (abs(k["hybrid_dist"]) if k.get("hybrid_dist") is not None else None), (abs(k["fin_cost"]) if k.get("fin_cost") is not None else None), k.get("hybrid_eq")))
+                     k.get("int_src"), (abs(k["int_paid"]) if k.get("int_paid") is not None else None), (abs(k["hybrid_dist"]) if k.get("hybrid_dist") is not None else None), (abs(k["fin_cost"]) if k.get("fin_cost") is not None else None), k.get("hybrid_eq"), k.get("hybrid_src"), k.get("hybrid_note")))
     con.commit()
 
 
