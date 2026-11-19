@@ -986,7 +986,7 @@ _EQ_NM = re.compile(r"자본금|자본잉여금|이익잉여금|결손금|기타
 
 def _ibk_fin(con, cc, kpi):
     """당사 양식 재무현황(체크리스트 ⑥, 2026-11-18 사용자): 재무현황 표와 같은 기간(연간 2개년 + 전년 동기 + 최근 분기, 분기 없으면 연간 3개년)에 대해
-    재무상태표 원문(fin_raw BS)에서 유동자산·비유동자산·유동부채·비유동부채별 규모 큰 계정을 뽑는다(최근 기간 기준 상위, 그룹 합계의 8% 이상·최대 5개·최소 2개).
+    재무상태표 원문(fin_raw BS)에서 유동자산·비유동자산·유동부채·비유동부채별 규모 큰 계정을 뽑는다(최근 기간 기준 상위 4개, 그룹 합계의 1% 미만 제외·최소 2개). 전년 대비 유의미한 변동 각주는 화면(index.html ibkNotes)에서 계산.
     계정 그룹은 XBRL 순번(ord)으로 판정: 소계(유동자산 등)가 세부보다 앞에 오는 표(헤더 선행)와 뒤에 오는 표 모두 처리(financials.borrow_items와 같은 규칙)"""
     from financials import _norm_nm
     out = {}
@@ -1044,8 +1044,8 @@ def _ibk_fin(con, cc, kpi):
             T = last["tot"].get(g) or (cand[0][1] if cand else 0)
             chosen = []
             for nm, v in cand:
-                if len(chosen) >= (6 if nocur else 5): break
-                if len(chosen) >= 2 and T and abs(v) < (0.05 if nocur else 0.08) * abs(T): break
+                if len(chosen) >= (6 if nocur else 4): break          # 2026-11-19 사용자: 유동·비유동 각 그룹 비중 큰 4개 고정(금융사 자산·부채는 6개)
+                if len(chosen) >= 2 and T and abs(v) < 0.01 * abs(T): break   # 1% 미만 잔챙이만 제외
                 chosen.append(nm)
             pick[g] = chosen
         cols = [{"label": p["label"], "kind": p["kind"]} for p in per]
