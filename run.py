@@ -897,6 +897,8 @@ def main():
     elif a.job == "rawdump" and a.type == "거래소공시재스캔":   # 2026-11-19 상장유지 위험 뱃지: 최근 1년 거래소공시(pblntf_ty=I) 이벤트 보강
         import delta as _dl
         _dl.rescan_krx(days=a.limit or 365)
+    elif a.job == "rawdump" and a.type in ("신종잔액", "신종잔액점검"):   # 2026-11-19: 재무상태표에 신종자본증권 줄이 없는 회사 — 정기보고서 「신종자본증권 미상환 잔액」 표(단위 문구 포함)로 잔액 채움. 점검은 출력만
+        __import__("hybrid_out").run(con, year0=a.year - 2, codes=set(ccs) if a.codes else None, limit=a.limit, dry=(a.type == "신종잔액점검"))
     elif a.job == "rawdump" and a.type == "신종공시":   # 2026-11-19: 잔액이 재무상태표에 없는 회사(풀무원식품 포함 150건) — DART 정기보고서 '신종자본증권 미상환 잔액'(newCaplScritsNrdmpBlce) 원자료 확인(--codes 필수). --limit를 주면 이어서 fn_ai 표본 실행
         from common import dart_get as _dg
         nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
