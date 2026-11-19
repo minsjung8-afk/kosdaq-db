@@ -20,6 +20,8 @@ from business import fetch_document_xml  # noqa: E402
 import notes_v2  # noqa: E402
 
 MODEL = os.environ.get("FN_AI_MODEL", "claude-haiku-4-5")
+VER = "v2"               # 2026-11-19 표본 20사(v1) 점검: 저장 20건 중 틀리거나 애매한 것이 절반(단위 환산 오류 3건 — 천원 표를 억으로 잘못 환산, 방향 모순 2건, 다른 계정 표 인용 1건, 현금 항목 0/11 유효)
+                         #   → v2: 금액 환산 금지 + 숫자 대조, 변동 방향 대조, 차입·리스 절 분리, 현금 항목 제외. 저장 행의 model에 '|v2'를 붙여 사이트는 v2만 표시(build_site.FN_AI_VER)
 PRICES = {"claude-haiku-4-5": (1.0, 5.0), "claude-sonnet-4-5": (3.0, 15.0)}
 BUDGET = float(os.environ.get("FN_AI_BUDGET", "35"))
 MAX_ITEMS = 4            # 회사당 변동 항목 수(금액 큰 순) — 예산 35달러 안에서 3,500사를 돌리려면 4건 × 2절 × 1,200자 ≈ 입력 8천 토큰
@@ -30,8 +32,8 @@ WIDE_KEYS = tuple(notes_v2.NOTE_KEYS_V2) + ("현금", "매출채권", "기타채
 
 # 계정명 → 관련 주석 절 제목 패턴
 _SEC = [
-    (r"현금", r"현금|현금흐름"),
-    (r"차입|사채|리스|CB|BW", r"차입|사채|리스|금융부채|전환사채|신주인수권"),
+    (r"리스", r"리스|사용권"),                          # v2: 차입·사채와 분리(DRB동일: 장기차입금 항목에 사용권자산 표가 근거로 붙음)
+    (r"차입|사채|CB|BW", r"차입|사채|금융부채|전환사채|신주인수권"),
     (r"매출채권|채권|계약자산|미청구", r"매출채권|채권|계약자산|미청구|손실충당"),
     (r"재고", r"재고"),
     (r"매입채무|채무|계약부채|선수", r"매입채무|채무|계약부채|선수"),
@@ -52,6 +54,10 @@ PROMPT = """당신은 여신심사역을 돕는 회계 보조원이다. 아래�
 - 발췌문에 사유(신규 차입·상환·차환, 취득·처분, 발행·전환, 손상, 거래처·대손, 계약 변동, 합병·연결범위 변동, 유상증자, 배당 등)가 드러나지 않으면 reason=null, quote=null. 추정·일반론 금지.
 - 숫자의 단순 증감 서술("증가했다")은 사유가 아니다. 구성 변화(예: 산업은행 운영자금 차입 300억 신규)처럼 무엇이 바뀌었는지가 보여야 한다.
 - quote는 발췌문의 한 줄을 그대로(앞뒤 생략 가능, 최대 160자). 요약·의역 금지. 발췌문에 없는 문장을 만들면 안 된다.
+- 금액을 환산하지 마라(천원·백만원 표의 숫자를 억 단위로 바꾸지 말 것). reason에는 되도록 숫자를 쓰지 말고, 꼭 필요하면 quote에 있는 숫자를 글자 그대로만 쓴다.
+- 변동 방향과 맞아야 한다. 증가한 항목에 '상환·처분·감소'만, 감소한 항목에 '신규·취득·증가'만 쓰면 안 된다.
+- 항목과 다른 계정의 표는 근거가 아니다(예: 차입금 항목에 사용권자산·리스 표, 매출채권 항목에 선수금 표).
+- 표의 두 숫자를 비교해 짐작한 인과(만기 연장·재분류·대체 등)는 쓰지 말 것. 주석 문장이 직접 말하거나, 표의 행 이름이 그 사실(차입처·회차·취득·처분·합병 등)을 나타낼 때만 쓴다.
 JSON 배열로만 답하라: [{{"i": 항목번호, "reason": "…" | null, "quote": "…" | null}}, …]
 
 """
@@ -92,6 +98,7 @@ def _changes(X):
                 if abs(r) < 0.3 or (base and abs(d) < 0.05 * abs(base)):
                     continue
                 out.append((it["nm"], a, b, p, c, r))
+    out = [x for x in out if not re.search(r"현금", x[0])]      # v2: 현금 항목은 AI에 묻지 않는다(표본 11건 중 유효 0 — 현금 증감은 화면의 현금흐름 구성 근거가 더 정확)
     out.sort(key=lambda x: -abs(x[4] - x[3]))
     return out[:MAX_ITEMS]
 
@@ -145,6 +152,44 @@ def _norm(s):
     return re.sub(r"\s+", "", s or "")
 
 
+_UP = re.compile(r"신규|증가|발행|취득|확대|추가|인수|유입|편입|증자|조달|합병")
+_DOWN = re.compile(r"상환|감소|처분|매각|소멸|손상|대손|환입|축소|유출|제외|감자|회수|해지|제거|상각")
+_PAREN_NUM = re.compile(r"\s*\([^()]*\d[^()]*\)")
+
+
+def _nums_ok(reason, ex):
+    """reason의 숫자가 발췌문에 '글자 그대로' 있는지(쉼표 무시, 더 긴 숫자의 일부로 맞는 것은 불인정: 335억 vs 335,529,483). 억·조 단위 금액은 발췌문에 같은 표기가 있어야 한다"""
+    exn = re.sub(r"(?<=\d),(?=\d)", "", ex or "")
+    exs = _norm(exn)
+    for m in re.finditer(r"\d[\d,]*(?:\.\d+)?", reason or ""):
+        n = m.group(0).replace(",", "")
+        tail = _norm((reason or "")[m.end():])[:2]
+        if tail[:1] in ("억", "조") or tail[:2] in ("천억", "백억", "십억", "천만", "백만"):
+            if (n + tail[:1]) not in exs:
+                return False
+            continue
+        if len(re.sub(r"\D", "", n)) < 2:
+            continue                                    # 한 자리 숫자(회차 가지번호 등)는 대조하지 않음
+        if not re.search(r"(?<![\d.])" + re.escape(n) + r"(?!\d)", exn):
+            return False
+    return True
+
+
+def _check(reason, ex, r):
+    """v2 결정적 검증 → (통과한 reason | None, 탈락 사유). ① 숫자 대조(괄호 속 숫자는 떼어 내고 한 번 더) ② 변동 방향과 사유의 방향어"""
+    if not _nums_ok(reason, ex):
+        cut = _PAREN_NUM.sub("", reason).strip()
+        if not cut or cut == reason or not _nums_ok(cut, ex):
+            return None, "숫자 불일치(환산·발췌문에 없는 숫자)"
+        reason = cut
+    up, down = bool(_UP.search(reason)), bool(_DOWN.search(reason))
+    if r > 0 and down and not up:
+        return None, "방향 불일치(증가 항목에 감소 사유)"
+    if r < 0 and up and not down:
+        return None, "방향 불일치(감소 항목에 증가 사유)"
+    return reason, ""
+
+
 def run(con=None, limit=None, codes=None, dry=False):
     import build_site  # noqa — 사이트 빌드와 같은 규칙으로 변동 항목 산출
     con = con or connect()
@@ -173,11 +218,13 @@ def run(con=None, limit=None, codes=None, dry=False):
         fs = "CFS" if "CFS" in ib else "OFS"
         X = ib[fs]
         ch = _changes(X)
-        key = fs + "|" + "|".join(f"{nm}:{X['cols'][b]['label']}" for nm, a, b, *_ in ch)
+        key = VER + "|" + fs + "|" + "|".join(f"{nm}:{X['cols'][b]['label']}" for nm, a, b, *_ in ch)
         if done.get(cc) == key:
             continue                                    # 같은 변동 세트는 다시 묻지 않음(새 보고서가 들어오면 key가 바뀜)
         if not ch:
-            con.execute("INSERT OR REPLACE INTO fn_ai_log VALUES (?,?,?,?,?,?,?,?)", (cc, 0, 0, 0, 0, MODEL, now(), key)); con.commit()
+            prev = con.execute("SELECT tin, tout FROM fn_ai_log WHERE corp_code=? AND model=?", (cc, MODEL)).fetchone()
+            con.execute("DELETE FROM fn_ai WHERE corp_code=? AND fs=?", (cc, fs))      # 예전 판(v1)에서 저장한 사유가 남지 않게
+            con.execute("INSERT OR REPLACE INTO fn_ai_log VALUES (?,?,?,?,?,?,?,?)", (cc, 0, 0, prev[0] if prev else 0, prev[1] if prev else 0, MODEL, now(), key)); con.commit()
             continue
         rows = kpi[fs]
         parts, meta = [], []
@@ -188,7 +235,7 @@ def run(con=None, limit=None, codes=None, dry=False):
             except Exception as e:  # noqa
                 print(f"[fn_ai] {c['corp_name']} 주석 실패 {rc} {str(e)[:60]}", flush=True); secs = []
             ex = _excerpt(secs, nm, fs)
-            meta.append((nm, X["cols"][b]["label"], rc, ex))
+            meta.append((nm, X["cols"][b]["label"], rc, ex, r))
             parts.append(f"[항목 {i}] {nm}: {X['cols'][a]['label']} {p/1e8:,.0f}억 → {X['cols'][b]['label']} {cv/1e8:,.0f}억 ({'+' if r > 0 else '−'}{abs(r)*100:.0f}%)\n--- 주석 발췌 ---\n{ex or '(관련 절 없음)'}\n")
         if dry:
             print(f"[fn_ai] {c['corp_name']} {fs} 항목 {len(ch)}: " + " · ".join(f"{m[0]}@{m[1]}({len(m[3])}자)" for m in meta), flush=True)
@@ -218,7 +265,7 @@ def run(con=None, limit=None, codes=None, dry=False):
                 continue
             if i < 0 or i >= len(meta):
                 continue
-            nm, label, rc, ex = meta[i]
+            nm, label, rc, ex, r = meta[i]
             if not o.get("reason") or not o.get("quote"):
                 if verbose:
                     print(f"[fn_ai]    – {nm}@{label}: 사유 없음" + ("" if ex else " (관련 절 없음)"), flush=True)
@@ -228,11 +275,17 @@ def run(con=None, limit=None, codes=None, dry=False):
                 if verbose:
                     print(f"[fn_ai]    ✗ {nm}@{label}: 인용 불일치로 버림 — {str(o['reason'])[:50]} / “{str(o['quote'])[:70]}”", flush=True)
                 continue
+            reason, why_not = _check(str(o["reason"]), ex, r)
+            if not reason:
+                if verbose:
+                    print(f"[fn_ai]    ✗ {nm}@{label}: {why_not} — {str(o['reason'])[:60]} / “{str(o['quote'])[:60]}”", flush=True)
+                continue
             if verbose:
-                print(f"[fn_ai]    ✓ {nm}@{label}: {str(o['reason'])[:80]} / “{str(o['quote'])[:110]}”", flush=True)
-            con.execute("INSERT OR REPLACE INTO fn_ai VALUES (?,?,?,?,?,?,?,?,?)", (cc, fs, nm, label, str(o["reason"])[:80], str(o["quote"])[:200], rc, MODEL, now()))
+                print(f"[fn_ai]    ✓ {nm}@{label}({'+' if r > 0 else '−'}{abs(r) * 100:.0f}%): {reason[:80]} / “{str(o['quote'])[:110]}”", flush=True)
+            con.execute("INSERT OR REPLACE INTO fn_ai VALUES (?,?,?,?,?,?,?,?,?)", (cc, fs, nm, label, reason[:80], str(o["quote"])[:200], rc, MODEL + "|" + VER, now()))
             found += 1
-        con.execute("INSERT OR REPLACE INTO fn_ai_log VALUES (?,?,?,?,?,?,?,?)", (cc, len(ch), found, tin, tout, MODEL, now(), key))
+        prev = con.execute("SELECT tin, tout FROM fn_ai_log WHERE corp_code=? AND model=?", (cc, MODEL)).fetchone()   # 다시 묻는 회사: 앞서 쓴 토큰도 누적(예산 집계가 줄어들지 않게)
+        con.execute("INSERT OR REPLACE INTO fn_ai_log VALUES (?,?,?,?,?,?,?,?)", (cc, len(ch), found, tin + (prev[0] if prev else 0), tout + (prev[1] if prev else 0), MODEL, now(), key))
         con.commit()
         n_co += 1; n_items += len(ch); n_found += found
         if n_co % 50 == 0:

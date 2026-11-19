@@ -12,6 +12,8 @@
   ⑤ 발행회사별 표 여러 개 → 별도 = 자기 회사 표, 연결 = 합계  (SK텔레콤·SK브로드밴드)
   ⑥ 그 밖(기준 없는 표 여러 개인데 금액이 다름) → 저장하지 않음
   0('-')도 저장하되 화면에는 '공시 0'으로만 표시(HMM 2025: 기중 전환으로 기말 잔액 없음).
+단위 대조: DART 정형 API(newCaplScritsNrdmpBlce)는 보고서 첫 표의 합계를 원 단위로 준다 → 파서의 첫 표 금액과 다르면 그 보고서는 저장하지 않는다
+  (API만 쓰지 않는 이유: 표가 여러 개인 보고서에서 첫 표만 준다 — 롯데쇼핑은 별도 '-'만 나오고 연결 3,500억이 빠짐).
   python run.py rawdump --type 신종잔액점검 --codes ...   # 파싱 결과만 출력
   python run.py rawdump --type 신종잔액                   # 대상 회사 수집 → hybrid_out 저장 → KPI 재계산
 """
@@ -46,24 +48,59 @@ def _num(cell):
 
 
 def _table_total(tbl_xml):
-    """잔여만기 표 → '합계' 행의 마지막 칸(표 단위 그대로). 합계 행이 없으면 공모+사모. 못 읽으면 None"""
+    """잔여만기 표 → (합계 금액(표 단위 그대로) | None, 메모). '합계' 행의 '합 계' 칸을 쓰되,
+    그 칸이 비었는데 만기 구간 칸에 금액이 있으면 구간 합을 쓴다(롯데지주 2025 사업보고서 별도: 20~30년 칸 625,000 · 합 계 칸 '-').
+    합 계 칸과 구간 합이 서로 다르면 읽지 않는다(None, 메모)."""
     rows = [[_txt(c) for c in CELL_RE.findall(tr)] for tr in TR_RE.findall(tbl_xml)]
     rows = [r for r in rows if r]
-    data = [r for r in rows if not any("잔여만기" in c for c in r)]
-    def last_of(label):
+    hdr = next((r for r in rows if any("잔여만기" in c for c in r)), None)
+    has_tot = bool(hdr) and hdr[-1].replace(" ", "") in ("합계", "계", "총계")
+    data = [r for r in rows if r is not hdr]
+
+    def vals_of(label):
         for r in data:
-            if any(c.replace(" ", "") == label for c in r[:-1]):
-                return _num(r[-1])
+            for k, c in enumerate(r[:-1]):
+                if c.replace(" ", "") == label:
+                    return [_num(x) for x in r[k + 1:]]
         return None
-    tot = last_of("합계")
-    if tot is None:
-        a, b = last_of("공모"), last_of("사모")
-        tot = (a or 0) + (b or 0) if (a is not None or b is not None) else None
-    return tot
+
+    def total(vals):
+        if vals is None or not [v for v in vals if v is not None]:
+            return None, None
+        if not has_tot:
+            return sum(v for v in vals if v is not None), None
+        last, buckets = vals[-1], sum(v for v in vals[:-1] if v is not None)
+        if not last:
+            return buckets, ("합계 칸 공란 → 만기 구간 합" if buckets else None)
+        if not buckets or abs(buckets - last) < 0.5:
+            return last, None
+        return None, f"합계 칸 {last:,.0f} ≠ 만기 구간 합 {buckets:,.0f}"
+
+    tot, note = total(vals_of("합계"))
+    if tot is None and note is None:
+        (a, an), (b, bn) = total(vals_of("공모")), total(vals_of("사모"))
+        if an and a is None or bn and b is None:
+            return None, an or bn
+        if a is not None or b is not None:
+            tot, note = (a or 0) + (b or 0), an or bn
+    return tot, note
+
+
+_PIECE_RE = re.compile(r"</?(?:P|TITLE|PGBRK|BR|DIV|TD|TH|TE|TU|TR|LI|SPAN)\b[^>]*>", re.I)
+_SHORT = 80          # 이보다 긴 문단·표는 설명문·발행조건 표 → 라벨·단위 근거로 쓰지 않는다
+
+
+def _clean_label(t):
+    lab = re.sub(r"\(?\s*기준일\s*[:：]?[^)]*\)?|\(?\s*단위\s*[:：]?\s*[천백십억만]*원[^)]*\)?|[()]", " ", t)
+    lab = re.sub(r"20\d{2}\s*[.년]\s*\d{1,2}\s*[.월]\s*\d{1,2}\s*일?", " ", lab)
+    return re.sub(r"\s+", " ", lab).strip()
 
 
 def parse(xml):
-    """보고서 원문 → [{label, amt(원), unit, dt}] — 「신종자본증권 미상환 잔액」 제목 뒤 잔여만기 표마다 1건"""
+    """보고서 원문 → [{label, amt(원)|None, unit, dt, ctx, note}] — 「신종자본증권 미상환 잔액」 제목 뒤 잔여만기 표마다 1건.
+    라벨·단위는 표 바로 앞의 '짧은' 문단·작은 표에서만 읽는다. 사이에 긴 설명문·발행조건 표가 끼면 그 앞의 라벨·단위는 버린다
+    (2026-11-19 표본 점검: SK이노베이션 — 발행조건 표의 '연결 기준 부채비율…' 문구가 라벨로 들어가 종속회사 표를 '연결'로 오판, 발행조건 표의 '(단위: 원)'이 다음 표 단위로 넘어감).
+    단위를 못 읽었거나 합계가 맞지 않는 표는 amt=None(→ 그 보고서는 저장하지 않음)."""
     out = []
     pos = 0
     while True:
@@ -75,58 +112,62 @@ def parse(xml):
         seg = xml[m.end():end]
         pos = max(end, m.end() + 1)
         cur = 0
-        unit, label_parts, dt = None, [], None
-        ctx = _ctx_basis(xml, m.start())
+        st = {"unit": None, "dt": None, "heads": []}
+
+        def absorb(t):
+            if len(t) > _SHORT:                              # 긴 설명문·발행조건 표 → 앞의 라벨·단위 무효
+                st["unit"], st["heads"] = None, []
+                return
+            u = UNIT_RE.findall(t)
+            if u:
+                st["unit"] = u[-1]
+            d = re.search(r"(20\d{2})\s*[.년]\s*(\d{1,2})\s*[.월]\s*(\d{1,2})", t)
+            if d:
+                st["dt"] = f"{d.group(1)}{int(d.group(2)):02d}{int(d.group(3)):02d}"
+            lab = _clean_label(t)
+            if lab:
+                st["heads"].append(lab)
+
         for tm in TABLE_RE.finditer(seg):
-            between = _txt(seg[cur:tm.start()])
-            cur = tm.end()
             body = tm.group(1)
             flat = _txt(body)
-            if "잔여만기" not in flat:                      # 기준일·단위만 담은 작은 표 또는 그 밖의 표
-                between = (between + " " + flat).strip()
-                tm_is_data = False
-            else:
-                tm_is_data = True
-            u = UNIT_RE.findall(between)
-            if u:
-                unit = u[-1]
-            d = re.search(r"(20\d{2})\s*[.년]\s*(\d{1,2})\s*[.월]\s*(\d{1,2})", between)
-            if d:
-                dt = f"{d.group(1)}{int(d.group(2)):02d}{int(d.group(3)):02d}"
-            lab = re.sub(r"\(?\s*기준일\s*[:：]?[^)]*\)?|\(?\s*단위\s*[:：]?\s*[천백십억만]*원[^)]*\)?|[()]", " ", between)
-            lab = re.sub(r"20\d{2}\s*[.년]\s*\d{1,2}\s*[.월]\s*\d{1,2}\s*일?", " ", lab)
-            lab = re.sub(r"\s+", " ", lab).strip()
-            if lab:
-                label_parts.append(lab)
-            if not tm_is_data:
+            for t in (_txt(x) for x in _PIECE_RE.split(seg[cur:tm.start()])):
+                if t:
+                    absorb(t)
+            cur = tm.end()
+            if "잔여만기" not in flat:                       # 기준일·단위만 담은 작은 표(짧음) 또는 발행조건 표(김)
+                absorb(flat)
                 continue
+            unit = st["unit"]
             if unit is None:
                 iu = UNIT_RE.findall(flat)
                 unit = iu[-1] if iu else None
-            tot = _table_total(body)
-            label = " ".join(label_parts)[-60:]
+            tot, note = _table_total(body)
+            rec = {"label": " ".join(st["heads"])[-60:], "amt": None, "unit": unit, "dt": st["dt"], "ctx": _ctx_basis(xml, m.end() + tm.start()), "note": note}
             if tot is not None and unit in UNIT:
-                out.append({"label": label, "amt": tot * UNIT[unit], "unit": unit, "dt": dt, "ctx": ctx})
-            elif tot is not None:
-                out.append({"label": label, "amt": None, "unit": unit, "dt": dt, "raw": tot, "ctx": ctx})   # 단위를 못 읽음 → 저장하지 않음(진단용)
-            label_parts = []
+                rec["amt"] = tot * UNIT[unit]
+            else:
+                rec["note"] = note or ("단위 문구 없음" if tot is not None else "합계 행 없음")
+            out.append(rec)
+            st["unit"], st["heads"] = None, []               # 단위·라벨은 다음 표로 넘기지 않는다
     return out
 
 
-_HEAD_RE = re.compile(r"(?:[가-하]\.|\(\d+\)|\d+\)|\d+\.|[①-⑳]|[□■▣◆▶○●]|\[|<)\s*(연결|별도|개별)\s*(?:재무제표\s*)?기준")
+_HEAD_RE = re.compile(r"(?:[가-하]\.|\(\d+\)|\d+\)|\d+\.|[①-⑳]|[□■▣◆▶○●]|\[|<|【)\s*(연결|별도|개별)\s*(?:재무제표\s*)?기준|(?:<|【)\s*(재무제표)\s*기준\s*(?:>|】)")
+_ANGLE_RE = re.compile(r"<\s*((?:연결\s*)?재무제표\s*기준)\s*>")      # 원문에 태그처럼 적힌 '<연결재무제표 기준>' — 태그 제거에 쓸려 나가지 않게 먼저 바꿔 둔다
 _SEC_RE = re.compile(r"증권의\s*발행을\s*통한\s*자금조달|채무증권의\s*발행\s*등과\s*관련된\s*사항")
 
 
 def _ctx_basis(xml, at):
-    """제목 위치(at) 앞에서 가장 가까운 '가. 별도기준 / (2) 연결기준' 머리말 → 'C'|'O'|None.
+    """표 위치(at) 앞에서 가장 가까운 '가. 별도기준 / (2) 연결기준 / <연결재무제표 기준>' 머리말 → 'C'|'O'|None.
     롯데쇼핑·롯데지주처럼 별도 표 묶음과 연결 표 묶음을 머리말로만 나누는 보고서용. 본문 속 '(연결 기준)'·'※ 별도 기준 발행 한도' 같은 언급은 번호·도형 기호가 앞에 없으므로 잡지 않는다."""
     lo = max(0, at - 900_000)
     head = xml[lo:at]
     ms = list(_SEC_RE.finditer(head))
     if ms:
         head = head[ms[0].start():] if len(ms) == 1 else head[ms[-2].start():] if at - (lo + ms[-1].start()) < 400 else head[ms[-1].start():]
-    hs = _HEAD_RE.findall(_txt(head))
-    return None if not hs else ("C" if hs[-1] == "연결" else "O")
+    hs = _HEAD_RE.findall(_txt(_ANGLE_RE.sub(r"【\1】", head)))
+    return None if not hs else ("C" if hs[-1][0] == "연결" else "O")          # '<재무제표 기준>'(연결 표기 없음) = 별도(대한항공: <재무제표 기준> / <연결재무제표 기준> 한 쌍)
 
 
 _GENERIC = re.compile(r"신종\s*자본\s*증권|미상환|잔액|기준일?|개별|별도|연결|동일|재무제표|주식회사|㈜|\(주\)|당사|지배회사|[\s\[\]()<>·.,:\-\d]|[가-하]\.")
@@ -156,8 +197,9 @@ def classify(tables, corp_name):
     별도에는 KPI 단계에서 '연결과 별도의 분배금이 같을 때만'(= 같은 증권일 때만) 쓴다."""
     t = [x for x in tables if x.get("amt") is not None]
     res = {"CFS": None, "OFS": None, "ANY": None, "OWN": None}
-    if not t:
-        return {**res, "how": "표 없음" if not tables else "단위 미확인"}
+    if not t or len(t) < len(tables):                          # 표 하나라도 단위·합계를 못 읽으면 그 보고서 전체를 저장하지 않는다(일부만 더하면 과소 — SK이노베이션 2026 1분기)
+        bad = [x for x in tables if x.get("amt") is None]
+        return {**res, "how": "표 없음" if not tables else "표 읽기 실패(" + " / ".join((x.get("note") or "?")[:30] for x in bad[:3]) + ")"}
     own = re.sub(r"주식회사|㈜|\(주\)|\s", "", corp_name or "")
     def is_own(x):
         i = _issuer(x["label"])
@@ -184,7 +226,27 @@ def classify(tables, corp_name):
     mine = [x for x in t if is_own(x)]
     if len(mine) == 1 and all(is_own(x) or is_other(x) for x in t):
         return {**res, "CFS": sum(x["amt"] for x in t), "OFS": mine[0]["amt"], "how": f"발행회사별 표 {len(t)}개(별도=자기 회사, 연결=합계)"}
+    if not mine and all(is_other(x) for x in t):               # 종속회사 표만 여러 개(SK이노베이션 2024 반기: SK인천석유화학·SK온) → 연결만
+        return {**res, "CFS": sum(x["amt"] for x in t), "how": f"종속회사 표 {len(t)}개 → 연결만(합계)"}
     return {**res, "how": f"분류 불가(표 {len(t)}개, 라벨: " + " / ".join(x["label"][:14] or "-" for x in t) + ")"}
+
+
+def _api_total(cc, y, rc):
+    """DART 정형 API(newCaplScritsNrdmpBlce: 신종자본증권 미상환 잔액) — 보고서 **첫 표**의 합계를 DART가 원 단위로 정규화해 준다(표가 여러 개여도 첫 표만: 롯데쇼핑 = 별도 '-').
+    파서가 읽은 단위가 맞는지 대조하는 용도. 실패·자료 없음은 None"""
+    try:
+        from common import dart_get
+        js = dart_get("newCaplScritsNrdmpBlce", corp_code=cc[1:] if cc.startswith("U") else cc, bsns_year=str(y), reprt_code=rc)
+    except Exception:  # noqa
+        return None
+    for r in (js or {}).get("list", []) or []:
+        if (r.get("remndr_exprtn2") or "").replace(" ", "") == "합계":
+            sm = _num(r.get("sm"))
+            if sm:
+                return sm
+            bk = [_num(v) for k, v in r.items() if k.startswith("yy")]
+            return sum(v for v in bk if v is not None) if any(v is not None for v in bk) else sm   # 합계 칸 공란(롯데지주) → 만기 구간 합
+    return None
 
 
 def _ensure(con):
@@ -216,9 +278,13 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False):
     done = {r[0] for r in con.execute("SELECT rcept_no FROM hybrid_out_log")}
     todo = [t for t in tg if dry or t[4] not in done]
     print(f"[신종잔액] 대상 {len({t[0] for t in tg})}사 · {len(tg)}기간 · 이번 실행 {min(len(todo), limit or len(todo))}기간" + (" (점검만)" if dry else ""), flush=True)
-    n_ok = n_set = 0
+    n_ok = n_set = n_bad = 0
     changed = set()
+    import common
     for cc, name, y, rc, rcept in todo[: (limit or len(todo))]:
+        if common.QUOTA_HIT:
+            print("[신종잔액] DART 한도 도달 — 중단(다음 실행에서 이어서)", flush=True)
+            break
         try:
             tables = parse(fetch_document_xml(rcept))
         except Exception as e:  # noqa
@@ -226,12 +292,21 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False):
             continue
         res = classify(tables, name)
         n_ok += 1
-        if dry or len(todo) <= 60:
-            print(f"[신종잔액] {name} {y} {rc}: 연결 {_e(res['CFS'])} · 별도 {_e(res['OFS'])} · 기준없음 {_e(res['ANY'])} · 자기회사 {_e(res['OWN'])} · {res['how']} · 표 "
-                  + " / ".join(f"[{t['label'][:18] or '-'}|{t.get('ctx') or '-'}] {_e(t.get('amt'))}({t.get('unit')})" for t in tables), flush=True)
+        api = _api_total(cc, y, rc) if tables else None        # 단위 대조: DART가 원 단위로 정규화한 첫 표 합계 vs 파서가 읽은 첫 표
+        first = tables[0].get("amt") if tables else None
+        chk = "미대조" if api is None or first is None else ("일치" if abs(api - first) < 1 else "불일치")
+        n_bad += chk == "불일치"
+        if dry or len(todo) <= 60 or chk == "불일치":
+            print(f"[신종잔액] {name} {y} {rc}: 연결 {_e(res['CFS'])} · 별도 {_e(res['OFS'])} · 기준없음 {_e(res['ANY'])} · 자기회사 {_e(res['OWN'])} · {res['how']} · API {_e(api)} {chk} · 표 "
+                  + " / ".join(f"[{t['label'][:18] or '-'}|{t.get('ctx') or '-'}] {_e(t.get('amt'))}({t.get('unit')}{'·' + t['note'] if t.get('note') else ''})" for t in tables), flush=True)
         if dry:
             continue
         con.execute("DELETE FROM hybrid_out WHERE corp_code=? AND bsns_year=? AND reprt_code=?", (cc, y, rc))
+        if chk == "불일치":                                    # 단위·표 인식이 DART 값과 다르면 저장하지 않는다(화면은 '있음' 유지) — 기록만 남겨 매일 다시 받지 않게
+            con.execute("INSERT OR REPLACE INTO hybrid_out_log VALUES (?,?,?,?)", (rcept, len(tables), f"API 불일치(API {_e(api)} vs 첫 표 {_e(first)}) · " + res["how"], now()))
+            con.commit()
+            changed.add((cc, y, rc))
+            continue
         for fs in ("CFS", "OFS", "ANY", "OWN"):
             if res[fs] is not None:                       # 0도 저장(= 표상 기말 잔액 없음 — 화면에는 '공시 0'으로만 표시, HMM 2025: 기중 전환)
                 con.execute("INSERT OR REPLACE INTO hybrid_out VALUES (?,?,?,?,?,?,?,?)", (cc, y, rc, fs, res[fs], res["how"], rcept, now()))
@@ -247,7 +322,7 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False):
             except Exception as e:  # noqa
                 print(f"[신종잔액] KPI 재계산 실패 {cc} {y} {rc} {str(e)[:60]}", flush=True)
         con.commit()
-    print(f"[신종잔액] 원문 {n_ok}건 · 저장 {n_set}건(연결/별도) · KPI 재계산 {len(changed)}기간", flush=True)
+    print(f"[신종잔액] 원문 {n_ok}건 · 저장 {n_set}건(연결/별도) · DART 정형 API와 불일치(저장 안 함) {n_bad}건 · KPI 재계산 {len(changed)}기간", flush=True)
     return n_set
 
 
