@@ -897,6 +897,49 @@ def main():
     elif a.job == "rawdump" and a.type == "거래소공시재스캔":   # 2026-11-19 상장유지 위험 뱃지: 최근 1년 거래소공시(pblntf_ty=I) 이벤트 보강
         import delta as _dl
         _dl.rescan_krx(days=a.limit or 365)
+    elif a.job == "rawdump" and a.type == "신종점검":   # 2026-11-19 사용자 '누락 없도록 꼼꼼하게': 신종자본증권 관련 계정명 전수(재무상태표 잔액·현금흐름표 분배금·자본변동표) vs 현재 규칙이 잡는 것
+        import financials as _fi, collections as _co, re as _re2
+        broad = _re2.compile(r"신종|하이브리드|영구채|영구사채|영구전환|영구교환|영구후순위|조건부자본|상각형|hybrid|perpetual", _re2.I)
+        nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        cnt, ex, hit = _co.Counter(), {}, {}
+        for r in con.execute("SELECT corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_nm, thstrm_amount FROM fin_raw WHERE thstrm_amount IS NOT NULL AND thstrm_amount != 0"):
+            an = _fi._norm_nm(r["account_nm"])
+            if not broad.search(an) and not broad.search(r["account_id"] or ""):
+                continue
+            k = (r["sj_div"], an)
+            cnt[k] += 1
+            ex.setdefault(k, set()).add(r["corp_code"])
+            if r["sj_div"] == "CF":
+                hit[k] = bool(_fi._HYBRID_RE.search(an) and not _fi._HYBRID_EX.search(an))
+            elif r["sj_div"] == "BS":
+                hit[k] = bool(_fi._HYBRID_EQ_RE.search(an) and not _fi._HYBRID_EQ_EX.search(an))
+        for sj in ("BS", "CF", "SCE", "IS", "CIS"):
+            ks = sorted([k for k in cnt if k[0] == sj], key=lambda k: -len(ex[k]))
+            print(f"[신종점검] === {sj}: 계정명 {len(ks)}종 ===", flush=True)
+            for k in ks[:150]:
+                cs = sorted(ex[k]); mark = {True: "O", False: "X"}.get(hit.get(k), "-")
+                print(f"[신종점검] {sj} [{mark}] {k[1]} · {len(cs)}사 {cnt[k]}행 · 예: {', '.join(nm.get(c, c) for c in cs[:4])}", flush=True)
+        # 잔액은 잡혔는데 분배금이 안 잡힌 회사(최근 사업보고서) — 현금흐름표의 배당·분배·이자 줄과 자본변동표 신종 줄을 그대로 출력
+        miss = 0
+        for cc, y in con.execute("SELECT corp_code, MAX(bsns_year) FROM fin_raw WHERE reprt_code='11011' AND sj_div='BS' GROUP BY corp_code").fetchall():
+            for fs in ("CFS", "OFS"):
+                rows = [dict(r) for r in con.execute("SELECT * FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=?", (cc, y, fs))]
+                if not rows:
+                    continue
+                k = {}
+                _fi._int_fallback(rows, k)
+                anyh = [r for r in rows if broad.search(_fi._norm_nm(r["account_nm"])) and r.get("thstrm_amount")]
+                if not anyh or (k.get("hybrid_eq") and k.get("hybrid_dist")):
+                    continue
+                miss += 1
+                if miss > 120:
+                    continue
+                print(f"[신종점검] 불완전 {nm.get(cc, cc)} {y} {fs}: 잔액 {k.get('hybrid_eq')} · 분배금 {k.get('hybrid_dist')}", flush=True)
+                for r in rows:
+                    an = _fi._norm_nm(r["account_nm"])
+                    if r.get("thstrm_amount") and (broad.search(an) or (r["sj_div"] == "CF" and _re2.search(r"배당|분배", an))):
+                        print(f"[신종점검]    {r['sj_div']} {r['account_nm']} = {r['thstrm_amount']:,.0f} ({r.get('account_id') or ''})", flush=True)
+        print(f"[신종점검] 신종 흔적은 있는데 잔액·분배금 중 하나라도 못 잡은 (회사×기준) {miss}건", flush=True)
     elif a.job == "rawdump" and a.type == "시세요약":   # 2026-11-19: 시세 재수집 없이 price_summary만 다시 계산(52주 고저 기준 변경 등 정의 변경 시)
         import prices as _pr
         n = 0
