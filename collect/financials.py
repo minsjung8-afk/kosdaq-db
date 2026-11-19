@@ -432,6 +432,22 @@ def _int_fallback(rows, k):
     k["hybrid_note"] = " · ".join(note) or None
 
 
+def _hybrid_disclosed(con, cc, y, rc, fs, k):
+    """재무상태표에 신종자본증권 줄이 없을 때(풀무원식품·SK텔레콤 등 과반) 정기보고서 「신종자본증권 미상환 잔액」 표(hybrid_out, 액면)로 잔액을 채운다.
+    재무상태표 금액이 있으면 그대로 두고, 공시 금액이 0이면 채우지 않는다(hybrid_out.py 설명 참조). hybrid_note에 '잔액 공시'를 남겨 화면에서 출처를 표시."""
+    if k.get("hybrid_eq") is not None or "총차입금에 포함" in (k.get("hybrid_note") or ""):
+        return
+    try:
+        r = con.execute("SELECT amt FROM hybrid_out WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (cc, str(y), rc, fs)).fetchone()
+    except Exception:  # noqa — 표가 아직 없음
+        return
+    if not r or not r[0] or r[0] <= 0:
+        return
+    k["hybrid_eq"] = r[0]
+    keep = ["분배금 미분리"] if (k.get("hybrid_dist") is None and "분배금" in (k.get("hybrid_note") or "")) else []
+    k["hybrid_note"] = " · ".join(["잔액 공시"] + keep)
+
+
 def _pick(rows, ids, names, sj=None):
     """rows: fin_raw dict 목록. account_id 우선, 없으면 계정명 정확/포함 매칭."""
     for r in rows:                            # 행 순서(재무제표에 먼저 나온 줄) 우선 — 2026-11-19 ids 순서 우선으로 바꿨다가 되돌림: 이자비용은 ids를 하나로 줄여 해결했고, 다른 계정(매출·채권·매입채무 등)의 검증된 동작을 바꿀 이유가 없음
@@ -485,6 +501,7 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
                  ("CF",) if key in ("cfo", "dep", "amort", "rou_dep", "cfi", "cff", "capex_ppe", "capex_int", "disp_ppe", "disp_int", "tax_paid", "int_paid") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
         _int_fallback(rows, k)                     # 2026-11-19 이자비용 출처 체인 + 신종자본증권 분배금
+        _hybrid_disclosed(con, corp_code, bsns_year, reprt_code, fs_div, k)
         if k.get("revenue") is None:              # 2026-10-28: 금융업(카드·캐피탈)·일부 비상장은 매출 합계 줄이 없음 → 영업이익+영업비용 또는 영업수익 구성 합
             k["revenue"], k["_rev_src"] = _rev_fallback(rows, k.get("op_income"))
         # 상각비: 계정명 패턴으로 재탐색 (합산 계정 '감가상각비와무형자산상각비' 우선, 없으면 감가+무형+사용권 합)
