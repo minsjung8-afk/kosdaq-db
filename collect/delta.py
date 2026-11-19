@@ -112,24 +112,32 @@ def rescan_krx(days=365):
     메자닌·5%보고는 건드리지 않음 — DART 호출은 목록 페이지 수만큼(1년 ≈ 200~400콜)"""
     con = connect()
     cmap = {r["corp_code"]: r["stock_code"] for r in con.execute("SELECT corp_code, stock_code FROM company")}
-    bgn = (date.today() - timedelta(days=days)).strftime("%Y%m%d"); end = date.today().strftime("%Y%m%d")
-    page, n_evt, n_rows = 1, 0, 0
-    while True:
-        js = dart_get("list", bgn_de=bgn, end_de=end, pblntf_ty="I", page_no=page, page_count=100)
-        rows = js.get("list", [])
-        for r in rows:
-            cc = r.get("corp_code")
-            if cc not in cmap:
-                continue
-            n_rows += 1
-            flag = next((v for k, v in EVENT_FLAGS.items() if k in (r.get("report_nm") or "").replace(" ", "")), None)
-            if flag:
-                con.execute("INSERT OR REPLACE INTO disclosure_event VALUES (?,?,?,?,?)", (cc, r["rcept_no"], r["rcept_dt"], r["report_nm"], flag))
-                n_evt += 1
-        con.commit()
-        if page >= int(js.get("total_page") or 1) or not rows:
-            break
-        page += 1
+    end_d = date.today(); start_d = end_d - timedelta(days=days)
+    n_evt, n_rows, n_pages = 0, 0, 0
+    w_end = end_d
+    while w_end > start_d:                                   # DART list: corp_code 없이 조회하면 검색기간 3개월 제한 → 89일 창으로 나눠 호출
+        w_bgn = max(start_d, w_end - timedelta(days=89))
+        bgn, end = w_bgn.strftime("%Y%m%d"), w_end.strftime("%Y%m%d")
+        page = 1
+        while True:
+            js = dart_get("list", bgn_de=bgn, end_de=end, pblntf_ty="I", page_no=page, page_count=100)
+            rows = js.get("list", [])
+            n_pages += 1
+            for r in rows:
+                cc = r.get("corp_code")
+                if cc not in cmap:
+                    continue
+                n_rows += 1
+                flag = next((v for k, v in EVENT_FLAGS.items() if k in (r.get("report_nm") or "").replace(" ", "")), None)
+                if flag:
+                    con.execute("INSERT OR REPLACE INTO disclosure_event VALUES (?,?,?,?,?)", (cc, r["rcept_no"], r["rcept_dt"], r["report_nm"], flag))
+                    n_evt += 1
+            con.commit()
+            if page >= int(js.get("total_page") or 1) or not rows:
+                break
+            page += 1
+        w_end = w_bgn - timedelta(days=1)
+    bgn, end, page = start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d"), n_pages
     print(f"[delta] 거래소공시 재스캔 {bgn}~{end}: {page}p · 대상회사 {n_rows:,}건 · 이벤트 {n_evt:,}건", flush=True)
     return n_evt
 
