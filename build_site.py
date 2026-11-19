@@ -1105,7 +1105,8 @@ def _lr_compact(lr):
     if o.get("mgmt"): out["m"] = 1
     if o.get("review") and o["review"].get("status") != "종료": out["r"] = o["review"]["status"]
     if o.get("caution"): out["c"] = 1
-    if lr.get("own"): out["w"] = lr["own"]
+    if o.get("mgmt_warn") and not o.get("mgmt"): out["u"] = o["mgmt_warn"].get("dt") or 1     # 거래소 '관리종목 지정 우려' 공시(최근 150일)
+    if lr.get("own") == "위험": out["w"] = "위험"                                              # 2026-11-19 실측 710사 → 목록 뱃지는 자체 판정 '위험'만('주의' 417사는 회사 화면에서만)
     return out or None
 
 
@@ -1118,6 +1119,8 @@ def _listing_risk(c, kpi, prices, ps, audit, review, events):
     R = _mgmt_rules().get(mkt)
     today = date.today().isoformat()
     st = c.get("sect_tp") or ""
+    if "SPAC" in st.upper() or re.search(r"스팩|기업인수목적", c.get("corp_name") or ""):
+        R = None                                  # 2026-11-19 실측: 스팩 72사가 전부 시총·매출 '위험' — 스팩은 매출·시총 요건 적용 대상이 아님(공식 상태만 표시)
     off = {"mgmt": "관리종목" in st, "caution": "환기" in st, "review": None}
     cut = (date.today() - timedelta(days=400)).strftime("%Y%m%d")
     rv = sorted([e for e in events or [] if e.get("flag") == "실질심사" and (e.get("rcept_dt") or "") >= cut], key=lambda e: e.get("rcept_dt") or "")
@@ -1134,7 +1137,8 @@ def _listing_risk(c, kpi, prices, ps, audit, review, events):
         fin = [e for e in mg if re.search(r"관리종목(지정|해제)", _mt(e)) and not re.search(r"우려|예고|미진행|내부결산|유의|사유발생|안내\(.*가능", _mt(e))]
         if fin and "해제" not in _mt(fin[-1]):
             off["mgmt"] = True
-    warn = [e for e in mg if re.search(r"우려|예고|내부결산|사유발생", _mt(e)) and "해제" not in _mt(e)]
+    wcut = (date.today() - timedelta(days=150)).strftime("%Y%m%d")   # 우려 예고 → 90일 안에 지정 여부가 갈리므로 150일 지난 예고는 뱃지에서 제외
+    warn = [e for e in mg if re.search(r"우려|예고|내부결산|사유발생", _mt(e)) and "해제" not in _mt(e) and (e.get("rcept_dt") or "") >= wcut]
     off["mgmt_warn"] = ({"dt": warn[-1].get("rcept_dt"), "title": (warn[-1].get("report_nm") or "").strip(), "rcept_no": warn[-1].get("rcept_no")} if warn and not off["mgmt"] else None)   # 거래소의 '지정 우려' 공시(공식 지정은 아님)
     items, trend = [], []
     if not R:
