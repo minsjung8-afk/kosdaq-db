@@ -139,10 +139,11 @@ def _sec_size(blocks):
     return sum(len(b.get("p", "")) + sum(len(" ".join(r)) for r in b.get("tbl", {}).get("rows", [])) for b in blocks)
 
 
-def extract_notes_v2(xml_text):
+def extract_notes_v2(xml_text, keys=None, max_sec=None):
     """정기보고서 원문 → [{t, fs, blocks}].
     ① '연결재무제표 주석'/'재무제표 주석' 절 본문을 항목(N. 제목)으로 분할해 심사·상각비 관련 항목만(fs: CFS/OFS)
     ② 그 밖의 제목 있는 절(재무에 관한 사항의 차입금·우발부채 등)은 종전처럼 SECTION 단위(fs: 상위 제목으로 추정)"""
+    K = tuple(keys) if keys else NOTE_KEYS_V2      # 2026-11-19 fn_ai(각주 사유): 현금·매출채권·재고·관계기업 등 더 넓은 절이 필요할 때 keys로 지정(기본 동작은 그대로)
     secs = []
     bounds = []
     for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml_text, flags=re.S | re.I):
@@ -176,10 +177,10 @@ def extract_notes_v2(xml_text):
                 fs = "CFS" if "연결" in tt else "OFS"
                 found_notes.add(fs)
                 for s in _split_notes(body, fs):
-                    if any(k in s["t"].replace(" ", "") for k in NOTE_KEYS_V2) and _sec_size(s["blocks"]) >= 60:
+                    if any(k in s["t"].replace(" ", "") for k in K) and _sec_size(s["blocks"]) >= 60:
                         secs.append(s)
                 continue
-            if any(k in tt for k in NOTE_KEYS_V2):
+            if any(k in tt for k in K):
                 blocks = _blocks(body)
                 if _sec_size(blocks) >= 60:
                     others.append({"t": title, "fs": None, "blocks": blocks})          # 재무에 관한 사항 등 — 연결·별도 구분 없음
@@ -203,10 +204,10 @@ def extract_notes_v2(xml_text):
                 continue
             found_notes.add(fs)
             for s in _split_notes(body, fs):
-                if any(k in s["t"].replace(" ", "") for k in NOTE_KEYS_V2) and _sec_size(s["blocks"]) >= 60:
+                if any(k in s["t"].replace(" ", "") for k in K) and _sec_size(s["blocks"]) >= 60:
                     secs.append(s)
     secs += others
-    return secs[:MAX_SEC]
+    return secs[:(max_sec or MAX_SEC)]
 
 
 def to_text(secs):

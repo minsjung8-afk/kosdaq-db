@@ -22,8 +22,11 @@ import notes_v2  # noqa: E402
 MODEL = os.environ.get("FN_AI_MODEL", "claude-haiku-4-5")
 PRICES = {"claude-haiku-4-5": (1.0, 5.0), "claude-sonnet-4-5": (3.0, 15.0)}
 BUDGET = float(os.environ.get("FN_AI_BUDGET", "35"))
-MAX_ITEMS = 6
-EXCERPT = 1500
+MAX_ITEMS = 4            # 회사당 변동 항목 수(금액 큰 순) — 예산 35달러 안에서 3,500사를 돌리려면 4건 × 2절 × 1,200자 ≈ 입력 8천 토큰
+EXCERPT = 1200
+# 주석 절 수집 키(2026-11-19): 기본 수집(notes_v2.NOTE_KEYS_V2 = 차입·우발·리스·유무형 등)에는 현금·매출채권·재고·관계기업 절이 없어 사유를 못 찾는다 → 각주용으로 넓힌다
+WIDE_KEYS = tuple(notes_v2.NOTE_KEYS_V2) + ("현금", "매출채권", "기타채권", "수취채권", "재고", "관계기업", "종속기업", "공동기업", "금융자산", "금융상품", "공정가치", "법인세",
+                                            "충당", "퇴직", "확정급여", "종업원급여", "계약자산", "계약부채", "영업권", "선수", "기타자산", "기타부채", "기타유동", "기타비유동", "자본금", "미지급", "예수")
 
 # 계정명 → 관련 주석 절 제목 패턴
 _SEC = [
@@ -94,13 +97,8 @@ def _changes(X):
 
 
 def _secs_for_report(con, rcept_no, cc):
-    """보고서 주석 절(v2). notes_latest면 저장본, 아니면 사업보고서 원문 1콜(fn_ai_src 캐시)"""
-    r = con.execute("SELECT notes_j FROM notes_latest WHERE corp_code=? AND rcept_no=?", (cc, rcept_no)).fetchone()
-    if r and r[0]:
-        try:
-            return json.loads(ztext(r[0]) or "[]")
-        except Exception:  # noqa
-            pass
+    """보고서 주석 절(v2, WIDE_KEYS). 보고서 원문 1콜 → fn_ai_src에 캐시(같은 보고서는 다시 받지 않음).
+    notes_latest 저장본은 좁은 키로 걸러져 있어 쓰지 않는다."""
     r = con.execute("SELECT secs_z FROM fn_ai_src WHERE rcept_no=?", (rcept_no,)).fetchone()
     if r and r[0]:
         try:
@@ -108,23 +106,31 @@ def _secs_for_report(con, rcept_no, cc):
         except Exception:  # noqa
             pass
     xml = fetch_document_xml(rcept_no)
-    secs = notes_v2.extract_notes_v2(xml)
+    secs = notes_v2.extract_notes_v2(xml, keys=WIDE_KEYS, max_sec=220)
     con.execute("INSERT OR REPLACE INTO fn_ai_src VALUES (?,?,?)", (rcept_no, common.zpack(json.dumps(secs, ensure_ascii=False)), now()))
     con.commit()
     return secs
 
 
 def _excerpt(secs, nm, fs):
+    """계정 관련 주석 절 2개까지 발췌. 제목에 계정의 핵심어가 들어간 절을 먼저, 절 안에서는 문단(서술)을 먼저 싣고 남는 분량에 표 행을 싣는다
+    (변동 사유는 대개 문단이나 표의 '취득·처분·차입·상환' 행에 있다 — 표 머리만 잘려 들어가는 것을 줄임)."""
     pat = next((s for k, s in _SEC if re.search(k, nm)), None)
     if not pat:
         return ""
     rx = re.compile(pat)
-    cand = [s for s in secs if rx.search(s["t"].replace(" ", "")) and (s.get("fs") in (fs, None, ""))]
-    if not cand:
-        cand = [s for s in secs if rx.search(s["t"].replace(" ", ""))]
+    core = re.sub(r"^(유동성|비유동|유동|단기|장기|기타)+", "", nm)
+    core = re.sub(r"(및.*|\(.*)$", "", core)[:6]
+    def title(s):
+        return s["t"].replace(" ", "")
+    cand = [s for s in secs if rx.search(title(s)) and (s.get("fs") in (fs, None, ""))] or [s for s in secs if rx.search(title(s))]
+    cand.sort(key=lambda s: (0 if (core and core in title(s)) else 1, len(title(s))))
     out = []
     for s in cand[:2]:
-        txt = notes_v2.to_text([s])
+        ps = [b["p"] for b in s["blocks"] if "p" in b]
+        rows = [" | ".join(r) for b in s["blocks"] if "tbl" in b for r in b["tbl"]["rows"]]
+        txt = f"### {s['t']}\n" + "\n".join(ps)[: EXCERPT * 2 // 3]
+        txt += "\n" + "\n".join(rows)
         out.append(txt[:EXCERPT])
     return "\n".join(out)
 
@@ -132,7 +138,7 @@ def _excerpt(secs, nm, fs):
 def _rcept_for_pair(con, cc, kpi_rows, b):
     """변동 쌍의 '당기'(b) 기간 보고서 접수번호"""
     r = kpi_rows[b]
-    return r.get("rcept_no") or ""
+    return (r.get("rcept_no") or "").split(":")[0]      # '…:전기'(다음 보고서의 전기 열로 채운 행) → 그 보고서 번호
 
 
 def _norm(s):
