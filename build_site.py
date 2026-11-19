@@ -1170,8 +1170,8 @@ def _listing_risk(c, kpi, prices, ps, audit, review, events, own_eq=None):
     basis = "별도" if kpi.get("OFS") else "연결"
     ann = [r for r in rows if r.get("kind") == "annual"]
     last = ann[-1] if ann else None
-    cons = bool(kpi.get("CFS"))                   # 연결 재무제표 작성 법인
-    ann_c = [r for r in (kpi.get("CFS") or rows) if r.get("kind") == "annual"]      # 자본잠식·자기자본·법차손 판정 행(연결 우선)
+    cons = bool([r for r in (kpi.get("CFS") or []) if r.get("kind") == "annual"])     # 연결 재무제표 작성 법인(연간 연결 행이 있을 때)
+    ann_c = [r for r in (kpi.get("CFS") or rows) if r.get("kind") == "annual"] or ann      # 자본잠식·자기자본·법차손 판정 행(연결 우선, 연결에 연간 행이 없으면 별도 — 알지노믹스: 연결은 분기만)
     last_c = ann_c[-1] if ann_c else None
     hold = str(c.get("induty_code") or "").startswith("64992")                       # 지주회사(KSIC 64992): 매출액은 연결 기준
     def eq_of(r):                                 # 연결이면 지배기업 소유주지분(비지배지분 제외), 못 찾으면 연결 자본총계
