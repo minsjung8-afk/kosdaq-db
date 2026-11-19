@@ -435,8 +435,9 @@ def main():
                 except Exception:  # noqa
                     _c["v"] = set()
             return _c["v"]
-        def _audit_add(n=200, min_eq=3000):
-            """2026-11-18 사용자 '3천억 이상부터 asap': 감사보고서만 내는 비상장 자본총계 3,000억↑를 큰 순으로 매일 밤 n사씩(정기보고서 반영 다음 순위)"""
+        def _audit_add(n=200, min_eq=1500):
+            """2026-11-18 사용자 '3천억 이상부터 asap' → 2026-11-19 '3,000억 다 수집하면 1,500억 이상 추가': 감사보고서만 내는 비상장 자본총계 1,500억↑를
+            큰 순으로 매일 밤 n사씩(audit_filers.eligible이 자본총계 내림차순이라 3,000억↑ 잔여분이 먼저 끝나고 1,500억↑로 이어진다)"""
             import subprocess
             con.commit()
             subprocess.run([sys.executable, str(Path(__file__).resolve()), "unlisted_add", "--type", "감사보고서", "--limit", str(n), "--min-equity", str(min_eq)],
@@ -462,6 +463,7 @@ def main():
                  ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),
                  ("fin_yoy", lambda: financials.run_yoy(ccs, con=con)),       # 전년동기 BS 보강   # 별도 재무 보강(연결만 있는 회사)
                  ("quarters", lambda: quarters.run(ccs, con=con)),
+                 ("hybrid_out", lambda: __import__("hybrid_out").run(con, year0=a.year - 2, budget_sec=15 * 60)),   # 2026-11-19: 새 정기보고서의 「신종자본증권 미상환 잔액」 표 — 재무상태표에 신종 줄이 없는 회사의 새 접수번호만(보고서당 2콜), 야간 15분 한도, KPI 재계산 앞
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
