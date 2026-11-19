@@ -253,6 +253,7 @@ a{color:var(--navy2)}
 .xbar{display:flex;gap:6px;justify-content:flex-end;margin:-30px 0 8px}.xbar button{font:700 11.5px var(--font);color:var(--navy);background:#fff;border:1px solid var(--line2);border-radius:999px;padding:5px 11px;cursor:pointer}.xbar button:hover{background:var(--nbg2)}.xbar button[data-x=pdf]{background:var(--gold-soft);border-color:var(--gold-soft);color:#0f2942}
 .ibkfin .tg{display:inline-block;width:12px;color:var(--gold)}.ibkfin.fold .ibkb{display:none}.ibkfin:not(.fold) .tg{transform:rotate(90deg)}
 .ibkfin.fold .ibkh{border:1.5px solid var(--bad);background:#fff5f5;border-radius:8px;padding:7px 10px}.ibkfin.fold .ibkh:hover{background:#ffeaea}
+.ibk sup.fn{font-size:9px;color:var(--bad);font-weight:800;margin-left:2px}.ibkn{margin:8px 0 2px;font-size:11.5px;color:var(--ink2);background:#fffbe9;border:1px solid #f1e3b0;border-radius:8px;padding:6px 10px}.ibkn ol{margin:4px 0 0;padding-left:18px}.ibkn li{margin:2px 0}
 .ibkh .nb{display:inline-block;font-size:10px;font-weight:800;color:#fff;background:var(--bad);border-radius:999px;padding:1px 8px;letter-spacing:.03em;white-space:nowrap}.ibkfin:not(.fold) .ibkh .nb{display:none}
 .ibk2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}@media (max-width:1150px){.ibk2{grid-template-columns:minmax(0,1fr)}}
 .ibkt{font-size:10.5px;font-weight:700;color:#2c5f8d;background:#e9eef6;padding:3px 7px;border-radius:3px 3px 0 0}
@@ -678,11 +679,11 @@ async function open(code){
     const P1=v=>v==null?'N/A':(v<0?'('+Math.abs(v).toFixed(1)+')':v.toFixed(1)), PX=v=>v==null?'N/A':v.toFixed(2)+'x';
     const pct=(a,b)=>a.map((x,i)=>x!=null&&b[i]?x/b[i]*100:null), div=(a,b)=>a.map((x,i)=>x!=null&&b[i]?x/b[i]:null), sub=(a,b)=>a.map((x,i)=>x!=null&&b[i]!=null?x-b[i]:null);
     for(const [fs,fl] of fsList){
-      const X=IB[fs], C=X.cols, B=X.base, G=X.groups, n=C.length;
+      const X=IB[fs], C=X.cols, B=X.base, G=X.groups, n=C.length, NT=ibkNotes(X), fnm=nm=>NT.mark[nm]?`<sup class="fn">${NT.mark[nm]}</sup>`:'';
       const th=`<tr><th class="l">구 분</th>${C.map(c=>`<th>${esc(c.label)}${c.kind!=='annual'?'<small>누적</small>':''}</th>`).join('')}</tr>`;
       const tr=(lb,vals,cls,fmt)=>`<tr class="${cls||''}"><td class="l">${lb}</td>${vals.map(v=>`<td>${(fmt||P)(v)}</td>`).join('')}</tr>`;
-      const grp=(lb,g)=>tr(lb,G[g].total,'g')+G[g].items.map(it=>tr(esc(it.nm),it.v,'sub')).join('');
-      const items=g=>(G[g]?G[g].items:[]).map(it=>tr(esc(it.nm),it.v,'sub')).join('');
+      const grp=(lb,g)=>tr(lb,G[g].total,'g')+G[g].items.map(it=>tr(esc(it.nm)+fnm(it.nm),it.v,'sub')).join('');
+      const items=g=>(G[g]?G[g].items:[]).map(it=>tr(esc(it.nm)+fnm(it.nm),it.v,'sub')).join('');
       let bs=th+(X.nocur   // 유동·비유동 구분 없는 표(금융사): 자산·부채 바로 아래 주요 계정
         ? tr('자산총계',B.total_assets,'tot')+items('ta')+tr('부채총계',B.total_liab,'tot')+items('tl')
         : tr('자산총계',B.total_assets,'tot')+grp('유동자산','ca')+grp('비유동자산','nca')+tr('부채총계',B.total_liab,'tot')+grp('유동부채','cl')+grp('비유동부채','ncl'))
@@ -690,9 +691,9 @@ async function open(code){
       const rev=B.revenue,op=B.op_income,eb=B.ebitda,fc=B.int_exp;
       let is=th+`<tr class="hd"><td colspan="${n+1}">▸ 손익계산서</td></tr>`+tr('매출액',rev,'g')+tr('영업이익',op)+tr('EBITDA',eb)+tr('이자비용',fc)+tr('당기순이익',B.net_income)+tr('영업활동현금흐름(OCF)',B.cfo)
         +`<tr class="hd"><td colspan="${n+1}">▸ 주요 재무비율 (%)</td></tr>`+tr('영업이익률',pct(op,rev),'',P1)+tr('EBITDA%',pct(eb,rev),'',P1)+tr('유동비율',pct(G.ca.total,G.cl.total),'',P1)+tr('부채비율',pct(B.total_liab,B.equity),'',P1)+tr('차입금의존도',pct(B.borrowings,B.total_assets),'',P1)+tr('EBITDA/금융비용',div(eb,fc),'',PX);
-      h+=`<div class="ibkfs" data-fs="${fs}"><div class="src" style="margin:6px 0 4px"><b>${fl}</b> 기준</div><div class="ibk2"><div><div class="ibkt">재무상태표</div><table class="ibk">${bs}</table></div><div><div class="ibkt">손익계산서 · 재무비율</div><table class="ibk">${is}</table></div></div></div>`;
+      h+=`<div class="ibkfs" data-fs="${fs}"><div class="src" style="margin:6px 0 4px"><b>${fl}</b> 기준</div><div class="ibk2"><div><div class="ibkt">재무상태표</div><table class="ibk">${bs}</table></div><div><div class="ibkt">손익계산서 · 재무비율</div><table class="ibk">${is}</table></div></div>${NT.notes.length?`<div class="ibkn"><b>주석</b> 전년 대비 유의미한 변동(±30% 이상이면서 그룹 합계의 5% 이상) · 단위 ${UNIT()}<ol>${NT.notes.map(t=>`<li>${esc(t)}</li>`).join('')}</ol></div>`:''}</div>`;
     }
-    h+=`<div class="src" style="margin-top:6px">출처 DART 정기보고서(XBRL) · 유동·비유동 자산·부채의 세부 계정은 최근 기간 기준 규모 순(그룹의 8% 이상, 2~5개) · 총차입금 = 단기·장기차입금 + 사채(CB·BW·EB·CP 포함) + 리스부채 · EBITDA = 영업이익 + 유무형상각비 · 분기 열은 누적(전년 동기 병기)</div></div></div>`;
+    h+=`<div class="src" style="margin-top:6px">출처 DART 정기보고서(XBRL) · 유동·비유동 자산·부채의 세부 계정은 최근 기간 기준 규모 상위 4개(그룹 합계의 1% 미만 제외) · 총차입금 = 단기·장기차입금 + 사채(CB·BW·EB·CP 포함) + 리스부채 · EBITDA = 영업이익 + 유무형상각비 · 분기 열은 누적(전년 동기 병기)</div></div></div>`;
   }
   h+=`</section>`;
   // 3-1 기발행 메자닌 (CB·BW·EB·종류주식): 미상환 현황(정기보고서) + 발행결정(주요사항보고서)을 회차로 합쳐 한 표
@@ -1080,6 +1081,15 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
         children}]});
       const blob=await Packer.toBlob(doc); dl(blob,`${name()}_심사참고_${today()}.docx`);
     } catch(e){ alert('Word 생성 실패: '+(e&&e.message||e)); } finally { busy(false); back(); } }
+  // 2026-11-19 사용자: 당사 양식 세부 계정의 전년 대비 유의미한 변동(±30% 이상이면서 그룹 합계의 5% 이상)에 각주 — 연간은 직전 연도, 분기는 전년 동기와 비교. 화면·엑셀 공용
+  window.ibkNotes=function(X){ const C=X.cols, G=X.groups, notes=[], mark={}; const pairs=[]; const ann=C.map((c,i)=>c.kind==='annual'?i:-1).filter(i=>i>=0), q=C.map((c,i)=>c.kind!=='annual'?i:-1).filter(i=>i>=0);
+    for(let k=1;k<ann.length;k++) pairs.push([ann[k-1],ann[k]]); if(q.length>=2) pairs.push([q[q.length-2],q[q.length-1]]);
+    const fmt=v=>{ const x=Math.round(v/1e8); return x<0?'('+Math.abs(x).toLocaleString('ko-KR')+')':x.toLocaleString('ko-KR'); };
+    for(const g of Object.keys(G)){ const T=G[g].total||[]; for(const it of G[g].items){ const parts=[];
+      for(const [a,b] of pairs){ const p=it.v[a], c=it.v[b]; if(p==null||c==null||!p) continue; const d=c-p, r=d/Math.abs(p); const base=T[b]||T[a]; if(Math.abs(r)<0.3||(base&&Math.abs(d)<0.05*Math.abs(base))) continue;
+        parts.push(`${C[a].label} ${fmt(p)} → ${C[b].label} ${fmt(c)} (${r>0?'+':'−'}${Math.abs(r*100).toFixed(1)}%)`); }
+      if(parts.length){ notes.push(`${it.nm}: ${parts.join(' · ')}`); mark[it.nm]=notes.length; } } }
+    return {notes,mark}; };
   function doXlsx(){ const d=window.CURD; if(!d||!d.ibk_fin){ alert('당사 양식 재무현황 데이터가 없습니다.'); return; }
     // 2026-11-19 사용자: 내려받기도 화면과 같은 배치(좌 재무상태표 · 우 손익계산서/재무비율, 같은 색 구분). 서식은 xlsx-js-style(SheetJS 0.18.5 포크), 못 불러오면 서식 없이 같은 배치로
     const go=()=>{ const X_=window.XLSXS||window.XLSX, wb=X_.utils.book_new(); const n=v=>v==null?null:Math.round(v/1e8*10)/10;
@@ -1100,8 +1110,9 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
         put(2,0,'재무상태표',ST.cap); put(2,RC,'손익계산서 · 재무비율',ST.cap);
         line(3,0,'구 분',C,ST.hd,null,ST.hdL); line(3,RC,'구 분',C,ST.hd,null,ST.hdL);
         let r=4; const L=(label,vals,st,z)=>{ line(r++,0,label,vals.map(n),st,z||NUM); };
-        const grp=(lb,g)=>{ L(lb,G[g].total,ST.sub); G[g].items.forEach(it=>L('   '+it.nm,it.v,ST.item)); };
-        const its=g=>(G[g]?G[g].items:[]).forEach(it=>L('   '+it.nm,it.v,ST.item));
+        const NT=ibkNotes(X), fl_=nm=>NT.mark[nm]?` (주${NT.mark[nm]})`:'';
+        const grp=(lb,g)=>{ L(lb,G[g].total,ST.sub); G[g].items.forEach(it=>L('   '+it.nm+fl_(it.nm),it.v,ST.item)); };
+        const its=g=>(G[g]?G[g].items:[]).forEach(it=>L('   '+it.nm+fl_(it.nm),it.v,ST.item));
         if(X.nocur){ L('자산총계',B.total_assets,ST.tot); its('ta'); L('부채총계',B.total_liab,ST.tot); its('tl'); }
         else { L('자산총계',B.total_assets,ST.tot); grp('유동자산','ca'); grp('비유동자산','nca'); L('부채총계',B.total_liab,ST.tot); grp('유동부채','cl'); grp('비유동부채','ncl'); }
         L('총차입금 (차입금+사채+리스부채)',B.borrowings,ST.cream); L('자본총계',B.equity,ST.tot); L('자본금',B.capital,ST.item); const rEnd=r;
@@ -1111,7 +1122,9 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
         line(q++,RC,'▸ 주요 재무비율 (%)',C.map(()=>''),ST.sec);
         const r1=(a,b,k)=>a.map((x,i)=>x!=null&&b[i]?Math.round((k?x/b[i]:x/b[i]*100)*100)/100:null);
         R('영업이익률',r1(B.op_income,B.revenue),ST.plain,PCT,1); R('EBITDA%',r1(B.ebitda,B.revenue),ST.plain,PCT,1); R('유동비율',r1(G.ca.total,G.cl.total),ST.plain,PCT,1); R('부채비율',r1(B.total_liab,B.equity),ST.plain,PCT,1); R('차입금의존도',r1(B.borrowings,B.total_assets),ST.plain,PCT,1); R('EBITDA/금융비용',r1(B.ebitda,B.int_exp,1),ST.plain,XF,1);
-        const last=Math.max(rEnd,q); put(last+1,0,'출처 DART 정기보고서(XBRL) · 심사참고 DB kosdaq-db.pages.dev · '+today(),ST.src);
+        let last=Math.max(rEnd,q);
+        if(NT.notes.length){ put(last+1,0,'주석 — 전년 대비 유의미한 변동(±30% 이상이면서 그룹 합계의 5% 이상) · 단위 억원',ST.cap); NT.notes.forEach((t,i)=>put(last+2+i,0,`(주${i+1}) ${t}`,ST.src)); last+=1+NT.notes.length; }
+        put(last+1,0,'출처 DART 정기보고서(XBRL) · 심사참고 DB kosdaq-db.pages.dev · '+today(),ST.src);
         ws['!ref']=X_.utils.encode_range({s:{r:0,c:0},e:{r:last+1,c:RC+nc}}); ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:RC+nc}}];
         ws['!cols']=[{wch:30},...C.map(()=>({wch:12})),{wch:3},{wch:24},...C.map(()=>({wch:12}))]; ws['!rows']=[{hpt:22},{hpt:6},{hpt:18},{hpt:20}];
         X_.utils.book_append_sheet(wb,ws,fl); }
