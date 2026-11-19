@@ -713,7 +713,7 @@ async function open(code){
       const fcAll=fc.map((v,i)=>(v==null&&hy[i]==null)?null:((v||0)+(hy[i]||0)));   // 커버리지 분모 = 이자비용 + 신종자본증권 분배금(2026-11-19)
       let is=th+`<tr class="hd"><td colspan="${n+1}">▸ 손익계산서</td></tr>`+tr('매출액',rev,'g')+tr('영업이익',op)+tr('EBITDA',eb)+tr('이자비용'+(isrc.length?` <small>${isrc.join('·')} 기준</small>`:''),fc)+(hy.some(v=>v!=null)?tr(`신종자본증권 분배금 <small>${hySrc(B)}</small>`,hy,'sub'):'')+tr('당기순이익',B.net_income)+tr('영업활동현금흐름(OCF)',B.cfo)
         +`<tr class="hd"><td colspan="${n+1}">▸ 주요 재무비율 (%)</td></tr>`+tr('영업이익률',pct(op,rev),'',P1)+tr('EBITDA%',pct(eb,rev),'',P1)+tr('유동비율',pct(G.ca.total,G.cl.total),'',P1)+tr('부채비율',pct(B.total_liab,B.equity),'',P1)+tr('차입금의존도',pct(B.borrowings,B.total_assets),'',P1)+(hasHy?tr('차입금의존도(신종포함)',pct(borHy,B.total_assets),'',P1):'')+tr('EBITDA/이자비용',div(eb,fc),'',PX)+(hy.some(v=>v!=null)?tr('EBITDA/이자비용(신종포함) <small>분모에 신종 분배금 가산</small>',div(eb,fcAll),'',PX):'');
-      h+=`<div class="ibkfs" data-fs="${fs}"><div class="src" style="margin:6px 0 4px"><b>${fl}</b> 기준</div><div class="ibk2"><div><div class="ibkt">재무상태표</div><table class="ibk">${bs}</table></div><div><div class="ibkt">손익계산서 · 재무비율</div><table class="ibk">${is}</table></div></div>${hyNt?`<div class="src" style="margin:6px 0 2px;line-height:1.5"><b>신종자본증권</b> ${esc(hyNt)}</div>`:''}${NT.notes.length?`<div class="ibkn"><b>주석</b> 전년 대비 큰 변동(±30%·그룹 5%↑) 중 사유가 확인되는 것만 — 보고서 주석 기반(AI 판독, 인용문 병기) 또는 DB 숫자 근거 · 번호는 변동이 생긴 기간의 숫자에 · 단위 ${UNIT()}<ol>${NT.notes.map(n=>`<li>${esc(n.t)}${n.ai?n.w:esc(n.w)}</li>`).join('')}</ol></div>`:''}</div>`;
+      h+=`<div class="ibkfs" data-fs="${fs}"><div class="src" style="margin:6px 0 4px"><b>${fl}</b> 기준</div><div class="ibk2"><div><div class="ibkt">재무상태표</div><table class="ibk">${bs}</table></div><div><div class="ibkt">손익계산서 · 재무비율</div><table class="ibk">${is}</table></div></div>${hyNt?`<div class="src" style="margin:6px 0 2px;line-height:1.5"><b>신종자본증권</b> ${esc(hyNt)}</div>`:''}${NT.notes.length?`<div class="ibkn"><b>주석</b> 전년(분기 열은 전년 동기) 대비 큰 변동 — ±30% 이상이면서 그룹 합계의 5% 이상 · DB 숫자 근거가 있으면 병기 · 번호는 변동이 생긴 기간의 숫자에 · 단위 ${UNIT()}<ol>${NT.notes.map(n=>`<li>${esc(n.t)}${n.ai?n.w:esc(n.w)}</li>`).join('')}</ol></div>`:''}</div>`;
     }
     h+=`<div class="src" style="margin-top:6px">출처 DART 정기보고서(XBRL) · 유동·비유동 자산·부채의 세부 계정은 최근 기간 기준 규모 상위 4개(그룹 합계의 1% 미만 제외) · 총차입금 = 단기·장기차입금 + 사채(CB·BW·EB·CP 포함) + 리스부채 · EBITDA = 영업이익 + 유무형상각비 · 분기 열은 누적(전년 동기 병기)</div></div></div>`;
   }
@@ -1127,10 +1127,8 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
       return ''; };
     for(const g of Object.keys(G)){ const T=G[g].total||[]; for(const it of G[g].items){ for(const [a,b] of pairs){ const p=it.v[a], c=it.v[b]; if(p==null||c==null||!p) continue; const dd=c-p, r=dd/Math.abs(p); const base=T[b]||T[a]; if(Math.abs(r)<0.3||(base&&Math.abs(dd)<0.05*Math.abs(base))) continue;
         let w=''; try{ w=why(it.nm,a,b); }catch(e){}
-        const ai=(d.fn_ai||[]).find(x=>x.fs===fs&&x.nm===it.nm&&x.label===C[b].label);   // 주석 인용이 있는 AI 사유(fn_ai) 우선
-        if(ai) w=`${ai.reason} <span class="q">“${ai.quote}”</span>`+(ai.rcept_no?` <a class="q" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${ai.rcept_no}" target="_blank" rel="noopener">주석</a>`:'');
-        if(!w) continue;   // 2026-11-19 사용자: 단순 숫자 변동만이면 각주 없음 — 주석 기반 사유(AI, 인용 필수) 또는 DB 근거(현금흐름·차입 구조·매출·Capex·공시)가 있을 때만, 변동이 생긴 연도의 숫자에 번호
-        notes.push({t:`${it.nm} ${C[b].label}: ${fmt(p)} → ${fmt(c)} (${r>0?'+':'−'}${Math.abs(r*100).toFixed(1)}%) — `,w,ai:!!ai}); (mark[it.nm]=mark[it.nm]||{})[b]=notes.length; } } }
+        // 2026-11-19 사용자 '상세 주석은 일단 반영하지 말고 전년동기·전년 대비 특이한 숫자에 각주만': 주석 판독 사유(AI, fn_ai)는 쓰지 않는다. 큰 변동이면 근거가 없어도 각주(변동률·금액)를 달고, DB 숫자 근거(현금흐름·차입 구조·매출·Capex·공시)가 있으면 덧붙인다
+        notes.push({t:`${it.nm} ${C[b].label}: ${C[b].kind==='annual'?'전년 대비':'전년 동기 대비'} ${r>0?'+':'−'}${Math.abs(r*100).toFixed(1)}% (${fmt(p)} → ${fmt(c)})`+(w?' — ':''),w,ai:false}); (mark[it.nm]=mark[it.nm]||{})[b]=notes.length; } } }
     return {notes,mark}; };
   function doXlsx(){ const d=window.CURD; if(!d||!d.ibk_fin){ alert('당사 양식 재무현황 데이터가 없습니다.'); return; }
     // 2026-11-19 사용자: 내려받기도 화면과 같은 배치(좌 재무상태표 · 우 손익계산서/재무비율, 같은 색 구분). 서식은 xlsx-js-style(SheetJS 0.18.5 포크), 못 불러오면 서식 없이 같은 배치로
@@ -1166,7 +1164,7 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
         R('영업이익률',r1(B.op_income,B.revenue),ST.plain,PCT,1); R('EBITDA%',r1(B.ebitda,B.revenue),ST.plain,PCT,1); R('유동비율',r1(G.ca.total,G.cl.total),ST.plain,PCT,1); R('부채비율',r1(B.total_liab,B.equity),ST.plain,PCT,1); R('차입금의존도',r1(B.borrowings,B.total_assets),ST.plain,PCT,1); if(xhasHy) R('차입금의존도(신종포함)',r1(xborHy,B.total_assets),ST.plain,PCT,1); R('EBITDA/이자비용',r1(B.ebitda,B.int_exp,1),ST.plain,XF,1); if((B.hybrid_dist||[]).some(v=>v!=null)) R('EBITDA/이자비용(신종포함)',r1(B.ebitda,B.int_exp.map((v,i)=>(v==null&&(B.hybrid_dist||[])[i]==null)?null:(v||0)+((B.hybrid_dist||[])[i]||0)),1),ST.plain,XF,1);
         let last=Math.max(rEnd,q);
         { const xn=hyTxt(B.hybrid_note); if(xn){ put(last+1,0,'신종자본증권: '+xn,ST.src); last+=1; } }
-        if(NT.notes.length){ put(last+1,0,'주석 — 전년 대비 큰 변동 중 근거가 확인되는 것 · 단위 억원',ST.cap); NT.notes.forEach((n,i)=>put(last+2+i,0,`(주${i+1}) ${n.t}${n.w.replace(/<[^>]+>/g,'')}`,ST.src)); last+=1+NT.notes.length; }
+        if(NT.notes.length){ put(last+1,0,'주석 — 전년(분기 열은 전년 동기) 대비 큰 변동(±30% 이상·그룹 합계의 5% 이상) · 단위 억원',ST.cap); NT.notes.forEach((n,i)=>put(last+2+i,0,`(주${i+1}) ${n.t}${n.w.replace(/<[^>]+>/g,'')}`,ST.src)); last+=1+NT.notes.length; }
         put(last+1,0,'출처 DART 정기보고서(XBRL) · 심사참고 DB kosdaq-db.pages.dev · '+today(),ST.src);
         ws['!ref']=X_.utils.encode_range({s:{r:0,c:0},e:{r:last+1,c:RC+nc}}); ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:RC+nc}}];
         ws['!cols']=[{wch:30},...C.map(()=>({wch:12})),{wch:3},{wch:24},...C.map(()=>({wch:12}))]; ws['!rows']=[{hpt:22},{hpt:6},{hpt:18},{hpt:20}];
