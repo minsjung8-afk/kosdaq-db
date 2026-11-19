@@ -185,7 +185,7 @@ def _build_fs(d, company, fs, primary):
             add("bad" if nde >= 8 else "warn", "상환능력 약화", f"순차입금/{'LTM ' if cur else ''}EBITDA {nde:.1f}x" + (f" · 연간 {hist}" if hist else ""), "순차입금/EBITDA 5배 이상(8배 이상이면 위험)")
         ic = g(a1, "interest_cover")
         if ic is not None and ic < 3:
-            add("bad" if ic < 1.5 else "warn", "이자 부담", f"{a1['bsns_year']} EBITDA/이자비용 {ic:.1f}x", "EBITDA/이자비용 3배 미만(1.5배 미만이면 위험)")
+            add("bad" if ic < 1.5 else "warn", "이자 부담", f"{a1['bsns_year']} EBITDA/이자비용 {ic:.1f}x" + ("(신종자본증권 분배금 포함)" if g(a1, "hybrid_dist") else ""), "EBITDA/이자비용 3배 미만(1.5배 미만이면 위험) · 신종자본증권 분배금이 있으면 분모에 가산")
         bd = g(now, "borrow_dep")
         if bd is not None and bd >= 50:
             add("warn", "차입금의존도 높음", f"{pl} 차입금의존도 {_p(bd)}", "차입금의존도 50% 이상")
@@ -209,7 +209,7 @@ def _build_fs(d, company, fs, primary):
                 add("good", "낮은 부채비율", f"{pl} 부채비율 {_p(dr)}", "부채비율 100% 미만")
             ic = g(a1, "interest_cover")
             if ic is not None and ic >= 10 and (g(a1, "int_exp") or 0) > 0:
-                add("good", "이자 부담 낮음", f"{a1['bsns_year']} EBITDA/이자비용 {ic:.1f}x", "EBITDA/이자비용 10배 이상")
+                add("good", "이자 부담 낮음", f"{a1['bsns_year']} EBITDA/이자비용 {ic:.1f}x" + ("(신종자본증권 분배금 포함)" if g(a1, "hybrid_dist") else ""), "EBITDA/이자비용 10배 이상")
         if a1 and (g(a1, "cfo") or 0) > 0 and (g(a1, "fcf") or 0) > 0 and not is_fin:
             add("good", "현금창출 양호", f"{a1['bsns_year']} 영업활동CF {_e(a1['cfo'])} · FCF {_e(a1['fcf'])}", "영업활동CF·FCF 모두 흑자")
         # 현황(판정 아님 — 최소 개수 채움용)

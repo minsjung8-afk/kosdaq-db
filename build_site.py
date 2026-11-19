@@ -515,7 +515,7 @@ def _flags(c, kpi, ps, audit, events, ratings):
     elif last and (last.get("op_income") or 0) < 0:
         out.append(("최근 연간 영업적자", "amber", f"{last['bsns_year']} 영업이익 {_amt(last['op_income'])}"))
     if last and last.get("interest_cover") is not None and last["interest_cover"] < 1:
-        out.append(("EBITDA/이자비용 < 1", "red", f"{last['interest_cover']}x"))
+        out.append(("EBITDA/이자비용 < 1", "red", f"{last['interest_cover']}x" + ("(신종 분배금 포함)" if last.get("hybrid_dist") else "")))
     if last and last.get("debt_ratio") is not None and last["debt_ratio"] > 300:
         out.append(("부채비율 300% 초과", "amber", f"{last['debt_ratio']}%"))
     if last and last.get("cur_ratio") is not None and last["cur_ratio"] < 80:
