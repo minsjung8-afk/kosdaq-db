@@ -386,7 +386,7 @@ def _int_fallback(rows, k):
         k["int_exp"], k["int_src"] = k["fin_cost"], "금융비용"
     else:
         k["int_src"] = None
-    cf, sce, trace = {}, {}, False
+    cf, sce, trace, flow = {}, {}, False, set()
     for r in rows:
         sj = r.get("sj_div")
         if sj not in ("CF", "SCE") or r.get("thstrm_amount") in (None, 0):
@@ -396,6 +396,11 @@ def _int_fallback(rows, k):
         if kind is None:
             continue
         trace = True
+        _m = _HY_NM.search(nm); _rest = nm[:_m.start()] + nm[_m.end():]
+        if _re_mod.search(r"상환|감소|반환|매입", _rest) and "손실" not in _rest:
+            flow.add("상환")
+        elif _re_mod.search(r"발행(?!비|수수료)|증가", _rest) and "환입" not in _rest:
+            flow.add("발행")
         if kind == "dist":
             d = cf if sj == "CF" else sce
             d[nm] = max(d.get(nm, 0), abs(r["thstrm_amount"]))      # 같은 이름이 여러 줄이면(자본변동표 열 반복) 큰 값 하나
@@ -422,6 +427,8 @@ def _int_fallback(rows, k):
     note = [("·".join(miss) + " 미분리")] if (trace and miss) else []
     if inb:
         note.append("잔액은 총차입금에 포함")
+    if note and he is None and not inb:              # 2026-11-19 사용자 '그런 건은 신종이 있다고 표시만': 잔액이 본문에 없을 때 화면에 '있음'으로 표시 — 당기 발행·상환 여부를 함께 남긴다(상환만 있으면 잔존 여부 불명)
+        note += [f"당기 {t}" for t in ("발행", "상환") if t in flow]
     k["hybrid_note"] = " · ".join(note) or None
 
 
