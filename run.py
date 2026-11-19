@@ -449,6 +449,7 @@ def main():
                  ("da_direct", lambda: __import__("notes_v2").direct_backfill(con, years=4, limit=2000, budget_sec=50 * 60)),   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정(XBRL 일부 항목 누락·분기 3개월 열 오독) — 하루 2,000건씩, 약 2주
                  ("da_ai", lambda: __import__("da_ai").run(con, limit=1500)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 1,500건·예산 40달러, 2026-10-30 사용자 "예산 올려줄게")
                  ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
+                 ("hybrid_out", lambda: __import__("hybrid_out").run(con, year0=a.year - 2, budget_sec=15 * 60)),   # 2026-11-19: 새 정기보고서의 「신종자본증권 미상환 잔액」 표(보고서당 2콜, 15분 한도). 2026-11-20 사용자: mezz 앞으로 — 뒤에 두면 시간 한도에 걸린 밤마다 빠짐(11-19·20 두 번 미실행)
                  ("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
                  ("summarize", lambda: (__import__("summarize").run_all(None, model="haiku", force=False),
@@ -463,7 +464,6 @@ def main():
                  ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),
                  ("fin_yoy", lambda: financials.run_yoy(ccs, con=con)),       # 전년동기 BS 보강   # 별도 재무 보강(연결만 있는 회사)
                  ("quarters", lambda: quarters.run(ccs, con=con)),
-                 ("hybrid_out", lambda: __import__("hybrid_out").run(con, year0=a.year - 2, budget_sec=15 * 60)),   # 2026-11-19: 새 정기보고서의 「신종자본증권 미상환 잔액」 표 — 재무상태표에 신종 줄이 없는 회사의 새 접수번호만(보고서당 2콜), 야간 15분 한도, KPI 재계산 앞
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
