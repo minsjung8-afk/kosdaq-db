@@ -942,6 +942,26 @@ def main():
             print(f"[차입점검] 중복의심 {x}", flush=True)
         for x in mism[:30]:
             print(f"[차입점검] KPI불일치 {x}", flush=True)
+        # 2차(2026-11-19): '총액'·'유동성대체부분'·'비유동성부분' 표기 회사와, 포함된 '및' 줄 바로 뒤(ord)에 구성 줄이 따라오는 회사 — 이중 계상 여부 눈으로 확인용(순번·부호 포함)
+        shown = 0
+        for cc, y in keys:
+            if shown >= 24: break
+            fs = "CFS" if con.execute("SELECT 1 FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div='CFS' AND sj_div='BS' LIMIT 1", (cc, y)).fetchone() else "OFS"
+            rows = [dict(r) for r in con.execute("SELECT * FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=? AND sj_div='BS' ORDER BY ord", (cc, y, fs))]
+            cand = [(r.get("ord"), _fi._norm_nm(r["account_nm"]), round((r["thstrm_amount"] or 0) / 1e8, 1)) for r in rows if r.get("thstrm_amount") and broad.search(_fi._norm_nm(r["account_nm"]))]
+            names = [c[1] for c in cand]
+            hit = any("총액" in n_ or "유동성대체" in n_ or "비유동성부분" in n_ for n_ in names)
+            if not hit:
+                items = _fi.borrow_items(rows); inn = [i["nm"] for i in items]
+                for n_ in inn:
+                    if "및" in n_:
+                        parts = [p for p in _re2.split(r"및", _re2.sub(r"\(.*?\)|유동성|비유동성|유동|비유동|단기|장기", "", n_)) if len(p) >= 2]
+                        if any(any(p in m and m != n_ for p in parts) for m in inn):
+                            hit = True; break
+            if hit:
+                shown += 1
+                tot = sum(i["amt"] for i in _fi.borrow_items(rows)) / 1e8
+                print(f"[차입점검] 구조확인 {nm.get(cc,('?',))[0]} {y} {fs} 총차입금 {tot:,.1f} 후보(순번,이름,억): {cand}", flush=True)
         if a.codes:
             for cc in ccs:
                 for y, fs in con.execute("SELECT DISTINCT bsns_year, fs_div FROM fin_raw WHERE corp_code=? AND reprt_code='11011' AND sj_div='BS' ORDER BY bsns_year DESC LIMIT 4", (cc,)):
