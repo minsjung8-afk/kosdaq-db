@@ -208,17 +208,28 @@ def run(con=None, limit=None, codes=None, dry=False):
         except Exception:  # noqa
             arr = []
         con.execute("DELETE FROM fn_ai WHERE corp_code=? AND fs=?", (cc, fs))
+        verbose = bool(limit and limit <= 50)                 # 표본 실행: 항목별 결과(저장·사유 없음·인용 불일치)를 로그로 남겨 품질을 눈으로 확인
+        if verbose:
+            print(f"[fn_ai] ▶ {c['corp_name']} {fs} · 입력 {tin:,}토큰 · 출력 {tout:,}토큰 · 발췌 " + "/".join(f"{len(m[3])}자" for m in meta), flush=True)
         for o in arr:
             try:
                 i = int(o.get("i")) - 1
             except Exception:  # noqa
                 continue
-            if i < 0 or i >= len(meta) or not o.get("reason") or not o.get("quote"):
+            if i < 0 or i >= len(meta):
                 continue
             nm, label, rc, ex = meta[i]
+            if not o.get("reason") or not o.get("quote"):
+                if verbose:
+                    print(f"[fn_ai]    – {nm}@{label}: 사유 없음" + ("" if ex else " (관련 절 없음)"), flush=True)
+                continue
             qn = _norm(o["quote"])
             if len(qn) < 8 or qn not in _norm(ex):            # 인용이 발췌문에 그대로 없으면 버림(할루시네이션 방지)
+                if verbose:
+                    print(f"[fn_ai]    ✗ {nm}@{label}: 인용 불일치로 버림 — {str(o['reason'])[:50]} / “{str(o['quote'])[:70]}”", flush=True)
                 continue
+            if verbose:
+                print(f"[fn_ai]    ✓ {nm}@{label}: {str(o['reason'])[:80]} / “{str(o['quote'])[:110]}”", flush=True)
             con.execute("INSERT OR REPLACE INTO fn_ai VALUES (?,?,?,?,?,?,?,?,?)", (cc, fs, nm, label, str(o["reason"])[:80], str(o["quote"])[:200], rc, MODEL, now()))
             found += 1
         con.execute("INSERT OR REPLACE INTO fn_ai_log VALUES (?,?,?,?,?,?,?,?)", (cc, len(ch), found, tin, tout, MODEL, now(), key))
