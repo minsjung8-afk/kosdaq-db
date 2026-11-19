@@ -897,6 +897,59 @@ def main():
     elif a.job == "rawdump" and a.type == "거래소공시재스캔":   # 2026-11-19 상장유지 위험 뱃지: 최근 1년 거래소공시(pblntf_ty=I) 이벤트 보강
         import delta as _dl
         _dl.rescan_krx(days=a.limit or 365)
+    elif a.job == "rawdump" and a.type in ("신종SCE보정", "신종현황"):   # 2026-11-19 사용자 '누락 없도록': 분배금이 현금흐름표에 없고 자본변동표에만 있는 회사 — 자본변동표를 합계 열 기준으로 다시 받아(_sce_pick) KPI 재계산 + 전체 현황 출력
+        import financials as _fi, collections as _co
+        hyq = "(account_nm LIKE '%신종%' OR account_nm LIKE '%하이브리드%' OR account_nm LIKE '%영구채%' OR account_nm LIKE '%영구사채%' OR account_nm LIKE '%영구전환%' OR account_nm LIKE '%영구교환%')"
+        y0 = str(a.year - 2)
+        nm = {r[0]: r[1] for r in con.execute("SELECT corp_code, corp_name FROM company")}
+        cos = sorted({r[0] for r in con.execute(f"SELECT DISTINCT corp_code FROM fin_raw WHERE bsns_year>=? AND {hyq}", (y0,))})
+        if a.codes:
+            cos = [c for c in cos if c in set(ccs)]
+        print(f"[신종] 최근 3개년 재무제표에 신종자본증권 흔적이 있는 회사 {len(cos)}사", flush=True)
+
+        def _eval(cc, y, rc, fs):
+            rows = [dict(r) for r in con.execute("SELECT * FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (cc, y, rc, fs))]
+            if not rows:
+                return None
+            k = {}
+            _fi._int_fallback(rows, k)
+            return k
+        if a.type == "신종SCE보정":
+            tgt = []
+            for cc in cos:
+                for y, rc in con.execute("SELECT DISTINCT bsns_year, reprt_code FROM fin_raw WHERE corp_code=? AND bsns_year>=? AND COALESCE(rcept_no,'') NOT LIKE '%:전기'", (cc, y0)).fetchall():
+                    ks = [k for k in (_eval(cc, y, rc, fs) for fs in ("CFS", "OFS")) if k]
+                    if any(k.get("hybrid_src") == "SCE" or (k.get("hybrid_note") and "분배금" in k["hybrid_note"]) for k in ks):
+                        tgt.append((cc, y, rc))
+            cap = a.limit or 600
+            print(f"[신종] 자본변동표 재수집 대상 {len(tgt)}기간(회사 {len({t[0] for t in tgt})}사) · 이번 실행 {min(len(tgt), cap)}기간", flush=True)
+            n_ok = 0
+            for cc, y, rc in tgt[:cap]:
+                try:
+                    _fi.fetch_fin_raw(con, cc, y, rc, prev=False)
+                    _fi.build_kpi(con, cc, y, rc)
+                    con.commit(); n_ok += 1
+                except Exception as e:  # noqa
+                    print(f"[신종] {nm.get(cc, cc)} {y} {rc} 실패 {str(e)[:80]}", flush=True)
+            print(f"[신종] 재수집·재계산 {n_ok}기간", flush=True)
+        # 현황: 회사별 최근 사업보고서 기준
+        st, notes = _co.Counter(), _co.defaultdict(list)
+        for cc in cos:
+            yr = con.execute("SELECT MAX(bsns_year) FROM fin_raw WHERE corp_code=? AND reprt_code='11011' AND sj_div='BS'", (cc,)).fetchone()[0]
+            if not yr:
+                continue
+            for fs in ("CFS", "OFS"):
+                k = _eval(cc, yr, "11011", fs)
+                if not k or not (k.get("hybrid_eq") or k.get("hybrid_dist") or k.get("hybrid_note")):
+                    continue
+                st["대상(회사×기준)"] += 1
+                st["잔액 있음" if k.get("hybrid_eq") else "잔액 없음"] += 1
+                st[f"분배금 {k.get('hybrid_src') or '없음'}"] += 1
+                if k.get("hybrid_note"):
+                    notes[k["hybrid_note"]].append(f"{nm.get(cc, cc)}({fs})")
+        print("[신종] 현황 " + " · ".join(f"{k} {v}" for k, v in st.items()), flush=True)
+        for t, v in notes.items():
+            print(f"[신종] 안내 '{t}' {len(v)}건: " + ", ".join(v), flush=True)
     elif a.job == "rawdump" and a.type == "신종SCE":   # 2026-11-19: 재무상태표에 신종자본증권 줄이 없는 회사(SK텔레콤·한전·CJ대한통운 등) — 자본변동표 열(account_detail)에 신종 잔액이 있는지 DART 원자료 확인(--codes 필수)
         import financials as _fi, re as _re2
         hy = _re2.compile(r"신종|하이브리드|영구채|영구사채|영구전환|Hybrid|Perpetual", _re2.I)
