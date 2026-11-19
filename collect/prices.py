@@ -163,7 +163,7 @@ def build_summary(con, stock_code, shares_out=None, asof=None):
                 chg_1m, chg_3m, chg_1y, avg_vol_3m, avg_value_3m, vol_60d, chg_1w, chg_6m, chg_2y, chg_3y)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (stock_code, asof, last["close"], shares_out, mcap,
-                 max(r["close"] for r in y1) if y1 else None, min(r["close"] for r in y1) if y1 else None,
+                 max((r["high"] if r["high"] else r["close"]) for r in y1) if y1 else None, min((r["low"] if r["low"] else r["close"]) for r in y1) if y1 else None,   # 2026-11-19 사용자: 52주 최고·최저는 장중 고가·저가(수정주가) 기준
                  chg(30), chg(91), chg(365), avg_vol, avg_val, vol, chg(7), chg(182), chg(730), chg(1095)))
     try:   # 새 asof 행에도 최신 대용가를 이어 붙임(INSERT OR REPLACE가 대용가 열을 비우는 문제 방지)
         con.execute("""UPDATE price_summary SET subst_price=(SELECT sb_prc FROM subst_price s WHERE s.stock_code=? ORDER BY trd_dd DESC LIMIT 1),
