@@ -262,7 +262,7 @@ table.ibk tr.tot td{background:#1a4a7a;color:#fff;font-weight:700}table.ibk tr.g
 
 /* 3. 재무현황 개편(2026-10-28): 단순 표 + 특이사항 패널 */
 .fin2col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start;margin-bottom:8px}.fin2col.one{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}   /* 2026-11-18 사용자: 별도(또는 연결)만 있어도 둘 다 있는 회사와 같은 폭(왼쪽 절반) — 넓게 늘리면 가독성 저하 */
-@media (max-width:1150px){.fin2col{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:1150px){.fin2col,.fin2col.one{grid-template-columns:minmax(0,1fr)}}   /* 2026-11-19: 별도만 있는 회사(.one)도 좁은 화면에선 한 열 전체 폭(모바일에서 반폭으로 잘리던 문제) */
 .fcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;padding:8px 10px}
 .fcard{border:1px solid var(--line);border-radius:8px;padding:6px 10px;display:grid;gap:2px;line-height:1.45;align-content:start;background:var(--panel)}
 .fcard.bad{border-top:3px solid var(--bad)}.fcard.warn{border-top:3px solid var(--warn)}.fcard.info{border-top:3px solid var(--navy2)}.fcard.good{border-top:3px solid var(--good)}.fcard.fact{border-top:3px solid var(--line2)}
