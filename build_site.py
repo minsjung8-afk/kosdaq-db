@@ -281,10 +281,9 @@ def _compact_prices(rows, cut):
     if cur: out.append(cur)
     return out + new
 
-def company_detail(con, c):
-    cc, sc = c["corp_code"], c["stock_code"]
-    biz = q(con, "SELECT bsns_year, rcept_no, overview_text, summary_json, summary_md, rating_text FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc)
-    b = biz[0] if biz else {}
+def kpi_periods(con, c):
+    """재무현황 표의 기간 세트(연간 2개년 + 전년 동기 + 최근 분기, 분기 없으면 연간 3개년) — company_detail·fn_ai 공용(2026-11-19 분리)"""
+    cc = c["corp_code"]
     kpi = {}
     Q = {"11013": 1, "11012": 2, "11014": 3}
     acc = int(c.get("acc_mt") or 12) if str(c.get("acc_mt") or "").strip().isdigit() else 12
@@ -308,6 +307,20 @@ def company_detail(con, c):
             rows.append({**L, "label": plabel(L["bsns_year"], L["reprt_code"]), "kind": "interim"})
         if rows:
             kpi[fs] = [{k: v for k, v in r.items() if k not in ("corp_code", "fs_div")} for r in rows]
+    return kpi
+
+
+def company_detail(con, c):
+    cc, sc = c["corp_code"], c["stock_code"]
+    biz = q(con, "SELECT bsns_year, rcept_no, overview_text, summary_json, summary_md, rating_text FROM business WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 1", cc)
+    b = biz[0] if biz else {}
+    kpi = kpi_periods(con, c)
+    Q = {"11013": 1, "11012": 2, "11014": 3}
+    acc = int(c.get("acc_mt") or 12) if str(c.get("acc_mt") or "").strip().isdigit() else 12
+
+    def plabel(year, rc):                       # 분기말 월 기준 라벨: 2025.06 (결산월 반영)
+        mm = ((acc + 3 * Q.get(rc, 0) - 1) % 12) + 1
+        return f"{year}.{mm:02d}"
     ann5 = {}                                    # 분기 재무가 없는 회사의 연간 손익 추이 그래프용 최근 5개년(2026-10-26, 가벼운 필드만)
     for fs in ("CFS", "OFS"):
         a5 = q(con, "SELECT bsns_year, revenue, op_income, net_borrowings, ebitda FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND revenue IS NOT NULL ORDER BY bsns_year DESC LIMIT 5", cc, fs)
@@ -339,6 +352,7 @@ def company_detail(con, c):
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
         "ibk_fin": _ibk_fin(con, cc, kpi),
+        "fn_ai": _safe(lambda: q(con, "SELECT fs, nm, label, reason, quote, rcept_no FROM fn_ai WHERE corp_code=? AND reason IS NOT NULL", cc)),   # 2026-11-19 사용자 승인 ②: 주석 인용이 있는 변동 사유(Haiku)
         "notes_raw": _notes_raw(con, cc),
         "borrow_bd": _safe(lambda: _borrow_bd(con, cc)),
         "notes_struct": (lambda r: {"rcept_no": r[0]["rcept_no"], "report_nm": r[0]["report_nm"], **json.loads(r[0]["json"])} if r else None)(
