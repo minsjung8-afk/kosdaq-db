@@ -892,6 +892,15 @@ def main():
         if a.codes:
             cc = {r[0] for r in con.execute(f"SELECT corp_code FROM company WHERE corp_code IN ({','.join('?' * len(a.codes))}) OR stock_code IN ({','.join('?' * len(a.codes))})", (*a.codes, *a.codes))}
         rating_guar.scan(con, corp_codes=cc, limit=a.limit)
+    elif a.job == "rawdump" and a.type == "시세요약":   # 2026-11-19: 시세 재수집 없이 price_summary만 다시 계산(52주 고저 기준 변경 등 정의 변경 시)
+        import prices as _pr
+        n = 0
+        for cc, sc in corp_pairs(con):
+            try:
+                _pr.build_summary(con, sc); n += 1
+            except Exception as e:  # noqa
+                print(f"[시세요약] {sc} 실패 {str(e)[:80]}", flush=True)
+        print(f"[시세요약] 재계산 {n:,}종목", flush=True)
     elif a.job == "rawdump" and a.type == "차입점검":   # 2026-11-19 사용자 '총차입금 매칭이 우선': 전 회사 최근 연간 BS의 차입성 줄 vs 총차입금에 들어간 줄 전수 대조
         import financials as _fi, collections as _co, re as _re2
         broad = _re2.compile(r"(차입|사채|리스부채|유동성장기부채|어음|전자단기)")
