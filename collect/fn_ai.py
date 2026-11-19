@@ -153,7 +153,7 @@ def _norm(s):
 
 
 _UP = re.compile(r"신규|증가|발행|취득|확대|추가|인수|유입|편입|증자|조달|합병")
-_DOWN = re.compile(r"상환|감소|처분|매각|소멸|손상|대손|환입|축소|유출|제외|감자|회수|해지|제거|상각")
+_DOWN = re.compile(r"상환|감소|처분|매각|소멸|손상|축소|유출|제외|감자|회수|해지|제거")      # 환입·상각·대손은 계정에 따라 방향이 달라 제외(충당금 환입 → 채권 순액 증가)
 _PAREN_NUM = re.compile(r"\s*\([^()]*\d[^()]*\)")
 
 
@@ -192,6 +192,9 @@ def _check(reason, ex, r):
 
 def run(con=None, limit=None, codes=None, dry=False):
     import build_site  # noqa — 사이트 빌드와 같은 규칙으로 변동 항목 산출
+    if not dry and os.environ.get("FN_AI_ENABLED") != "1":     # 2026-11-19 사용자 '각주 관련 상세 주석은 일단 반영하지 말고': 표본 정밀도(20건 중 유효 9건)가 낮아 보류 — 켤 때만 실행
+        print("[fn_ai] 보류 중 — 실행하지 않음(사용자 결정 2026-11-19). 다시 켜려면 FN_AI_ENABLED=1", flush=True)
+        return 0
     con = con or connect()
     _ensure(con)
     spent = _spent(con)
