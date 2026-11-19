@@ -393,7 +393,7 @@ def company_detail(con, c):
         d["rating_summary"] = None
     d["flags"] = _flags(c, kpi, d["price_summary"], d["audit"], d["events"], [r for r in d["ratings"] or [] if not r["guar"]])
     try:
-        d["listing_risk"] = _listing_risk(c, kpi, prices, d["price_summary"], d["audit"], d.get("review"), d["events"], own_eq=_owner_equity(con, cc)) if (c.get("market") or "").upper() in ("KOSPI", "KOSDAQ") else None
+        d["listing_risk"] = _listing_risk(c, kpi, prices, d["price_summary"], d["audit"], d.get("review"), d["events"], own_eq=_owner_equity(con, cc, [r["bsns_year"] for r in (kpi.get("CFS") or []) if r.get("kind") == "annual"])) if (c.get("market") or "").upper() in ("KOSPI", "KOSDAQ") else None
     except Exception as e:  # noqa
         print("[site] listing_risk 실패", c.get("stock_code"), e); d["listing_risk"] = None
     LR_IDX[c["stock_code"]] = d.get("listing_risk")
@@ -1113,16 +1113,18 @@ def _lr_compact(lr):
 _OWN_EQ_NM = re.compile(r"^지배(기업|회사|주주)(의)?(소유주|소유지분|주주|소유주지분)?(에게|에)?(귀속되는|귀속)?(자본|지분)?(합계|총계)?$")
 
 
-def _owner_equity(con, cc):
-    """연결 재무상태표의 지배기업 소유주지분(사업보고서, 연도별) — 거래소 기준: 자본잠식·자기자본·법차손은 연결 재무제표, 자기자본은 비지배지분 제외"""
+def _owner_equity(con, cc, years):
+    """연결 재무상태표의 지배기업 소유주지분(사업보고서, 연도별) — 거래소 기준: 자본잠식·자기자본·법차손은 연결 재무제표, 자기자본은 비지배지분 제외.
+    연도를 지정해 기본키 앞부분(corp_code, bsns_year, reprt_code, fs_div, sj_div)으로 바로 찾는다 — 회사 전체 행을 훑는 조회를 넣은 실행은 수집·빌드 단계가 8분 → 20분 이상으로 늘었다(2026-11-19)."""
     out = {}
-    try:
-        for y, nm, aid, amt in con.execute("""SELECT bsns_year, account_nm, account_id, thstrm_amount FROM fin_raw
-                WHERE corp_code=? AND fs_div='CFS' AND sj_div='BS' AND reprt_code='11011' AND thstrm_amount IS NOT NULL""", (cc,)):
-            if aid == "ifrs-full_EquityAttributableToOwnersOfParent" or _OWN_EQ_NM.match(re.sub(r"\s", "", nm or "")):
-                out.setdefault(str(y), amt)
-    except Exception:  # noqa
-        pass
+    for y in years:
+        try:
+            for nm, aid, amt in con.execute("""SELECT account_nm, account_id, thstrm_amount FROM fin_raw
+                    WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div='CFS' AND sj_div='BS' AND thstrm_amount IS NOT NULL""", (cc, str(y))):
+                if aid == "ifrs-full_EquityAttributableToOwnersOfParent" or _OWN_EQ_NM.match(re.sub(r"\s", "", nm or "")):
+                    out.setdefault(str(y), amt)
+        except Exception:  # noqa
+            pass
     return out
 
 
