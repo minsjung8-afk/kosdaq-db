@@ -1684,7 +1684,7 @@ def main():
         notes_struct.run(set(ccs) if a.codes else None, limit=a.limit, con=con, force=a.force)
     if a.job == "fin_yoy":                    # 전년동기 열 재무상태표 보강(최신 분기의 전년 같은 분기 보고서 직접, 연결·별도 각 1콜)
         import financials
-        financials.run_yoy(ccs, con=con)
+        financials.run_yoy(ccs, con=con, force=a.force)   # --force --codes …: empty로 기록된 전년동기도 재조회(2026-11-20)
     if a.job == "fin_ofs":                    # 연결만 있는 회사의 별도 재무 보강(회사당 2콜)
         import financials
         financials.run_ofs(ccs, a.year - 1, con=con)
