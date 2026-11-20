@@ -157,6 +157,13 @@ def _quarters(con, cc):
             out[fs] = qs
     return out
 
+def _ltm_op5(qs):
+    """quarters(연결 우선)에서 LTM 영업이익이 있는 최근 5개 분기를 억원 정수 리스트로. 5개 미만이면 None(스크리닝에서 '추세 판단 불가')."""
+    rows = (qs or {}).get("CFS") or (qs or {}).get("OFS") or []
+    v = [r["ltm_op"] for r in rows if r.get("ltm_op") is not None]
+    return [round(x / 1e8) for x in v[-5:]] if len(v) >= 5 else None
+
+
 def _valuation(kpi, ps):
     rows = kpi.get("CFS") or kpi.get("OFS") or []
     if not rows or not ps or not ps.get("mcap"):
@@ -1385,6 +1392,7 @@ def build():
                       "rt_sub": (d["rating_aux"]["grade"] if d.get("rating_aux") and d["rating_aux"].get("kind") == "sub" else None), "manual": MANUAL.get(c["corp_code"]),
                       "rt_guar": (None if cur_rt else next((r["grade"] for r in d["ratings"] or [] if r.get("guar") and r.get("grade") not in ("취소", "철회", "WD", "NR", "-")), None)),   # 2026-11-18 사용자: 보증부 등급만 있는 회사는 등급 뱃지 대신 '보증부 A1'로
                       "per": (d["valuation"] or {}).get("per"), "ev_ebitda": (d["valuation"] or {}).get("ev_ebitda"), "cur": _CUR,
+                      "pbr": (d["valuation"] or {}).get("pbr"), "l5": _ltm_op5(d.get("quarters")),   # 2026-11-20 사용자 '쿠쿠홈시스·매일유업형 스크리닝': PBR + 최근 5분기 LTM 영업이익(억) — 목록 화면 스크리닝 필터용
                       "red": sum(1 for f in d["flags"] if f[1] == "red"), "amber": sum(1 for f in d["flags"] if f[1] == "amber"),
                       "lr": _lr_compact(d.get("listing_risk"))})   # 2026-11-19 상장유지 위험 뱃지: m 관리종목 · r 실질심사(상태) · c 환기 · w 위험/주의
     meta = {"built_at": con.execute("SELECT datetime('now','localtime')").fetchone()[0], "count": len(index),
