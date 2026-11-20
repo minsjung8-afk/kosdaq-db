@@ -1099,6 +1099,33 @@ def main():
                     if r.get("thstrm_amount") and (broad.search(an) or (r["sj_div"] == "CF" and _re2.search(r"배당|분배", an))):
                         print(f"[신종점검]    {r['sj_div']} {r['account_nm']} = {r['thstrm_amount']:,.0f} ({r.get('account_id') or ''})", flush=True)
         print(f"[신종점검] 신종 흔적은 있는데 잔액·분배금 중 하나라도 못 잡은 (회사×기준) {miss}건", flush=True)
+    elif a.job == "rawdump" and a.type == "배당":   # 2026-11-20 사용자 '배당률도 보여줘(작년 기준)': DART 정형 API alotMatter(배당에 관한 사항) 1콜/사 → 주당 현금배당금·현금배당수익률·배당성향 3개년 + 현재가 기준 수익률 출력(DB 변경 없음)
+        from common import dart_get as _dg
+        yr = str(a.year - 1)
+        def _num(v):
+            try:
+                return float(str(v).replace(",", "").replace("%", "").strip())
+            except Exception:  # noqa
+                return None
+        print(f"[배당] 사업연도 {yr} 사업보고서(11011) 기준 · 열: 회사|보통주 DPS(원) {yr}/{int(yr) - 1}/{int(yr) - 2}|공시 시가배당률(%)|배당성향(%)|현재가|현재가 기준 수익률(%)", flush=True)
+        for cc, sc in pairs:
+            api_cc = cc[1:] if cc.startswith("U") else cc
+            nm = con.execute("SELECT corp_name FROM company WHERE corp_code=?", (cc,)).fetchone()[0]
+            try:
+                js = _dg("alotMatter", corp_code=api_cc, bsns_year=yr, reprt_code="11011")
+            except Exception as e:  # noqa
+                print(f"[배당]    {nm} API 실패 {str(e)[:60]}", flush=True); continue
+            rows = js.get("list") or []
+            def pick(se_pat, pref="보통주"):
+                cand = [r for r in rows if se_pat in (r.get("se") or "").replace(" ", "")]
+                r = next((r for r in cand if pref in (r.get("stock_knd") or "")), cand[0] if cand else None)
+                return [(_num(r.get(k)) if r else None) for k in ("thstrm", "frmtrm", "lwfr")]
+            dps, yld, pay = pick("주당현금배당금"), pick("현금배당수익률"), pick("현금배당성향")
+            px = con.execute("SELECT close FROM price_daily WHERE stock_code=? ORDER BY dt DESC LIMIT 1", (sc,)).fetchone()
+            px = px[0] if px else None
+            cur_y = round(dps[0] / px * 100, 2) if dps[0] and px else None
+            f = lambda L: "/".join("-" if v is None else (f"{v:,.0f}" if abs(v) >= 100 else f"{v:g}") for v in L)
+            print(f"[배당]    {nm}|{f(dps)}|{f(yld)}|{f(pay)}|{px or '-'}|{cur_y if cur_y is not None else '-'}", flush=True)
     elif a.job == "rawdump" and a.type == "시세요약":   # 2026-11-19: 시세 재수집 없이 price_summary만 다시 계산(52주 고저 기준 변경 등 정의 변경 시)
         import prices as _pr
         n = 0
