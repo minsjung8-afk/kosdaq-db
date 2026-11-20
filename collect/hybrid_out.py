@@ -302,7 +302,7 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False, workers=6, budg
     year0 = year0 or date.today().year - 2
     tg = targets(con, year0, codes)
     done = {r[0] for r in con.execute("SELECT rcept_no FROM hybrid_out_log WHERE how NOT LIKE 'API 불일치%' AND how NOT LIKE '%분류 불가%'")}      # 불일치·분류 불가로 미저장한 보고서는 규칙이 바뀌면 다시 시도(2026-11-20 순서 추정 규칙 추가)
-    todo = [t for t in tg if dry or t[4] not in done]
+    todo = [t for t in tg if dry or codes or t[4] not in done]   # 종목 지정(--codes) 실행은 이미 받은 보고서도 다시 판정(규칙 수정 후 특정 회사 재적재용, 2026-11-20)
     work = todo[: (limit or len(todo))]
     print(f"[신종잔액] 대상 {len({t[0] for t in tg})}사 · {len(tg)}기간 · 이번 실행 {len(work)}기간 · 동시 {workers}" + (" (점검만)" if dry else ""), flush=True)
     n_ok = n_set = n_bad = left = 0
@@ -331,6 +331,8 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False, workers=6, budg
                 amts = [t.get("amt") for t in tables if t.get("amt") is not None]
                 first = amts[0] if amts else None
                 chk = "미대조" if api is None or not amts else ("일치" if any(abs(api - x) < 1 for x in amts) else "불일치")   # 정형 API는 '첫 표'가 아니라 개별(자기 회사) 표를 주기도 한다(콘텐트리중앙·SKC: 연결 표가 앞, API는 뒤의 별도 표) → 어느 표든 맞으면 일치
+                if chk == "일치" and res["how"].startswith("표 2개 순서 추정") and api is not None and first is not None and abs(api - first) >= 1:   # 2026-11-20: 순서 추정은 첫 표=연결이 전제 → API가 첫 표와 다르면(네패스 2024 1Q: 표 300억 vs API 0) 저장하지 않음
+                    chk = "불일치"
                 n_bad += chk == "불일치"
                 print(f"[신종잔액] {name} {y} {rc}: 연결 {_e(res['CFS'])} · 별도 {_e(res['OFS'])} · 기준없음 {_e(res['ANY'])} · 자기회사 {_e(res['OWN'])} · {res['how']} · API {_e(api)} {chk} · 표 "
                       + " / ".join(f"[{t['label'][:18] or '-'}|{t.get('ctx') or '-'}] {_e(t.get('amt'))}({t.get('unit')}{'·' + t['note'] if t.get('note') else ''})" for t in tables), flush=True)
