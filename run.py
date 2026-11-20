@@ -435,9 +435,10 @@ def main():
                 except Exception:  # noqa
                     _c["v"] = set()
             return _c["v"]
-        def _audit_add(n=200, min_eq=1000):
-            """2026-11-18 사용자 '3천억 이상부터 asap' → 11-19 '3,000억 다 수집하면 1,500억 이상 추가' → 11-20 '1,000억↑로 확장': 감사보고서만 내는 비상장 자본총계 1,000억↑를
-            큰 순으로 매일 밤 n사씩(audit_filers.eligible이 자본총계 내림차순이라 3,000억↑ 잔여분이 먼저 끝나고 1,500억↑로 이어진다)"""
+        def _audit_add(n=300, min_eq=500):
+            """2026-11-18 사용자 '3천억 이상부터 asap' → 11-19 '3,000억 다 수집하면 1,500억 이상 추가' → 11-20 '1,000억↑로 확장' → 11-20 밤 '1,000억 다 되면 500억↑도 추가':
+            감사보고서만 내는 비상장 자본총계 500억↑ 큰 순으로 매일 밤 n사씩(audit_filers.eligible이 자본총계 내림차순이라 1,000억↑ 잔여 348사가 먼저 끝나고 500억대로 이어진다).
+            비용: 1사당 DART 약 6.7콜·15초 → 300사 ≈ 2,000콜·75분(2026-11-20 250사 실측 1,671콜·85분). 500~1,000억 약 2,300사 → 8일 안팎"""
             import subprocess
             con.commit()
             subprocess.run([sys.executable, str(Path(__file__).resolve()), "unlisted_add", "--type", "감사보고서", "--limit", str(n), "--min-equity", str(min_eq)],
