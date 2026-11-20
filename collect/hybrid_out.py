@@ -231,6 +231,10 @@ def classify(tables, corp_name):
         return {**res, "CFS": sum(x["amt"] for x in t), "OFS": mine[0]["amt"], "how": f"발행회사별 표 {len(t)}개(별도=자기 회사, 연결=합계)"}
     if not mine and all(is_other(x) for x in t):               # 종속회사 표만 여러 개(SK이노베이션 2024 반기: SK인천석유화학·SK온) → 연결만
         return {**res, "CFS": sum(x["amt"] for x in t), "how": f"종속회사 표 {len(t)}개 → 연결만(합계)"}
+    # 2026-11-20 사용자 '분류 불가 19건(현대차·AK홀딩스·대동) 보완': 기준 표시도 발행회사 이름도 없는 표 2개는 정기보고서 관행상 연결→별도 순서
+    # (CJ CGV 등 라벨이 있는 2표 사례 전부 그 순서). 첫 표 ≥ 둘째 표일 때만 순서로 추정하고 '순서 추정'을 남긴다(API 대조는 호출부에서 첫 표와 비교).
+    if len(t) == 2 and not any(bs) and not any(is_own(x) or is_other(x) for x in t) and t[0]["amt"] >= t[1]["amt"] >= 0:
+        return {**res, "CFS": t[0]["amt"], "OFS": t[1]["amt"], "how": "표 2개 순서 추정(연결→별도, 기준 표시 없음)"}
     return {**res, "how": f"분류 불가(표 {len(t)}개, 라벨: " + " / ".join(x["label"][:14] or "-" for x in t) + ")"}
 
 
@@ -297,7 +301,7 @@ def run(con=None, year0=None, codes=None, limit=None, dry=False, workers=6, budg
     from datetime import date
     year0 = year0 or date.today().year - 2
     tg = targets(con, year0, codes)
-    done = {r[0] for r in con.execute("SELECT rcept_no FROM hybrid_out_log WHERE how NOT LIKE 'API 불일치%'")}      # 불일치로 미저장한 보고서는 규칙이 바뀌면 다시 시도
+    done = {r[0] for r in con.execute("SELECT rcept_no FROM hybrid_out_log WHERE how NOT LIKE 'API 불일치%' AND how NOT LIKE '%분류 불가%'")}      # 불일치·분류 불가로 미저장한 보고서는 규칙이 바뀌면 다시 시도(2026-11-20 순서 추정 규칙 추가)
     todo = [t for t in tg if dry or t[4] not in done]
     work = todo[: (limit or len(todo))]
     print(f"[신종잔액] 대상 {len({t[0] for t in tg})}사 · {len(tg)}기간 · 이번 실행 {len(work)}기간 · 동시 {workers}" + (" (점검만)" if dry else ""), flush=True)
