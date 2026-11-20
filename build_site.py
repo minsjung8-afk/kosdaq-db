@@ -404,6 +404,11 @@ def company_detail(con, c):
     except Exception as e:  # noqa
         print("[site] listing_risk 실패", c.get("stock_code"), e); d["listing_risk"] = None
     LR_IDX[c["stock_code"]] = d.get("listing_risk")
+    try:   # 2026-11-20 일일 표본 검증(verify) 최근 결과 — 회사 화면 "표본 검증" 줄
+        import verify as _vf
+        d["verify"] = _vf.summary(con, cc)
+    except Exception:  # noqa
+        d["verify"] = None
     try:
         RT_UPD.extend((dt, c["corp_name"], c["stock_code"], ag, x, y, k) for dt, ag, x, y, k in _rt_changes(d["ratings"]))
     except Exception:  # noqa
@@ -1406,7 +1411,13 @@ def build():
     try:   # 데이터 품질 점검 결과(site/data/dq.json) + 점검 페이지(dq.html)
         sys.path.insert(0, str(Path(__file__).resolve().parent / "collect"))
         import dq
-        dq.run(con)
+        _dqo = dq.run(con)
+        try:   # 2026-11-20 표본 검증 승인 큐(최근 30일) + 통계를 dq.json에 붙임
+            import verify as _vf
+            _dqo["verify"] = _vf.queue(con)
+            (SITE / "data" / "dq.json").write_text(json.dumps(_dqo, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:  # noqa
+            print("[site] 검증 큐 생성 실패:", e)
         if (TEMPLATE.parent / "dq.html").exists():
             shutil.copy(TEMPLATE.parent / "dq.html", SITE / "dq.html")
     except Exception as e:  # noqa

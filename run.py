@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill", "da_ai", "periodic_new"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill", "da_ai", "periodic_new", "verify"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--min-equity", type=float, help="unlisted_add 감사보고서: 자본총계 하한(억원) — 2026-11-18 사용자 '3천억 이상부터 asap'")
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
@@ -1099,6 +1099,9 @@ def main():
                     if r.get("thstrm_amount") and (broad.search(an) or (r["sj_div"] == "CF" and _re2.search(r"배당|분배", an))):
                         print(f"[신종점검]    {r['sj_div']} {r['account_nm']} = {r['thstrm_amount']:,.0f} ({r.get('account_id') or ''})", flush=True)
         print(f"[신종점검] 신종 흔적은 있는데 잔액·분배금 중 하나라도 못 잡은 (회사×기준) {miss}건", flush=True)
+    elif a.job == "verify":   # 2026-11-20 사용자 결정: 하루 20사 원문 대조 — 정정·단위만 자동 보완, 나머지 승인 큐(dq 페이지). 매일 03:30 스케줄(worker)
+        import verify as _vf
+        _vf.run(con, n=a.limit or 20, codes=a.codes, dry=a.dry_run)
     elif a.job == "rawdump" and a.type == "배당":   # 2026-11-20 사용자 '배당률도 보여줘(작년 기준)': DART 정형 API alotMatter(배당에 관한 사항) 1콜/사 → 주당 현금배당금·현금배당수익률·배당성향 3개년 + 현재가 기준 수익률 출력(DB 변경 없음)
         from common import dart_get as _dg
         yr = str(a.year - 1)
