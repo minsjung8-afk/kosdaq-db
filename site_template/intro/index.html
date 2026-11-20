@@ -54,15 +54,15 @@ html,body{margin:0;height:100%;background:var(--navy0);overflow:hidden;font-fami
 <script>
 // 장면: 화면 캡처는 src/ 2배 해상도. crop=[x,y,w,h](원본 px) 프레임에 맞춰 보이는 영역, zoom=[x,y,w,h] 3초 뒤 확대 목표, hl=강조 상자들(원본 px)
 const SHOTS=[
- {dur:3,img:'h0.jpg',W:3024,H:1580,crop:[0,0,3024,1323],hl:[[40,262,2950,180]],no:'01',tt:'상장사 + 신용등급 보유 비상장사 3,100여 개사',st:'DART · KRX · 금융감독원 자료를 매일 새벽 자동 갱신 · <b>회사 추가로 계속 늘어남</b>'},
- {dur:3,img:'h1.jpg',W:3136,H:1562,crop:[0,462,1580,692],hl:[[20,480,600,670]],no:'02',tt:'회사명 · 종목코드 · 업종으로 검색',st:'시장 · 비상장 필터, 시총 · PER · EV/EBITDA · 신용등급순 정렬'},
- {dur:3,img:'h1.jpg',W:3136,H:1562,crop:[640,470,2496,1092],hl:[[676,500,2440,120],[700,625,2410,250]],no:'03',tt:'대표 신용등급 · 심사 경고 · 핵심 지표',st:'부채비율 · 순차입금/EBITDA · 밸류에이션 · 감사의견을 첫 화면에서'},
- {dur:3,img:'rating.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,20,2020,910]],no:'04',tt:'최근 3년 신용등급 추이',st:'평가서 PDF 바로 열기 · <b>보증부 등급은 대표 등급에서 자동 제외</b>'},
- {dur:3,img:'fin.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,100,1090,860],[1176,100,1080,860]],no:'05',tt:'별도 · 연결 재무 + 최신 분기',st:'EBITDA · 총차입금 · FCF — 연도를 누르면 DART 원문으로 · <b>당사 양식 재무현황(체크리스트 ⑥) 엑셀, 화면 전체 Word · PDF 내려받기</b>'},
- {dur:3,img:'borrow.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,100,1090,540],[66,810,2200,170]],no:'06',tt:'차입금 구조 · 기발행 메자닌',st:'유동 · 비유동 × 차입금 · 사채 · 리스 3개년 + CB · BW 잔액과 전환가 대비 현재가'},
- {dur:3,img:'chart.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,110,2180,660]],no:'07',tt:'주가 차트 · 대용가 · 담보가',st:'일 · 주 · 월봉 차트 위에 대용가와 <b>담보가(대용가 × 90%)</b> 선 표시'},
- {dur:3,img:'sim.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,330,2190,380],[66,765,2190,180]],no:'08',tt:'담보인정 시뮬레이션 · 대주주 담보제공',st:'현재가→담보가 낙폭 버퍼 · 52주 최저 대비 · 담보제공 공시 보고서 바로 열기'},
- {dur:3,img:'add.jpg',W:1356,H:818,crop:[0,0,1356,818],hl:[[1160,590,110,70],[70,150,1120,80]],no:'09',tt:'목록에 없는 회사는 직접 추가',st:'DART 감사보고서 제출 법인 검색 → [추가] → 자동 수집 · <b>등록 암호는 관리자에게 문의하세요</b>'}];
+ {dur:4,img:'h0.jpg',W:3024,H:1580,crop:[0,0,3024,1323],hl:[[40,262,2950,180]],no:'01',tt:'상장사 + 신용등급 보유 비상장사 3,100여 개사',st:'DART · KRX · 금융감독원 자료를 매일 새벽 자동 갱신 · <b>회사 추가로 계속 늘어남</b>'},
+ {dur:4,img:'h1.jpg',W:3136,H:1562,crop:[0,462,1580,692],hl:[[20,480,600,670]],no:'02',tt:'회사명 · 종목코드 · 업종으로 검색',st:'시장 · 비상장 필터, 시총 · PER · EV/EBITDA · 신용등급순 정렬'},
+ {dur:4,img:'h1.jpg',W:3136,H:1562,crop:[640,470,2496,1092],hl:[[676,500,2440,120],[700,625,2410,250]],no:'03',tt:'대표 신용등급 · 심사 경고 · 핵심 지표',st:'부채비율 · 순차입금/EBITDA · 밸류에이션 · 감사의견을 첫 화면에서'},
+ {dur:4,img:'rating.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,20,2020,910]],no:'04',tt:'최근 3년 신용등급 추이',st:'평가서 PDF 바로 열기 · <b>보증부 등급은 대표 등급에서 자동 제외</b>'},
+ {dur:4,img:'fin.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,100,1090,860],[1176,100,1080,860]],no:'05',tt:'별도 · 연결 재무 + 최신 분기',st:'EBITDA · 총차입금 · FCF — 연도를 누르면 DART 원문으로 · <b>당사 양식 재무현황(체크리스트 ⑥) 엑셀, 화면 전체 Word · PDF 내려받기</b>'},
+ {dur:4,img:'borrow.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,100,1090,540],[66,810,2200,170]],no:'06',tt:'차입금 구조 · 기발행 메자닌',st:'유동 · 비유동 × 차입금 · 사채 · 리스 3개년 + CB · BW 잔액과 전환가 대비 현재가'},
+ {dur:4,img:'chart.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,110,2180,660]],no:'07',tt:'주가 차트 · 대용가 · 담보가',st:'일 · 주 · 월봉 차트 위에 대용가와 <b>담보가(대용가 × 90%)</b> 선 표시'},
+ {dur:4,img:'sim.jpg',W:2352,H:1033,crop:[0,0,2352,1033],hl:[[66,330,2190,380],[66,765,2190,180]],no:'08',tt:'담보인정 시뮬레이션 · 대주주 담보제공',st:'현재가→담보가 낙폭 버퍼 · 52주 최저 대비 · 담보제공 공시 보고서 바로 열기'},
+ {dur:4,img:'add.jpg',W:1356,H:818,crop:[0,0,1356,818],hl:[[1160,590,110,70],[70,150,1120,80]],no:'09',tt:'목록에 없는 회사는 직접 추가',st:'DART 감사보고서 제출 법인 검색 → [추가] → 자동 수집 · <b>등록 암호는 관리자에게 문의하세요</b>'}];
 const stage=document.getElementById('stage'), FW=1760, FH=770;
 function fit(c){ const s=Math.min(FW/c[2],FH/c[3]); return {s, ox:(FW-c[2]*s)/2, oy:(FH-c[3]*s)/2}; }
 for(const sh of SHOTS){
@@ -73,7 +73,7 @@ for(const sh of SHOTS){
   stage.appendChild(d);
 }
 const end=document.createElement('div'); end.className='slide'; end.innerHTML=`<div class="card end"><div class="l t1">kosdaq-db.pages.dev</div><div class="l t2">휴대폰 홈 화면에 앱으로 설치해 쓸 수 있습니다 (앱 설치 버튼)</div><div class="l t2">매일 06:00 시세 · 06:30 대용가 · 00:10 공시 · 재무 보충</div><div class="l t2">회사 화면은 Word · PDF로, 당사 양식 재무현황은 엑셀로 내려받기</div><div class="l t3">심사 참고용 요약입니다 — 판단은 반드시 DART · 금감원 원문으로 확인하세요</div></div>`; stage.appendChild(end);
-const slides=[...stage.querySelectorAll('.slide')], DUR=[2.5,8].concat(SHOTS.map(s=>s.dur)).concat([3]);
+const slides=[...stage.querySelectorAll('.slide')], DUR=[4,8].concat(SHOTS.map(s=>s.dur)).concat([4]);   // 2026-11-20 사용자: 너무 빨리 넘어감 → 한 장 4초(02 '왜' 슬라이드는 타원 5개 순차 등장이라 8초 유지). 총 약 52초
 let cur=0, playing=true, t0=0, raf=0, timer=0;
 const dots=document.getElementById('dots'); slides.forEach((_,i)=>{ const d=document.createElement('i'); d.onclick=()=>go(i,true); dots.appendChild(d); });
 const prog=document.querySelector('#prog i'), cnt=document.getElementById('cnt'), bPlay=document.getElementById('bPlay');
