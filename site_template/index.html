@@ -441,7 +441,9 @@ function sortList(l){
 // 2026-11-19 상장유지 위험 뱃지(공식: 관리종목·실질심사·환기종목 / 자체: 위험·주의)
 window.lrBadges=function(lr){ if(!lr) return ''; let h=''; if(lr.m) h+='<span class="lrb m" title="KRX 관리종목 지정">관리종목</span>'; if(lr.r) h+=`<span class="lrb r" title="상장적격성 실질심사 ${esc(lr.r)}">실질심사${lr.r==='검토 중'?'·검토':''}</span>`; if(lr.c) h+='<span class="lrb c" title="KRX 투자주의환기종목">환기</span>'; if(lr.u) h+=`<span class="lrb w1" title="거래소 관리종목 지정 우려 공시${typeof lr.u==='string'?' '+lr.u.slice(0,4)+'-'+lr.u.slice(4,6)+'-'+lr.u.slice(6,8):''}">지정 우려</span>`; else if(lr.w&&!lr.m&&!lr.r) h+=`<span class="lrb w2" title="자체 점검: 관리종목 지정 요건(시총·주가·매출·자본잠식·감사의견 등) 미달 상태 — 거래소 공시는 아직 없음">요건 미달</span>`; return h; };
 let lrf='';
-document.querySelectorAll('.lbtn').forEach(b=>b.onclick=()=>{lrf=b.dataset.l;document.querySelectorAll('.lbtn').forEach(x=>x.classList.toggle('on',x===b));applyFilter()});
+// 2026-11-20 사용자: 켜진 필터를 다시 누르면(더블클릭 포함) 해제되어 '전체'로 돌아감 — 상장유지·시장·초성 공통(togglePick)
+function togglePick(group,b,set){ const all=[...document.querySelectorAll(group)]; const back=b.classList.contains('on')&&b!==all[0]?all[0]:b; set(back.dataset); all.forEach(x=>x.classList.toggle('on',x===back)); applyFilter(); }
+document.querySelectorAll('.lbtn').forEach(b=>b.onclick=()=>togglePick('.lbtn',b,d=>{lrf=d.l;}));
 // 2026-11-20 사용자: 회사명 초성 버튼. 앞의 괄호·공백·기호는 건너뛰고 첫 글자의 초성(된소리는 기본 자음으로)
 const CHO_T=['ㄱ','ㄱ','ㄴ','ㄷ','ㄷ','ㄹ','ㅁ','ㅂ','ㅂ','ㅅ','ㅅ','ㅇ','ㅈ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
 function choOf(name){ const n=String(name||'').replace(/^(\s|\(주\)|㈜|주식회사|[()\[\]·.,'"-])+/,'');   /* 괄호·㈜·'주식회사' 접두만 제거 — 글자 단위로 지우면 '사'·'주'로 시작하는 회사명이 깨짐 */ const c=n.charCodeAt(0); if(c>=0xAC00&&c<=0xD7A3) return CHO_T[Math.floor((c-0xAC00)/588)]; if(c>=0x3131&&c<=0x314E) return CHO_T[[0x3131,0x3132,0x3134,0x3137,0x3138,0x3139,0x3141,0x3142,0x3143,0x3145,0x3146,0x3147,0x3148,0x3149,0x314A,0x314B,0x314C,0x314D,0x314E].indexOf(c)]||''; return n?'A':''; }
@@ -455,7 +457,7 @@ function scrApply(){ SCR=scrRead(); const el=$('#scr'); el.classList.toggle('on'
 $('#s_go').onclick=scrApply; $('#scr .bd').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); scrApply(); } });
 $('#s_clr').onclick=()=>{ ['s_per','s_pbr','s_ev','s_debt','s_mcap','s_g'].forEach(id=>$('#'+id).value=''); $('#s_tr').value=''; scrApply(); };
 $('#s_pre').onclick=()=>{ $('#s_per').value=8; $('#s_pbr').value=1; $('#s_ev').value=''; $('#s_debt').value=100; $('#s_mcap').value=1000; $('#s_tr').value='up'; $('#s_g').value=10; scrApply(); };
-document.querySelectorAll('#cho .cbtn').forEach(b=>b.onclick=()=>{cho=b.dataset.ch;document.querySelectorAll('#cho .cbtn').forEach(x=>x.classList.toggle('on',x===b));applyFilter()});
+document.querySelectorAll('#cho .cbtn').forEach(b=>b.onclick=()=>togglePick('#cho .cbtn',b,d=>{cho=d.ch;}));
 function applyFilter(){
   const t=$('#q').value.trim().toLowerCase();
   let l=mkt==='MANUAL'?items.filter(i=>i.manual):mkt?items.filter(i=>i.market===mkt):items;
@@ -471,7 +473,7 @@ document.querySelectorAll('.sbtn').forEach(b=>b.onclick=()=>{
   b.textContent+=sortDesc?' ▼':' ▲'; applyFilter();
 });
 $('#q').addEventListener('input',applyFilter);
-document.querySelectorAll('.mbtn:not(.lbtn)').forEach(b=>b.onclick=()=>{mkt=b.dataset.m;document.querySelectorAll('.mbtn:not(.lbtn)').forEach(x=>x.classList.toggle('on',x===b));applyFilter()});
+document.querySelectorAll('#mkts .mbtn').forEach(b=>b.onclick=()=>togglePick('#mkts .mbtn',b,d=>{mkt=d.m;}));
 function render(list){
   $('#cnt').textContent=`${list.length}개`;
   $('#list').innerHTML=list.slice(0,500).map(i=>`<div class="row${cur===i.code?' on':''}${i.delisted?' dlr':''}" data-c="${i.code}">
