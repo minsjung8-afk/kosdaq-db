@@ -21,6 +21,7 @@ const TABLE = [
   { hh: 7,  mm: 30, dow: [1, 2, 3, 4, 5], job: "subst" },    // 월~금 07:30  대용가 재조회(daily 뒤 순서 유지)
   { hh: 8,  mm: 30, dow: [1, 2, 3, 4, 5], job: "daily" },    // 월~금 08:30  07:00 보완(미반영분만)
   { hh: 0,  mm: 10,                        job: "catchup" },  // 매일 00:10   미수집분 일괄
+  { hh: 3,  mm: 30,                        job: "verify" },   // 매일 03:30   표본 20사 원문 대조(정정·단위 자동 보완, 나머지 승인 큐) — 2026-11-20 사용자 결정, 11-21부터
   { hh: 5,  mm: 30, dom: [2],              job: "fin" },      // 매월 2일 05:30  연간 재무 갱신
   { hh: 5,  mm: 30, dom: [1, 15],          job: "rating" },   // 매월 1·15일 05:30  신용등급
   { hh: 4,  mm: 0,  dow: [2, 5],           job: "news" },     // 화·금 04:00  뉴스
@@ -31,7 +32,7 @@ const TABLE = [
 const GH_CRON = { "0 21 * * 0-4": "daily", "30 21 * * 0-4": "subst", "30 23 * * 0-4": "daily", "10 15 * * *": "catchup",
   "30 20 2 * *": "fin", "30 20 17 5,8,11 *": "fin", "30 20 1,15 * *": "rating", "0 19 * * 1,4": "news", "0 20 5 4 *": "biz" };
 const DEFAULT_MIN = { daily: 40, subst: 10, catchup: 170, fin: 120, rating: 30, news: 30, chain: 170, site: 12, unlisted_add: 20, kpi: 30,
-  da: 15, da_notes: 60, coverage: 8, review: 60, quarters: 60, biz: 90, mezz: 30, summarize: 60, audit_fs: 120, notes: 90, price: 20 };
+  da: 15, da_notes: 60, coverage: 8, review: 60, quarters: 60, biz: 90, mezz: 30, summarize: 60, audit_fs: 120, notes: 90, price: 20, verify: 25 };
 const GUARD_MIN = 15;          // 정기 작업 15분 전부터는 회사 등록을 시작하지 않음(아침 시세·공시 반영 지연 방지)
 const KST = 9 * 3600e3;
 
