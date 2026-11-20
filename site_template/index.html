@@ -52,15 +52,16 @@ header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6;flex:
 #instTip{max-width:260px;margin:0 0 6px auto;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.1);color:#E8EEF6;font-size:12px;text-align:left;line-height:1.5}
 #visit{position:fixed;right:14px;bottom:12px;z-index:50;padding:4px 11px;border-radius:999px;background:rgba(15,30,55,.82);color:#cfdcf0;font-size:11.5px;box-shadow:0 2px 8px rgba(0,0,0,.18);pointer-events:none}#visit:empty{display:none}#visit b{color:#fff;font-variant-numeric:tabular-nums}#visit .vl{font-size:10.5px;letter-spacing:.04em}
 @media print{#visit{display:none}}
-#band{grid-column:1/-1;display:grid;grid-template-columns:1.5fr repeat(5,minmax(0,1fr));gap:9px;padding:11px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
-#band .bc{padding:8px 12px 9px;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 2px rgba(15,41,66,.05),0 4px 14px rgba(15,41,66,.05)}
+/* 2026-11-20 사용자: 카드 띠를 본문 열(우측)에만 두고 오른쪽 정렬, 카드는 한 줄(제목+값, 부연은 툴팁) — 좌측 목록은 헤더 바로 아래까지 올라옴(aside가 2~3행 차지) */
+#band{grid-column:2;grid-row:2;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:7px 24px;background:var(--bg);border-bottom:1px solid var(--line);min-width:0}
+aside{grid-column:1;grid-row:2/4}main{grid-column:2;grid-row:3}
+#band .bc{padding:5px 12px;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 2px rgba(15,41,66,.05),0 4px 14px rgba(15,41,66,.05);display:flex;align-items:baseline;gap:8px;flex:0 0 auto;max-width:100%}
 #band .bc:first-child{border-left:3px solid var(--gold)}
-#band .k{font-size:10px;letter-spacing:.06em;color:var(--ink2);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#band .v{font-size:15.5px;font-weight:800;color:var(--navy-deep);font-variant-numeric:tabular-nums;margin-top:2px;letter-spacing:-.3px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#band .s{font-size:10.5px;color:var(--mute);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#band .s.wrap{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}   /* 수록 회사 구성은 두 줄로 전부 표시(2026-10-30) */
-@media (max-width:1300px){#band .s.wrap{display:block;font-size:10px}}   /* 좁은 화면에서도 구성은 보이게 */
-@media (max-width:1300px){header .lead{display:none}header .srcline .chip small{display:none}#band{gap:7px;padding:9px 16px}#band .bc{padding:7px 10px}#band .v{font-size:14px}#band .s{display:none}header .meta{font-size:10.5px}}
+#band .k{flex:0 0 auto;font-size:10px;letter-spacing:.06em;color:var(--ink2);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#band .v{font-size:13.5px;font-weight:800;color:var(--navy-deep);font-variant-numeric:tabular-nums;margin:0;letter-spacing:-.3px;line-height:1.25;white-space:nowrap}
+#band .s{display:none}
+#band .s.wrap{display:inline;font-size:11px;color:var(--ink2);margin-left:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}   /* 수록 회사 구성은 카드 안에 한 줄로 병기(2026-11-20) */
+@media (max-width:1300px){header .lead{display:none}header .srcline .chip small{display:none}#band{gap:6px;padding:6px 16px}#band .bc{padding:4px 10px}#band .v{font-size:13px}#band .s.wrap{display:none}header .meta{font-size:10.5px}}
 /* 좌측 패널 */
 aside{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
 aside .search{padding:12px;border-bottom:1px solid var(--line);background:#fafbfd}
@@ -90,7 +91,7 @@ aside input:focus{outline:2px solid var(--navy2);outline-offset:-1px}
 /* 본문 */
 main{overflow:auto;min-width:0;padding:18px 24px 48px}
 /* 2026-11-20 사용자: '전체보기' — 제목 헤더·수록회사 띠·좌측 목록을 모두 숨기고 우측 본문만 창 전체로(디자인은 그대로, 선택은 브라우저에 기억) */
-body.focus{grid-template-columns:1fr;grid-template-rows:1fr}body.focus header,body.focus #band,body.focus aside,body.focus #mbar{display:none!important}body.focus main{grid-column:1/-1;grid-row:1/-1}
+body.focus{grid-template-columns:1fr;grid-template-rows:1fr}body.focus header,body.focus #band,body.focus aside,body.focus #mbar{display:none!important}body.focus main{grid-column:1/-1;grid-row:1/-1}body.focus aside{grid-row:auto}
 #focusOff{display:none;position:fixed;right:16px;bottom:16px;z-index:40;font:600 11.5px var(--font);padding:5px 11px;border:1px solid var(--line2);border-radius:20px;background:#fff;color:var(--navy);cursor:pointer;box-shadow:0 2px 8px rgba(10,25,48,.12);opacity:.85}#focusOff:hover{opacity:1;background:var(--nbg)}body.focus #focusOff{display:inline-block}
 /* 2026-11-20 모바일: 전체보기는 PC 전용 — 모바일은 상세화면이 이미 전체폭이므로 버튼 숨김. 기존 display:revert!important가 body.mdet의 aside 숨김(line ~209)까지 되살려 상세 대신 목록이 보이던 문제 수정 */
 @media (max-width:760px){body.focus header,body.focus #band,body.focus aside{display:revert!important}body.focus.mdet header,body.focus.mdet #band,body.focus.mdet aside{display:none!important}body.focus #mbar{display:grid!important}#focusOff,#xbar [data-x="focus"]{display:none!important}}
@@ -197,8 +198,8 @@ a{color:var(--navy2)}
   header .eyebrow,header .lead,header .srcline,header #meta{display:none}
   header .hin{align-items:center}header .meta{text-align:right}#instBtn{margin:0}
   header h1{font-size:15px;margin:0}
-  #band{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:8px 10px}
-  #band .bc{padding:6px 8px}#band .v{font-size:12.5px}#band .k{font-size:9.5px}#band .s{display:none}
+  #band{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:8px 10px}
+  #band .bc{padding:6px 8px;display:block}#band .v{font-size:12.5px}#band .k{font-size:9.5px}#band .s,#band .s.wrap{display:none}
   aside{border-right:0;min-height:0}
   aside .search{padding:10px max(12px,env(safe-area-inset-right,0px)) 10px max(12px,env(safe-area-inset-left,0px));position:sticky;top:0;z-index:5}
   aside input{font-size:16px;padding:9px 12px}
@@ -401,16 +402,14 @@ function renderBand(m){
   const qn={'03':'1분기','06':'반기','09':'3분기'};
   const lq=m.latest_q?`${m.latest_q.slice(0,4)} ${qn[m.latest_q.slice(5)]||''}보고서`:'';
   const cells=[
-    [`수록 회사 <span style="font-weight:600;letter-spacing:0;color:#9a6b12">· 수동 추가 ${n(items.filter(i=>i.manual).length)}사 포함, 추가할수록 늘어남</span>`,`${n(m.count)}개사`,(()=>{   // 2026-11-18 사용자: 수동 추가하면 계속 늘어난다고 표시
+    [`<span title="수동 추가 ${n(items.filter(i=>i.manual).length)}사 포함, 추가할수록 늘어남">수록 회사</span>`,`${n(m.count)}개사`,(()=>{   // 2026-11-18 수동 추가 안내는 툴팁으로(2026-11-20 카드 한 줄 압축)
       const ur=items.filter(i=>i.market==='UNLISTED'&&i.rating).length, lr=items.filter(i=>i.market!=='UNLISTED'&&i.rating).length;   // 2026-10-30 사용자 요청: 구성 전부, 안 잘리게(두 줄 허용)
       return (['KOSPI','KOSDAQ','KONEX'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준')
-        +(bm.UNLISTED?` · 비상장 ${n(bm.UNLISTED)}`:'')+`<br>등급보유 ${n(m.rated)}(상장 ${n(lr)}·비상장 ${n(ur)})`+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'');})()],
+        +(bm.UNLISTED?` · 비상장 ${n(bm.UNLISTED)}`:'')+` · 등급보유 ${n(m.rated)}(상장 ${n(lr)}·비상장 ${n(ur)})`+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'');})()],
     ['재무 기준',lq?`${lq.replace('보고서','')} 반영`:(m.fin_year?`${m.fin_year} 사업보고서`:'-'),(m.fin_year?`연간 ${m.fin_year}까지 · `:'')+`${n(m.fin_annual)}사 · DART`],   // 2026-11-19 사용자: '2025 사업보고서'가 앞에 오면 과거 데이터로 보임 → 최신 분기를 앞에
-    ['분기 손익 (12분기)',`${n(m.fin_q)}사`,'누적 차감 복원 · LTM · DART'],
     ['주가 기준일',m.price_asof||'-','종가·거래량·시총 · KRX 일별시세'],
-    ['대용가 기준일',m.subst_dd||'-','담보가 = 대용가 × 90% · KRX'],
-    ['신용등급 보유',`${n(m.rated)}사`,(m.rating_asof?`최근 ${m.rating_asof} · `:'')+'금감원 공시']];
-  $('#band').innerHTML=cells.map(([k,v,s],i)=>`<div class="bc"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s${i===0?' wrap':''}" title="${esc(s.replace(/<br>/g,' / '))}">${i===0?s:esc(s)}</div></div>`).join('');
+    ['대용가 기준일',m.subst_dd||'-','담보가 = 대용가 × 90% · KRX']];   // 2026-11-20 사용자: 분기 손익·신용등급 보유 카드 삭제(등급보유는 수록 회사 구성에 포함)
+  $('#band').innerHTML=cells.map(([k,v,s],i)=>`<div class="bc" title="${i===0?'':esc(s.replace(/<br>/g,' / '))}"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s${i===0?' wrap':''}" title="${esc(s.replace(/<br>/g,' / '))}">${i===0?s:esc(s)}</div></div>`).join('');
 }
 let mkt='',sortKey='name',sortDesc=false;
 const MK={KOSDAQ:0,KOSPI:1,KONEX:2,UNLISTED:3};
