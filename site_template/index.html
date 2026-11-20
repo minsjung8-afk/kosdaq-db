@@ -110,6 +110,7 @@ section>.twrap{margin-left:16px;margin-right:16px}
 .tile .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1.2;margin-top:3px}
 .tile .v small{font-size:12px;color:var(--mute);margin-left:2px;font-weight:600}
 .tile .d{font-size:11px;color:var(--mute)}
+.tile .v .d52{font-size:11px;color:var(--mute);font-weight:600;letter-spacing:0}
 .tile .kvs{display:grid;grid-template-columns:auto auto;justify-content:space-between;gap:2px 10px;font-size:12.5px;margin-top:4px}.tile .kvs b{font-weight:500;color:var(--ink2)}.tile .kvs span{font-variant-numeric:tabular-nums;font-weight:700;text-align:right}
 .tile .foot{font-size:11px;color:var(--mute);margin-top:6px;border-top:1px dashed var(--line);padding-top:5px}
 /* 업종 내 위치 */
@@ -492,6 +493,8 @@ async function open(code){
   if(!d){$('#main').innerHTML='<div class="empty">상세 데이터가 없습니다.</div>';return}
   FXC=d.currency&&d.currency!=='KRW'?d.currency:null;
   window.CURD=d;
+  // 2026-11-20 사용자: 52주 최저·최고 기록일 — 일별 시세(수정주가)에서 기준일 이전 365일 구간의 최저가(저가)·최고가(고가) 날짜
+  const w52=(()=>{ try{ const P=d.prices||[], asof=(d.price_summary||{}).asof; if(!P.length||!asof) return {}; const cut=new Date(asof); cut.setDate(cut.getDate()-365); const c0=cut.toISOString().slice(0,10); let lo=null,hi=null; for(const r of P){ if(r[0]<c0||r[0]>asof) continue; const h=r[2]||r[4], l=r[3]||r[4]; if(h!=null&&(hi==null||h>hi[1])) hi=[r[0],h]; if(l!=null&&(lo==null||l<lo[1])) lo=[r[0],l]; } return {lo:lo&&lo[0],hi:hi&&hi[0]}; }catch(e){ return {}; } })();
   const c=d.company, ps=d.price_summary||{}, kp=d.kpi.CFS||d.kpi.OFS||[], last=[...kp].reverse().find(r=>r.kind==='annual')||kp[kp.length-1]||{}, ao=d.audit[0];
   const opClass=o=>!o?'':/^적정/.test(o)?'good':/한정/.test(o)?'warn':'bad';   // DART 값은 '적정의견'·'한정의견'·'의견거절'
   // 대표 등급: 장기(단기사채 제외)·비정정 최신 → 단기·비정정 최신 → 정정 포함 (build_site.current_rating과 같은 규칙, 2026-10-25)
@@ -869,7 +872,7 @@ async function open(code){
         const rel=(x,y)=>x&&y?((x/y-1)*100).toFixed(0)+'%':'-'; const sgn=v=>v==='-'||v[0]==='-'?v:'+'+v;
         return `<div class="tiles" style="margin:10px 16px 0;grid-template-columns:repeat(5,1fr)">
         <div class="tile"><div class="k">현재가 / 60일 평균</div><div class="v">${num(ps.close)}<small>원</small></div><div class="kvs"><b>60일 평균가</b><span>${a60?num(Math.round(a60))+'원':'-'}</span><b>평균 대비 현재가</b><span>${sgn(rel(ps.close,a60))}</span></div></div>
-        <div class="tile"><div class="k">52주 최저 / 최고 <small>장중 저가·고가, 수정주가</small></div><div class="v">${num(ps.low_52w)}<small>원 ~ </small>${num(ps.high_52w)}<small>원</small></div><div class="kvs"><b>최저 대비 현재가</b><span>${sgn(rel(ps.close,ps.low_52w))}</span><b>최고 대비 현재가</b><span>${rel(ps.close,ps.high_52w)}</span></div></div>
+        <div class="tile"><div class="k">52주 최저 / 최고 <small>장중 저가·고가, 수정주가 · 괄호는 기록일</small></div><div class="v">${num(ps.low_52w)}<small>원${w52.lo?` <span class="d52" title="52주 최저 기록일 ${esc(w52.lo)}">(${w52.lo.slice(2).replace(/-/g,'.')})</span>`:''} ~ </small>${num(ps.high_52w)}<small>원${w52.hi?` <span class="d52" title="52주 최고 기록일 ${esc(w52.hi)}">(${w52.hi.slice(2).replace(/-/g,'.')})</span>`:''}</small></div><div class="kvs"><b>최저 대비 현재가</b><span>${sgn(rel(ps.close,ps.low_52w))}</span><b>최고 대비 현재가</b><span>${rel(ps.close,ps.high_52w)}</span></div></div>
         <div class="tile"><div class="k">대용가 (KRX${ps.subst_dd?' · '+ps.subst_dd:''})</div><div class="v">${sub?num(sub)+'<small>원</small>':'<span class="src" style="font-size:13px" title="KRX가 공시한 최신 대용가 목록에 이 종목이 없음(수집 누락 아님). 증거금 대용증권에서 제외된 종목일 수 있으므로 담보 취급 전 KRX·예탁원 확인">KRX 미산정</span>'}</div><div class="kvs"><b>현재가 대비</b><span>${sub&&ps.close?rel(sub,ps.close):'-'}</span></div></div>
         <div class="tile"><div class="k">담보가 (대용가×90%)</div><div class="v">${cv?num(Math.round(cv))+'<small>원</small>':'<span class="src" style="font-size:14px">미수집</span>'}</div><div class="kvs"><b>현재가→담보가 낙폭 버퍼</b><span>${cv&&ps.close?((cv/ps.close-1)*100).toFixed(0)+'%':'-'}</span><b>담보가 vs 52주 최저</b><span class="${cv&&ps.low_52w&&cv>ps.low_52w?'bad':''}">${cv&&ps.low_52w?sgn(((cv/ps.low_52w-1)*100).toFixed(0)+'%'):'-'}</span></div></div>
         <div class="tile"><div class="k">일평균 거래대금</div><div class="v">${조억W(ps.avg_value_3m,1)}<small> (3M)</small></div><div class="kvs"><b>1년 평균</b><span>${v1y?조억W(v1y):'-'}</span></div></div>
