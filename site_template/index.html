@@ -58,6 +58,13 @@ header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6;flex:
 /* 2026-11-20 사용자: 카드 띠를 증권사 시세 배너처럼 좌→우로 흐르게(티커). 같은 카드 묶음 2개를 이어 붙여 translateX(-50%→0)로 끊김 없이 순환, 마우스 올리면 정지, 모션 최소화 설정이면 정지 */
 #band .tk{display:flex;width:max-content;animation:tk var(--tkd,40s) linear infinite;will-change:transform}#band .tkin{flex:0 0 auto}#band .tk:hover{animation-play-state:paused}#band .tkin{display:flex;gap:8px;padding:0 4px}
 @keyframes tk{from{transform:translateX(calc(-1 * var(--tkw,600px)))}to{transform:translateX(0)}}@media (prefers-reduced-motion:reduce){#band .tk{animation:none}}
+/* 2026-11-21 사용자: 2·3행 — 「오늘 변경」(건수만)·「신용등급 변동」(회사 기존→신규) 우→좌 티커 */
+#band .tk2{display:flex;width:max-content;animation:tk2 var(--tkd,40s) linear infinite;will-change:transform;margin-top:5px}#band .tk2:hover{animation-play-state:paused}#band .tk2 .tkin{display:flex;gap:6px;padding:0 4px;align-items:center;flex:0 0 auto}
+@keyframes tk2{from{transform:translateX(0)}to{transform:translateX(calc(-1 * var(--tkw,600px)))}}@media (prefers-reduced-motion:reduce){#band .tk2{animation:none}}
+.pl{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:11px;white-space:nowrap;border:1px solid var(--line);background:#fff;color:var(--ink2)}
+.pl .lb{font-size:9.5px;font-weight:800;letter-spacing:.06em;color:#fff;background:var(--navy);border-radius:999px;padding:1px 7px}.pl b{color:var(--navy-deep);font-weight:800}.pl .ar{color:#8a94a6}
+.pl.dn{border-color:#f3c0c0;background:#fff5f5}.pl.dn .lb{background:#c0392b}.pl.up{border-color:#bfe3cc;background:#f3fbf6}.pl.up .lb{background:#1e8449}.pl.nw .lb{background:#2c5f8d}
+.pl.hd{background:var(--nbg2);border-color:#d6e2f3;color:var(--navy);font-weight:700}.pl.lk{cursor:pointer}.pl.lk:hover{border-color:var(--navy2)}
 aside{grid-column:1;grid-row:2/4}main{grid-column:2;grid-row:3}
 #band .bc{padding:5px 12px;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 2px rgba(15,41,66,.05),0 4px 14px rgba(15,41,66,.05);display:flex;align-items:baseline;gap:8px;flex:0 0 auto;max-width:100%}
 #band .bc:first-child{border-left:3px solid var(--gold)}
@@ -422,8 +429,34 @@ function renderBand(m){
   // 2026-11-20 티커: PC는 카드 묶음을 2벌 이어 붙여 좌→우로 흐르게(속도 ≈ 45px/s), 모바일은 정적 2열 카드
   if(innerWidth>760){ $('#band').innerHTML=`<div class="tk"><div class="tkin">${bcs}</div></div>`; const tk=$('#band .tk'), one=tk.firstElementChild, w=one.getBoundingClientRect().width||600, bw=$('#band').getBoundingClientRect().width||1200;
     const k=Math.ceil(bw/w)+1; for(let i=0;i<k;i++){ const c=one.cloneNode(true); c.setAttribute('aria-hidden','true'); tk.appendChild(c); }   // 묶음을 화면 폭을 넘길 만큼 복제해 와이드 화면에서도 빈 구간 없이 순환
-    tk.style.setProperty('--tkw',w+'px'); tk.style.setProperty('--tkd',Math.max(15,Math.round(w/45))+'s'); }
+    tk.style.setProperty('--tkw',w+'px'); tk.style.setProperty('--tkd',Math.max(15,Math.round(w/45))+'s'); tickerRows(); }
   else $('#band').innerHTML=bcs;
+}
+// 2026-11-21 사용자: 띠 2행 「오늘 변경」(신규 수록·새 보고서 반영·기능 변경 — 건수만), 3행 「신용등급 변동」(회사 기존 → 신규 · 평가사; 당일 없으면 최근 변동일) — data/updates.json(업데이트 패널과 같은 데이터), 우→좌 흐름
+async function tickerRows(){
+  let U=[]; try{ U=await (await fetch('data/updates.json')).json(); }catch(e){ return; } if(!Array.isArray(U)||!U.length) return;
+  const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const md=d=>String(d||'').slice(5); const pl=(cls,html,code)=>`<span class="pl ${cls||''}${code?' lk':''}"${code?` data-go="${esc(code)}"`:''}>${html}</span>`;
+  const n=v=>Number(v||0).toLocaleString('ko-KR');
+  // 2행
+  const t=U[0]; const rep=Object.entries(t.reports||{}); const repN=rep.reduce((a,[,v])=>a+v.length,0);
+  const kinds=['사업','3분기','반기','1분기'].filter(k=>t.reports&&t.reports[k]).map(k=>`${k} ${t.reports[k].length}`).join(' · ');
+  const r2=[pl('hd',`📌 오늘 변경 <b>${esc(md(t.date))}</b>`)];
+  if((t.new||[]).length) r2.push(pl('nw',`<span class="lb">신규 수록</span><b>${n(t.new.length)}사</b>`));
+  if(repN) r2.push(pl('',`<span class="lb">새 보고서 반영</span><b>${n(repN)}사</b> ${esc(kinds)}`));
+  if((t.ratings||[]).length) r2.push(pl('',`<span class="lb">등급 변동</span><b>${t.ratings.length}건</b>`));
+  if((t.notes||[]).length) r2.push(pl('',`<span class="lb">기능 변경</span><b>${t.notes.length}건</b> <span title="${esc(t.notes.join(' / '))}">${esc(t.notes[0].slice(0,40))}${t.notes[0].length>40?'…':''}</span>`));
+  if(r2.length===1) r2.push(pl('','변경 없음'));
+  // 3행
+  const rd=U.find(d=>(d.ratings||[]).length); const r3=[];
+  if(!rd){ r3.push(pl('hd','🏷 신용등급 변동'),pl('','최근 14일 변동 없음')); }
+  else { r3.push(pl('hd',`🏷 신용등급 변동 <b>${esc(md(rd.date))}</b>${rd.date!==t.date?' <span class="ar">· 오늘 변동 없음, 최근</span>':''}`));
+    for(const r of rd.ratings){ const cls=r.kind==='하향'?'dn':r.kind==='상향'?'up':'nw'; r3.push(pl(cls,`<span class="lb">${esc(r.kind)}</span><b>${esc(r.name)}</b> ${r.from?esc(r.from)+' ':''}<span class="ar">→</span> ${esc(r.to)} <span class="ar">${esc(r.agency||'')}</span>`,r.code)); } }
+  const band=$('#band'), bw=band.getBoundingClientRect().width||1200;
+  for(const html of [r2.join(''),r3.join('')]){ const tk=document.createElement('div'); tk.className='tk2'; tk.innerHTML=`<div class="tkin">${html}</div>`; band.appendChild(tk);
+    const one=tk.firstElementChild, w=one.getBoundingClientRect().width||600, k=Math.ceil(bw/w)+1; for(let i=0;i<k;i++){ const c=one.cloneNode(true); c.setAttribute('aria-hidden','true'); tk.appendChild(c); }
+    tk.style.setProperty('--tkw',w+'px'); tk.style.setProperty('--tkd',Math.max(15,Math.round(w/45))+'s'); }
+  band.addEventListener('click',e=>{ const p=e.target.closest('[data-go]'); if(p&&/^\d{6}$/.test(p.dataset.go)) open(p.dataset.go); });
 }
 let mkt='',sortKey='name',sortDesc=false;
 const MK={KOSDAQ:0,KOSPI:1,KONEX:2,UNLISTED:3};
