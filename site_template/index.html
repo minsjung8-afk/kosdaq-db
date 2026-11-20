@@ -54,7 +54,10 @@ header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6;flex:
 #visit{display:inline-block;vertical-align:middle;margin:0 0 7px 0;padding:3px 11px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#cfdcf0;font-size:11.5px;pointer-events:none}#visit:empty{display:none}#visit b{color:#fff;font-variant-numeric:tabular-nums}#visit .vl{font-size:10.5px;letter-spacing:.04em}
 @media print{#visit{display:none}}
 /* 2026-11-20 사용자: 카드 띠를 본문 열(우측)에만 두고 오른쪽 정렬, 카드는 한 줄(제목+값, 부연은 툴팁) — 좌측 목록은 헤더 바로 아래까지 올라옴(aside가 2~3행 차지) */
-#band{grid-column:2;grid-row:2;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:7px 24px;background:var(--bg);border-bottom:1px solid var(--line);min-width:0}
+#band{grid-column:2;grid-row:2;display:block;padding:7px 0;background:var(--bg);border-bottom:1px solid var(--line);min-width:0;overflow:hidden}
+/* 2026-11-20 사용자: 카드 띠를 증권사 시세 배너처럼 좌→우로 흐르게(티커). 같은 카드 묶음 2개를 이어 붙여 translateX(-50%→0)로 끊김 없이 순환, 마우스 올리면 정지, 모션 최소화 설정이면 정지 */
+#band .tk{display:flex;width:max-content;animation:tk var(--tkd,40s) linear infinite;will-change:transform}#band .tkin{flex:0 0 auto}#band .tk:hover{animation-play-state:paused}#band .tkin{display:flex;gap:8px;padding:0 4px}
+@keyframes tk{from{transform:translateX(calc(-1 * var(--tkw,600px)))}to{transform:translateX(0)}}@media (prefers-reduced-motion:reduce){#band .tk{animation:none}}
 aside{grid-column:1;grid-row:2/4}main{grid-column:2;grid-row:3}
 #band .bc{padding:5px 12px;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 2px rgba(15,41,66,.05),0 4px 14px rgba(15,41,66,.05);display:flex;align-items:baseline;gap:8px;flex:0 0 auto;max-width:100%}
 #band .bc:first-child{border-left:3px solid var(--gold)}
@@ -415,7 +418,12 @@ function renderBand(m){
     ['재무 기준',lq?`${lq.replace('보고서','')} 반영`:(m.fin_year?`${m.fin_year} 사업보고서`:'-'),(m.fin_year?`연간 ${m.fin_year}까지 · `:'')+`${n(m.fin_annual)}사 · DART`],   // 2026-11-19 사용자: '2025 사업보고서'가 앞에 오면 과거 데이터로 보임 → 최신 분기를 앞에
     ['주가 기준일',m.price_asof||'-','종가·거래량·시총 · KRX 일별시세'],
     ['대용가 기준일',m.subst_dd||'-','담보가 = 대용가 × 90% · KRX']];   // 2026-11-20 사용자: 분기 손익·신용등급 보유 카드 삭제(등급보유는 수록 회사 구성에 포함)
-  $('#band').innerHTML=cells.map(([k,v,s],i)=>`<div class="bc" title="${i===0?'':esc(s.replace(/<br>/g,' / '))}"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s${i===0?' wrap':''}" title="${esc(s.replace(/<br>/g,' / '))}">${i===0?s:esc(s)}</div></div>`).join('');
+  const bcs=cells.map(([k,v,s],i)=>`<div class="bc" title="${i===0?'':esc(s.replace(/<br>/g,' / '))}"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s${i===0?' wrap':''}" title="${esc(s.replace(/<br>/g,' / '))}">${i===0?s:esc(s)}</div></div>`).join('');
+  // 2026-11-20 티커: PC는 카드 묶음을 2벌 이어 붙여 좌→우로 흐르게(속도 ≈ 45px/s), 모바일은 정적 2열 카드
+  if(innerWidth>760){ $('#band').innerHTML=`<div class="tk"><div class="tkin">${bcs}</div></div>`; const tk=$('#band .tk'), one=tk.firstElementChild, w=one.getBoundingClientRect().width||600, bw=$('#band').getBoundingClientRect().width||1200;
+    const k=Math.ceil(bw/w)+1; for(let i=0;i<k;i++){ const c=one.cloneNode(true); c.setAttribute('aria-hidden','true'); tk.appendChild(c); }   // 묶음을 화면 폭을 넘길 만큼 복제해 와이드 화면에서도 빈 구간 없이 순환
+    tk.style.setProperty('--tkw',w+'px'); tk.style.setProperty('--tkd',Math.max(15,Math.round(w/45))+'s'); }
+  else $('#band').innerHTML=bcs;
 }
 let mkt='',sortKey='name',sortDesc=false;
 const MK={KOSDAQ:0,KOSPI:1,KONEX:2,UNLISTED:3};
