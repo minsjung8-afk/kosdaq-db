@@ -182,6 +182,21 @@ jobs:
       - name: build site
         if: github.event.inputs.job != 'unlisted' && env.DB_OK == '1'
         run: python run.py site
+      - name: site data snapshot      # 2026-11-20 소개 슬라이드 제작용 — 빌드된 site/data 일부(회사 목록·업데이트·표본 회사 3곳)를 3일 보관 아티팩트로(작업 환경이 pages.dev에 닿지 못해 로컬 렌더링에 씀)
+        if: github.event.inputs.job == 'site'
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-snapshot
+          retention-days: 3
+          if-no-files-found: ignore
+          path: |
+            site/data/companies.json
+            site/data/updates.json
+            site/data/dq.json
+            site/data/c/462870.json
+            site/data/c/086520.json
+            site/data/c/000660.json
+            site/data/c/005930.json
       - name: ensure pages project
         if: github.event.inputs.job != 'unlisted' && env.DB_OK == '1'
         continue-on-error: true
