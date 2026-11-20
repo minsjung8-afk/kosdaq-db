@@ -94,7 +94,10 @@ def run(days=None, bgn=None, end=None):
                     n_major += 1
                 except Exception as e:  # noqa
                     log(con, cc, "delta_major", "fail", e)
-            flag = next((v for k, v in EVENT_FLAGS.items() if k in (r.get("report_nm") or "").replace(" ", "")), None)
+            _nm0 = (r.get("report_nm") or "").replace(" ", "")
+            flag = next((v for k, v in EVENT_FLAGS.items() if k in _nm0), None)
+            if "정정" in _nm0 and re.search(r"사업보고서|분기보고서|반기보고서|감사보고서", _nm0):   # 2026-11-20 표본 검증(verify) 표본 선정용: 재무 보고서 정정 접수
+                flag = "재무정정"
             if flag:
                 con.execute("INSERT OR REPLACE INTO disclosure_event VALUES (?,?,?,?,?)",
                             (cc, r["rcept_no"], r["rcept_dt"], r["report_nm"], flag))
