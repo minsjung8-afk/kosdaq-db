@@ -134,6 +134,11 @@ def process(con=None, limit=None, days=None, light=False, workers=4):
                     build_kpi(con, cc, str(int(y) - 1), rc)
                     con.execute(f"UPDATE periodic_new SET status='반영', done_at=?, tries=tries+1 WHERE rcept_no IN ({q})", (now(), *ids))
                     n_ok += 1
+                    try:   # 2026-11-20 사용자(초록뱀미디어 CB): 기발행 메자닌 미상환 표(mezz_out)가 반기보고서에 머물러 있었음 → 새 정기보고서가 반영되면 그 보고서 기준으로 즉시 갱신(문서 1콜)
+                        import mezz as _mz
+                        _mz.fetch_outstanding(con, cc)
+                    except Exception as e:  # noqa
+                        log(con, cc, "periodic_mezz", "fail", f"{y} {rc} {e}")
                 else:
                     con.execute(f"UPDATE periodic_new SET tries=tries+1 WHERE rcept_no IN ({q})", ids)
                     n_wait += 1
