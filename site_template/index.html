@@ -803,6 +803,10 @@ async function open(code){
      h+=`<div class="fsv" data-fs="${FS}"><div class="twrap"><table class="ft">${head}${body}</table></div></div>`; }
      h+=`</div>`;
      if(MERGED||UNK) h+=`<div class="src" style="margin:4px 0 0">${MERGED?'합산 계정 = 그 기간 재무상태표에 차입금과 사채를 한 줄로 공시(분리 불가)':''}${MERGED&&UNK?' · ':''}${UNK?'구분불명 = 계정명·위치로 유동성 판정 불가':''}</div>`;
+     // 2026-11-20 사용자(초록뱀미디어 '총차입금에 CB 불포함?'): 메자닌 액면 잔액을 총차입금 옆에 병기 — 총차입금은 재무상태표 장부가(전환권·상환권 파생부채 분리, 할인 차감)라 액면보다 작게 보임
+     { const mo=(d.mezz_out||[]).filter(r=>(r.remndr_amt||0)>0); if(mo.length){ const face=mo.reduce((a,r)=>a+(r.remndr_amt||0),0); const by={}; mo.forEach(r=>{by[r.kind]=(by[r.kind]||0)+(r.remndr_amt||0);}); const src=mo[0].report_nm||''; const last=(d.kpi.CFS||d.kpi.OFS||[]).slice(-1)[0]||{}; const bor=last.borrowings;
+       const deriv=(()=>{ try{ const X=d.ibk_fin&&(d.ibk_fin.CFS||d.ibk_fin.OFS); if(!X) return null; const i=X.cols.length-1; const it=[...(X.groups.cl?X.groups.cl.items:[]),...(X.groups.ncl?X.groups.ncl.items:[])].filter(x=>/당기손익.*금융부채|파생상품부채|파생금융부채/.test(x.nm)); const v=it.reduce((a,x)=>a+(x.v[i]||0),0); return v?{v,nm:it.map(x=>x.nm).join('·')}:null; }catch(e){ return null; } })();
+       h+=`<div class="src" style="margin:6px 0 0;line-height:1.5"><b>기발행 메자닌 액면 잔액</b> ${억(face)}${UN()} (${Object.entries(by).map(([k,v])=>k+' '+억(v)+UN()).join(' · ')} · ${esc(src)} 기준, 3-2 표) — 총차입금 ${bor!=null?억(bor)+UN():'-'}에는 <b>재무상태표 장부가</b>로 포함됨: 전환권·조기상환권을 떼어낸 사채 부분만 차입금·사채 줄에 잡히고(액면보다 작음), 분리된 파생부채${deriv?` <b>${억(deriv.v)}${UN()}</b>(${esc(deriv.nm)})`:''}는 차입금이 아니라 총차입금에서 제외. 액면 기준 실질 차입은 총차입금에 그 차액을 더해 보세요.</div>`; } }
    } else if(d.kpi&&(d.kpi.CFS||d.kpi.OFS)) h+=`<div class="src" style="padding:4px 0 2px">차입금 현황 표: 재무상태표 세부 계정 미수집(사이트 재생성 후 표시)</div>`;
    if(!ns&&!nr&&!bb) h+=`<div class="src" style="padding:4px 0 2px">차입금 만기구조 · 금융기관별 차입 · 우발채무(보증·담보·소송·약정) — 최신 정기보고서 주석 수집 후 표시. 현재는 3. 재무현황의 총차입금·순차입금과 5. 공시 타임라인의 담보제공·소송 키워드를 참고하세요.</div>`;
    if(ns){
