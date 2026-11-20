@@ -20,11 +20,16 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;white-sp
 <header><h1>데이터 품질 점검</h1><div class="s" id="s">불러오는 중</div></header>
 <main>
 <div class="src">사이트 빌드 때마다 자동 점검(DART 호출 없음) · 최신 연간은 주 재무제표(연결 우선) 기준 · 예시는 항목당 최대 12개 · 회사명 클릭 → 해당 종목 화면</div>
+<h2 style="font-size:15px;color:var(--navy);margin:0 0 6px">표본 검증 (매일 03:30 · 20사 · 원문 ↔ DB)</h2><div class="src" id="vs">결과 없음(첫 실행 전)</div><table id="vt" style="margin-bottom:22px;display:none"><thead><tr><th>검증일</th><th>회사</th><th>연도·기준</th><th>항목</th><th class="n">DB</th><th class="n">원문</th><th>판정</th><th>조치</th></tr></thead><tbody id="vb"></tbody></table>
+<h2 style="font-size:15px;color:var(--navy);margin:0 0 6px">정합성·누락 점검</h2>
 <table><thead><tr><th style="width:24%">점검 항목</th><th style="width:8%">회사 수</th><th style="width:12%">비율</th><th>예시</th></tr></thead><tbody id="b"></tbody></table>
 </main>
 <script>
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 fetch('data/dq.json',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+  if(d.verify&&d.verify.stats&&d.verify.stats['검증 회사']){ const st=d.verify.stats; const q=d.verify.queue||[]; const 억=v=>v==null?'-':(v/1e8).toLocaleString('ko-KR',{maximumFractionDigits:1})+'억';
+    document.getElementById('vs').innerHTML=`최근 30일 검증 ${st['검증 회사']}사 · `+Object.entries(st).filter(([k])=>k!=='검증 회사').map(([k,v])=>`${esc(k)} ${v}`).join(' · ')+` · 아래는 자동 보완되지 않은 불일치(승인 큐) ${q.length}건 — 판정 기준: 일치 ±0.5% / 단위 불일치 ×1,000 / 정정 미반영 접수번호 차이 / 값 불일치 같은 접수번호`;
+    if(q.length){ document.getElementById('vt').style.display=''; document.getElementById('vb').innerHTML=q.map(x=>`<tr><td>${esc(x.at)}</td><td><a href="./#${esc(x.code)}" target="_blank">${esc(x.name)}</a></td><td>${esc(x.year)} ${esc(x.fs)}</td><td>${esc(x.item)}</td><td class="n">${억(x.db)}</td><td class="n">${억(x.src)}</td><td>${esc(x.verdict)}</td><td><small>${esc(x.action)}</small></td></tr>`).join(''); } }
   document.getElementById('s').innerHTML=`전체 ${d.companies.toLocaleString()}사${d.spac_excluded?` (스팩 ${d.spac_excluded}사 제외)`:''} · 점검 ${d.checks.length}개 항목 · <a href="./">← 심사참고 DB</a>`;
   document.getElementById('b').innerHTML=d.checks.map(c=>{const p=c.companies/d.companies*100;
     return `<tr><td><b>${esc(c.check)}</b></td><td class="n">${c.companies.toLocaleString()}</td><td><div class="bar"><i style="width:${Math.min(100,p).toFixed(1)}%"></i></div><small>${p.toFixed(1)}%</small></td>
