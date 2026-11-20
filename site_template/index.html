@@ -39,7 +39,7 @@ header .srcline{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:
 header .srcline .lbl{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:#8FA9C2;margin-right:2px}
 header .srcline .chip{font-size:10.5px;font-weight:700;color:#D3E3F2;white-space:nowrap;border:1px solid rgba(201,162,39,.42);background:rgba(255,255,255,.055);border-radius:999px;padding:3px 10px}
 header .srcline .chip small{font-weight:500;color:#9fb6cc;margin-left:4px}
-header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6}
+header .meta{color:#9fb0cc;font-size:11px;text-align:right;line-height:1.6;flex:0 1 auto;max-width:380px;margin-left:auto}
 #updBtn{position:relative;font:700 12px var(--font);color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:5px 11px;margin:0 6px 6px 0;cursor:pointer}#updBtn:hover{background:rgba(255,255,255,.2)}
 #updBtn .dot{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--warn);color:#fff;font-size:10px;line-height:16px;text-align:center;font-weight:800}
 #updPanel{position:fixed;top:0;right:0;width:min(440px,96vw);height:100vh;background:#fff;border-left:1px solid var(--line);box-shadow:-8px 0 28px rgba(15,41,66,.18);z-index:60;display:flex;flex-direction:column;transform:translateX(102%);transition:transform .22s ease}#updPanel.on{transform:none}
@@ -406,7 +406,7 @@ fetch('data/companies.json').then(r=>r.json()).then(j=>{
 });
 function renderBand(m){
   const n=v=>v==null?'-':Number(v).toLocaleString('ko-KR'), bm=m.by_market||{};
-  $('#meta').innerHTML=`빌드 ${esc(m.built_at||'-')}<br>평일 07:00 시세 · 07:30 대용가 · 08:30 보완 · 매일 00:10 미수집분 보충 · 03:30 표본 검증 · 월·수·금 05:00 뉴스`;   // 2026-11-20 스케줄 변경 반영
+  $('#meta').innerHTML=`빌드 ${esc(m.built_at||'-')}<br>평일 07:00 시세 · 07:30 대용가 · 08:30 보완<br>매일 00:10 보충 · 03:30 표본 검증 · 월·수·금 05:00 뉴스`;   // 2026-11-20 스케줄 변경 반영(한 줄이 길면 메타 블록이 헤더 아래로 줄바꿈돼 가운데로 밀림 → 두 줄로)
   const qn={'03':'1분기','06':'반기','09':'3분기'};
   const lq=m.latest_q?`${m.latest_q.slice(0,4)} ${qn[m.latest_q.slice(5)]||''}보고서`:'';
   const cells=[
