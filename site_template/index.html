@@ -464,7 +464,7 @@ async function open(code){
   const fl=d.flags||[];
   const flagStrip=fl.length?`<div class="flags">${fl.map(([n,l,t])=>`<span class="flag ${l}" title="${esc(t)}">${esc(n)}${t?` <small>${esc(t)}</small>`:''}</span>`).join('')}</div>`:`<div class="flags"><span class="flag ok">경고 플래그 없음</span></div>`;
   let h=`<h2>${esc(c.corp_name)}${c.delisted_dt?'<span class="dl" style="font-size:12px;vertical-align:middle">상장폐지</span>':''}${rtBadge}</h2><div class="sub-title">${c.market==='UNLISTED'?'비상장 · DART '+esc(c.corp_code):c.stock_code+' · '+esc(c.market)}${c.sect_tp?' '+esc(c.sect_tp):''} · ${esc(c.sector_krx||'')} (KSIC ${esc(c.induty_code||'-')})${c.corp_name_full&&c.corp_name_full!==c.corp_name?' · '+esc(c.corp_name_full):''}</div>`;
-  h+=`<div class="xbar" id="xbar"><button type="button" data-x="print" title="브라우저 인쇄 — 접힌 섹션을 모두 펼쳐 인쇄">🖨 인쇄</button><button type="button" data-x="word" title="보이는 화면 그대로 Word(.docx, A4 가로)로 저장 — 각 블록을 그림으로">📝 Word 저장</button><button type="button" data-x="pdf" title="보이는 화면 그대로 PDF(A4 가로)로 저장">📄 PDF 저장</button></div>`;   // 2026-11-18 사용자: 개별 업체 화면 내려받기(pdf·word)·인쇄
+  h+=`<div class="xbar" id="xbar"><button type="button" data-x="print" title="브라우저 인쇄 — 접힌 섹션을 모두 펼쳐 인쇄">🖨 인쇄</button><button type="button" data-x="html" title="단일 HTML 파일로 저장 — 외부 폰트·스크립트 없이 오프라인 PC에서 바로 열림, 표가 페이지에서 끊기지 않음">💾 HTML 저장</button></div>`;   // 2026-11-18 사용자: 개별 업체 화면 내려받기(pdf·word)·인쇄
   h+=flagStrip;
   const LR=d.listing_risk; if(LR&&(LR.items&&LR.items.length||LR.level)){ const o=LR.official||{}; const lv=LR.level; const amt=v=>v==null?'-':(Math.round(v/1e8)).toLocaleString('ko-KR');
     h+=`<div class="lrbox${lv?'':' fold'}" id="lrbox"><div class="hd"><span class="tg">▸</span>상장유지 위험 분석 ${lv?`<span class="lrb ${lv==='관리종목'||lv==='실질심사'?'m':lv==='환기종목'?'c':lv==='위험'?'w1':'w2'}">${esc(lv)}</span>`:'<span class="j ok">이상 없음</span>'} <span class="src" style="font-weight:400">${esc(LR.basis||'')} 기준 · 공식 지정(KRX·거래소공시)과 자체 점검(mgmt_rules)을 분리 · ${esc(LR.asof||'')}</span></div><div class="bd">
@@ -1052,7 +1052,7 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
 })();
 </script>
 <script>
-// 2026-11-18 사용자: 개별 업체 화면 인쇄 · Word · PDF, 당사 양식 재무현황 접기/펼치기 · 엑셀 내려받기
+// 2026-11-18 사용자: 개별 업체 화면 인쇄 · Word · PDF, 당사 양식 재무현황 접기/펼치기 · 엑셀 내려받기 → 2026-11-20 사용자: HTML 저장이 되면 Word·PDF 버튼 삭제(페이지 넘김에서 표가 끊김). 함수는 남겨 둠
 (function(){
   const $m=()=>document.getElementById('main');
   function unfoldAll(){ const f=[...$m().querySelectorAll('section.fold, .ibkfin.fold, .lrbox.fold')]; f.forEach(e=>e.classList.remove('fold')); try{ fitTables(); }catch(e){} return ()=>f.forEach(e=>e.classList.add('fold')); }
@@ -1103,6 +1103,34 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
         children}]});
       const blob=await Packer.toBlob(doc); dl(blob,`${name()}_심사참고_${today()}.docx`);
     } catch(e){ alert('Word 생성 실패: '+(e&&e.message||e)); } finally { busy(false); back(); } }
+  // 2026-11-20 사용자 'PDF·Word는 페이지 넘어가며 표가 끊김 → HTML 다운로드, 오프라인에서 바로 열려야(폰트 문제로 느렸던 전례)':
+  //   화면 본문(.mdbody)을 펼친 상태로 복제해 단일 HTML로 저장. 외부 자원 0(Pretendard 링크·스크립트·라이브러리 없음, 시스템 글꼴 맑은 고딕 우선), 시세 차트만 PNG로 박아 넣음.
+  //   접힌 섹션·각주 상세·연결/별도 전환은 모두 펼친 상태로 저장(파일은 정적이라 전환 버튼이 없음)
+  async function doHtml(){ const back=unfoldAll(); busy(true,'HTML 만드는 중…'); try{
+      await new Promise(r=>setTimeout(r,200));
+      const m=$m(), live=m.querySelector('.mdbody'), body=live.cloneNode(true);
+      const E=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      // 시세 차트(캔버스 라이브러리)는 그림으로
+      const px=live.querySelector('#px'), pxc=body.querySelector('#px');
+      if(px&&pxc){ let img=null; try{ await loadLib('h2c',()=>window.html2canvas); const cv=await html2canvas(px,{scale:2,backgroundColor:'#ffffff',logging:false}); img=cv.toDataURL('image/png'); }catch(e){}
+        pxc.innerHTML=img?`<img src="${img}" style="width:100%;height:auto;display:block" alt="시세 차트">`:'<div class="hint">시세 차트는 저장본에 포함되지 않음(사이트에서 확인)</div>'; pxc.removeAttribute('style'); }
+      body.querySelectorAll('.xbar,#xbusy,script,.mseg,[data-tf],[data-per]').forEach(e=>e.remove());
+      body.querySelectorAll('[hidden]').forEach(e=>e.removeAttribute('hidden'));                 // 각주 상세 등 접힌 것 펼침
+      body.querySelectorAll('.fin2col.m2').forEach(e=>e.classList.remove('m2'));                  // 연결·별도 둘 다
+      body.querySelectorAll('.fold').forEach(e=>e.classList.remove('fold'));
+      body.querySelectorAll('a[href]').forEach(a=>{ try{ a.href=new URL(a.getAttribute('href'),location.href).href; a.target='_blank'; }catch(e){} });
+      body.querySelectorAll('button').forEach(b=>{ const sp=document.createElement('span'); sp.className=b.className; sp.textContent=b.textContent; b.replaceWith(sp); });
+      const css=[...document.querySelectorAll('style')].map(s=>s.textContent).join('\n');
+      const extra=`:root{--font:"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif}
+html,body{display:block;background:#fff;margin:0;padding:0;font-family:var(--font);color:var(--fg)}
+#main{max-width:1400px;margin:0 auto;padding:12px 16px 40px;overflow:visible}
+.mdbody{padding:0}.twrap{overflow:visible}table{page-break-inside:auto}tr{page-break-inside:avoid}section,.ibkfin,.lrbox{page-break-inside:auto}
+.xhead{font-size:11px;color:#6b7488;margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid #dbe1ea}
+@media print{#main{padding:0}body{zoom:.85}}`;
+      const head=`${E(name())} · 심사참고 DB kosdaq-db.pages.dev · ${today()} 저장 · 심사 참고용 요약, 원문은 DART·금감원 · 오프라인 저장본(외부 글꼴·스크립트 없음)`;
+      const html=`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${E(name())} 심사참고 ${today()}</title><style>${css}\n${extra}</style></head><body><div id="main"><div class="xhead">${head}</div><div class="mdbody">${body.innerHTML}</div></div></body></html>`;
+      dl(new Blob([html],{type:'text/html;charset=utf-8'}),`${name()}_심사참고_${today()}.html`);
+    } catch(e){ alert('HTML 생성 실패: '+(e&&e.message||e)); } finally { busy(false); back(); } }
   // 2026-11-19 사용자: 당사 양식 세부 계정의 전년 대비 유의미한 변동(±30% 이상이면서 그룹 합계의 5% 이상)에 각주 — 연간은 직전 연도, 분기는 전년 동기와 비교. 화면·엑셀 공용
   // 2026-11-19 사용자: 변동 사유도 간략히 — 주석 원문 없이 DB에 있는 숫자(현금흐름·차입 구조·매출·Capex·공시)로 '근거'만 붙인다(추정 서술은 하지 않음). 공시·주석 기반 서술은 AI 요약(선택) 몫
   // 2026-11-19 사용자 '그런 건은 신종이 있다고 표시만': 잔액이 재무상태표에 따로 없으면 금액 대신 '있음'(당기 상환만 있으면 '상환 있음' — 잔존 여부 불명)
@@ -1174,7 +1202,7 @@ addEventListener('scroll',()=>{const p=document.getElementById('estpop');if(p)p.
     if(window.XLSXS||window.XLSX) go();
     else load('https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js',()=>{ window.XLSXS=window.XLSX; go(); },
               ()=>load('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',go,()=>alert('엑셀 라이브러리를 불러오지 못했습니다(네트워크).'))); }
-  document.addEventListener('click',e=>{ const lh=e.target.closest('#lrbox .hd'); if(lh){ lh.parentNode.classList.toggle('fold'); return; } const b=e.target.closest('[data-x]'); if(b){ const x=b.dataset.x; if(x==='print') doPrint(); else if(x==='pdf') doPdf(); else if(x==='word') doWord(); else if(x==='xlsx'){ e.stopPropagation(); doXlsx(); } return; }
+  document.addEventListener('click',e=>{ const lh=e.target.closest('#lrbox .hd'); if(lh){ lh.parentNode.classList.toggle('fold'); return; } const b=e.target.closest('[data-x]'); if(b){ const x=b.dataset.x; if(x==='print') doPrint(); else if(x==='pdf') doPdf(); else if(x==='word') doWord(); else if(x==='html') doHtml(); else if(x==='xlsx'){ e.stopPropagation(); doXlsx(); } return; }
     const hd=e.target.closest('.ibkh'); if(hd){ const box=hd.closest('.ibkfin'); box.classList.toggle('fold'); } });
 })();
 </script>
