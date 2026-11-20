@@ -414,7 +414,7 @@ function renderBand(m){
     [`<span title="수동 추가 ${n(items.filter(i=>i.manual).length)}사 포함, 추가할수록 늘어남">수록 회사</span>`,`${n(m.count)}개사`,(()=>{   // 2026-11-18 수동 추가 안내는 툴팁으로(2026-11-20 카드 한 줄 압축)
       const ur=items.filter(i=>i.market==='UNLISTED'&&i.rating).length, lr=items.filter(i=>i.market!=='UNLISTED'&&i.rating).length;   // 2026-10-30 사용자 요청: 구성 전부, 안 잘리게(두 줄 허용)
       return (['KOSPI','KOSDAQ','KONEX'].filter(k=>bm[k]).map(k=>({KOSPI:'코스피',KOSDAQ:'코스닥',KONEX:'코넥스'}[k]+' '+n(bm[k]))).join(' · ')||'DART 고유번호 기준')
-        +(bm.UNLISTED?` · 비상장 ${n(bm.UNLISTED)}`:'')+` · 등급보유 ${n(m.rated)}(상장 ${n(lr)}·비상장 ${n(ur)})`+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'');})()],
+        +(bm.UNLISTED?` · 비상장 ${n(bm.UNLISTED)}`:'')+` · 신용등급보유 ${n(m.rated)}`+(m.delisted?` · 상장폐지 ${n(m.delisted)} 포함`:'');})()],
     ['재무 기준',lq?`${lq.replace('보고서','')} 반영`:(m.fin_year?`${m.fin_year} 사업보고서`:'-'),(m.fin_year?`연간 ${m.fin_year}까지 · `:'')+`${n(m.fin_annual)}사 · DART`],   // 2026-11-19 사용자: '2025 사업보고서'가 앞에 오면 과거 데이터로 보임 → 최신 분기를 앞에
     ['주가 기준일',m.price_asof||'-','종가·거래량·시총 · KRX 일별시세'],
     ['대용가 기준일',m.subst_dd||'-','담보가 = 대용가 × 90% · KRX']];   // 2026-11-20 사용자: 분기 손익·신용등급 보유 카드 삭제(등급보유는 수록 회사 구성에 포함)
