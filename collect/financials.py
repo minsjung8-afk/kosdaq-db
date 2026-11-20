@@ -983,9 +983,11 @@ def run_ofs(corp_codes, year, con=None, workers=4):
     return n
 
 
-def run_yoy(corp_codes, con=None, workers=4):
+def run_yoy(corp_codes, con=None, workers=4, force=False):
     """전년동기 열 재무상태표 보강: 최신 분기보고서의 '전년 같은 분기'가 전기 열 재사용(손익만)이라 BS가 빈 경우,
-    그 분기보고서를 직접 받아 BS 포함 전체로 교체. 연결·별도 각각 1콜."""
+    그 분기보고서를 직접 받아 BS 포함 전체로 교체. 연결·별도 각각 1콜.
+    force=True(2026-11-20 사용자 '2026.3Q는 있는데 2025.3Q가 비어있다'): 이미 ok/empty로 기록된 건도 다시 조회 — DART가 013(자료 없음)을 돌려준 적 있어도
+    (연결 미작성 회사는 그대로 empty) 재확인. --codes로 범위를 좁혀 쓴다."""
     import common
     from concurrent.futures import ThreadPoolExecutor
     con = con or connect()
@@ -1008,8 +1010,9 @@ def run_yoy(corp_codes, con=None, workers=4):
         if not has_bs:
             todo.append((cc, fs, py, rc))
     tried = {(r[0], r[1]) for r in con.execute("SELECT corp_code, msg FROM fetch_log WHERE job='fin_yoy' AND status IN ('ok','empty')")}
-    todo = [t for t in todo if (t[0], f"{t[1]} {t[2]} {t[3]}") not in tried]
-    print(f"[fin-yoy] 전년동기 재무상태표 보강 대상 {len(todo)}건(연결·별도) · 병렬 {workers}", flush=True)
+    if not force:
+        todo = [t for t in todo if (t[0], f"{t[1]} {t[2]} {t[3]}") not in tried]
+    print(f"[fin-yoy] 전년동기 재무상태표 보강 대상 {len(todo)}건(연결·별도) · 병렬 {workers}{' · 강제 재조회' if force else ''}", flush=True)
     n = i = 0
     with ThreadPoolExecutor(workers) as ex:
         for b in range(0, len(todo), workers * 5):
