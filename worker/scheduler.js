@@ -24,14 +24,14 @@ const TABLE = [
   { hh: 3,  mm: 30,                        job: "verify" },   // 매일 03:30   표본 20사 원문 대조(정정·단위 자동 보완, 나머지 승인 큐) — 2026-11-20 사용자 결정, 11-21부터
   { hh: 5,  mm: 30, dom: [2],              job: "fin" },      // 매월 2일 05:30  연간 재무 갱신
   { hh: 5,  mm: 30, dom: [1, 15],          job: "rating" },   // 매월 1·15일 05:30  신용등급
-  { hh: 4,  mm: 0,  dow: [2, 5],           job: "news" },     // 화·금 04:00  뉴스
+  { hh: 5,  mm: 0,  dow: [1, 3, 5],        job: "news" },     // 월·수·금 05:00  뉴스(2026-11-20 사용자: 주 3회 — 최근 3일 내 수집한 회사는 건너뛰어 회사당 3~4일 주기, 00:10 catchup·03:30 verify 뒤)
   { hh: 5,  mm: 30, dom: [17], mon: [5, 8, 11], job: "fin" }, // 5·8·11월 17일 05:30  분기·반기보고서 제출기한 직후 재무 재수집
   { hh: 5,  mm: 0,  dom: [5],  mon: [4],   job: "biz" },      // 4/5 05:00  사업내용·감사의견·주주(사업보고서)
 ];   // 2026-10-27: GitHub 자체 schedule(collect.yml)을 없애고 이 표가 유일한 정기 실행 출처
 // GitHub 자체 schedule(collect.yml on.schedule) cron → job (실행 목록에서 작업 종류 추정용)
 const GH_CRON = { "0 21 * * 0-4": "daily", "30 21 * * 0-4": "subst", "30 23 * * 0-4": "daily", "10 15 * * *": "catchup",
   "30 20 2 * *": "fin", "30 20 17 5,8,11 *": "fin", "30 20 1,15 * *": "rating", "0 19 * * 1,4": "news", "0 20 5 4 *": "biz" };
-const DEFAULT_MIN = { daily: 40, subst: 10, catchup: 170, fin: 120, rating: 30, news: 30, chain: 170, site: 12, unlisted_add: 20, kpi: 30,
+const DEFAULT_MIN = { daily: 40, subst: 10, catchup: 170, fin: 120, rating: 30, news: 100, chain: 170, site: 12, unlisted_add: 20, kpi: 30,
   da: 15, da_notes: 60, coverage: 8, review: 60, quarters: 60, biz: 90, mezz: 30, summarize: 60, audit_fs: 120, notes: 90, price: 20, verify: 25 };
 const GUARD_MIN = 15;          // 정기 작업 15분 전부터는 회사 등록을 시작하지 않음(아침 시세·공시 반영 지연 방지)
 const KST = 9 * 3600e3;
