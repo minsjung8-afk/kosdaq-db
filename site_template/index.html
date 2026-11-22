@@ -453,8 +453,11 @@ async function tickerRows(){
   else { r3.push(pl('hd',`🏷 신용등급 변동 <b>${esc(md(rd.date))}</b>${rd.date!==t.date?' <span class="ar">· 오늘 변동 없음, 최근</span>':''}`));
     for(const r of rd.ratings){ const cls=r.kind==='하향'?'dn':r.kind==='상향'?'up':'nw'; r3.push(pl(cls,`<span class="lb">${esc(r.kind)}</span><b>${esc(r.name)}</b> ${r.from?esc(r.from)+' ':''}<span class="ar">→</span> ${esc(r.to)} <span class="ar">${esc(r.agency||'')}</span>`,r.code)); } }
   const band=$('#band'), bw=band.getBoundingClientRect().width||1200;
-  // 2026-11-22 사용자: 「오늘 변경」·「신용등급 변동」 두 행을 한 행으로 합침(짧은 행이 폭 채우느라 같은 알약을 3번 반복하던 문제도 해소). 두 묶음 사이는 구분 점.
-  for(const html of [r2.join('')+'<span class="pl sep" aria-hidden="true">·</span>'+r3.join('')]){ const tk=document.createElement('div'); tk.className='tk2'; tk.innerHTML=`<div class="tkin">${html}</div>`; band.appendChild(tk);
+  // 2026-11-22 사용자: 「오늘 변경」·「신용등급 변동」은 기본 한 행(짧은 행이 폭 채우느라 같은 알약을 3번 반복하던 문제 해소). 단 내용이 많을 때(합친 폭이 띠 폭의 2배 초과 — 정기평가일 등급 변동 다수)는 두 행으로 나눠 3행 표시.
+  const probe=document.createElement('div'); probe.className='tk2'; probe.style.animation='none'; probe.innerHTML=`<div class="tkin">${r2.join('')}</div><div class="tkin">${r3.join('')}</div>`; band.appendChild(probe);
+  const [w2,w3]=[...probe.children].map(e=>e.getBoundingClientRect().width); probe.remove();
+  const rowsHtml=(w2+w3>bw*2)?[r2.join(''),r3.join('')]:[r2.join('')+'<span class="pl sep" aria-hidden="true">·</span>'+r3.join('')];
+  for(const html of rowsHtml){ const tk=document.createElement('div'); tk.className='tk2'; tk.innerHTML=`<div class="tkin">${html}</div>`; band.appendChild(tk);
     const one=tk.firstElementChild, w=one.getBoundingClientRect().width||600, k=Math.ceil(bw/w)+1; for(let i=0;i<k;i++){ const c=one.cloneNode(true); c.setAttribute('aria-hidden','true'); tk.appendChild(c); }
     tk.style.setProperty('--tkw',w+'px'); tk.style.setProperty('--tkd',Math.max(15,Math.round(w/45))+'s'); }
   band.addEventListener('click',e=>{ const p=e.target.closest('[data-go]'); if(p&&/^\d{6}$/.test(p.dataset.go)) open(p.dataset.go); });
