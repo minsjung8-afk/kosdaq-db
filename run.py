@@ -444,13 +444,16 @@ def main():
             subprocess.run([sys.executable, str(Path(__file__).resolve()), "unlisted_add", "--type", "감사보고서", "--limit", str(n), "--min-equity", str(min_eq)],
                            env={**_os.environ, "KOSDAQ_IN_CHAIN": "1"}, check=False)
         import os as _os
+        _t0 = __import__("time").time(); _LIMIT = 200 * 60   # 워크플로 수집 단계 상한(collect.yml timeout 200m)과 맞춤
+        _remain = lambda: _LIMIT - (__import__("time").time() - _t0)
+        def _budget(want_sec, floor_min=10):   # 남은 시간 안에서만 예산 배정(상한 10분 전까지) — 2026-11-23: catchup이 mezz에서 200분 강제 종료(exit 137)된 뒤 순서·예산 재배치
+            return max(0, min(want_sec, int(_remain()) - floor_min * 60))
+        def _audit_add_guarded():   # 비상장 추가는 하위 프로세스라 INT로 못 멈춤 → 남은 시간 80분 미만이면 오늘은 건너뜀(내일 이어감)
+            if _remain() < 80 * 60: print(f"[catchup] audit_add 건너뜀 — 남은 시간 {int(_remain()//60)}분 < 80분(내일)", flush=True); return
+            _audit_add()
+        # 2026-11-23 순서 변경(사용자 승인): 상장사 일일 핵심(mezz·biz·summarize·rating·fin·quarters·notes·invest) 먼저 → 재개 가능한 비상장 추가(audit_add)·과거 보강(da_*)은 남는 시간에.
+        #   11-22 밤 실측: periodic 4분 → audit_add 90분 → da_backfill 70분 → … mezz 32분+에서 200분 상한 강제 종료, 뒤 단계 전부 미실행.
         steps = [("periodic", lambda: __import__("periodic_new").process(con)),
-                 ("audit_add", lambda: _audit_add()),   # 2026-11-13: 새로 공시된 분기·반기·사업보고서를 과거 보강(da_backfill)보다 먼저 — 한도를 백필이 다 쓰기 전에
-                 ("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=90 * 60)),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
-                 ("da_direct", lambda: __import__("notes_v2").direct_backfill(con, years=4, limit=2000, budget_sec=50 * 60)),   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정(XBRL 일부 항목 누락·분기 3개월 열 오독) — 하루 2,000건씩, 약 2주
-                 ("da_ai", lambda: __import__("da_ai").run(con, limit=1500)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 1,500건·예산 40달러, 2026-10-30 사용자 "예산 올려줄게")
-                 ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
-                 ("hybrid_out", lambda: __import__("hybrid_out").run(con, year0=a.year - 2, budget_sec=15 * 60)),   # 2026-11-19: 새 정기보고서의 「신종자본증권 미상환 잔액」 표(보고서당 2콜, 15분 한도). 2026-11-20 사용자: mezz 앞으로 — 뒤에 두면 시간 한도에 걸린 밤마다 빠짐(11-19·20 두 번 미실행)
                  ("mezz", lambda: mezz.run(ccs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
                  ("summarize", lambda: (__import__("summarize").run_all(None, model="haiku", force=False),
@@ -468,6 +471,12 @@ def main():
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
+                 ("audit_add", lambda: _audit_add_guarded()),   # 2026-11-13: 새 정기보고서 처리(periodic)보다 뒤, 과거 보강(da_backfill)보다 앞 — 한도를 백필이 다 쓰기 전에. 2026-11-23: 일일 핵심 단계 뒤로
+                 ("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=_budget(90 * 60))),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
+                 ("da_direct", lambda: __import__("notes_v2").direct_backfill(con, years=4, limit=2000, budget_sec=_budget(50 * 60))),   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정(XBRL 일부 항목 누락·분기 3개월 열 오독) — 하루 2,000건씩, 약 2주
+                 ("da_ai", lambda: __import__("da_ai").run(con, limit=1500)),   # 규칙으로 못 집은 상각비를 Haiku로(하루 1,500건·예산 40달러, 2026-10-30 사용자 "예산 올려줄게")
+                 ("hk", lambda: __import__("hankyung").run(period="d7", pdf=False)),   # 한경컨센서스 최근 7일 리포트 목록(메타만, PDF 미저장) — 2026-10-28
+                 ("hybrid_out", lambda: __import__("hybrid_out").run(con, year0=a.year - 2, budget_sec=_budget(15 * 60))),   # 2026-11-19: 새 정기보고서의 「신종자본증권 미상환 잔액」 표(보고서당 2콜, 15분 한도). 2026-11-20 사용자: mezz 앞으로 — 뒤에 두면 시간 한도에 걸린 밤마다 빠짐(11-19·20 두 번 미실행)
                  ("da", lambda: __import__("da_xbrl").run(con=con)),
                  ("da_notes", lambda: __import__("notes_v2").run(con=con)),   # XBRL에 없는 상각비는 주석 변동표에서(2026-10-24)   # 상각비(XBRL) — 건당 수초로 느려 분기·주석·요약 뒤로(2026-10-23)
                  ("audit_scan", lambda: __import__("audit_filers").run()),   # 감사보고서만 내는 비상장 500억↑ 선별 — 남는 한도로 매일 이어감(2026-10-29 사용자 요청)
