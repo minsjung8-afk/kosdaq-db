@@ -252,6 +252,10 @@ def annual_sections(xml):
             out["CFS"] = m.group(1)
         elif title == "재무제표" and "OFS" not in out:
             out["OFS"] = m.group(1)
+    # 2026-11-23: 연결재무제표를 작성하지 않는 회사의 사업보고서에도 「2. 연결재무제표」 절은 있고 본문이 '해당사항 없음'뿐(한네트·라이콤 등) → 표가 없는 절은 없는 것으로(verify가 'CFS DB 없음'으로 매일 2~5사 오탐)
+    for fs in list(out):
+        if not TABLE_RE.search(out[fs]) or re.search(r"해당\s*사항\s*없음|작성\s*대상이?\s*아니", re.sub(r"<[^>]+>", "", out[fs])[:600]):
+            out.pop(fs)
     return out
 
 
