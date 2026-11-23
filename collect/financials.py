@@ -11,7 +11,8 @@ KPI_MAP = {
     "cogs":         (["ifrs-full_CostOfSales"], ["매출원가", "영업원가"]),
     "net_income":   (["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실", "연결당기순이익", "연결당기순이익(손실)",
                                                "연결당기순손익", "당기순이익(순손실)", "당기순손실(이익)", "연결당기순손실",
-                                               "분기순이익", "분기순이익(손실)", "분기순손실", "반기순이익", "반기순이익(손실)", "반기순손실"]),   # 감사보고서 표(표준계정코드 없음) 대응. 2026-11-23 분·반기 보고서의 '분기순이익' 추가
+                                               "분기순이익", "분기순이익(손실)", "분기순손실", "반기순이익", "반기순이익(손실)", "반기순손실",
+                                               "당기연결순이익(손실)", "당기연결순이익", "당기연결순손실", "당기이익", "당기손실", "당기이익(손실)", "당기손익"]),   # 2026-11-23 kpi진단 56행: 노랑풍선 당기연결순이익(손실), 순 없는 당기이익   # 감사보고서 표(표준계정코드 없음) 대응. 2026-11-23 분·반기 보고서의 '분기순이익' 추가
     "pretax":       (["ifrs-full_ProfitLossBeforeTax"], ["법인세비용차감전순이익", "법인세비용차감전순이익(손실)", "법인세비용차감전순손익", "법인세비용차감전순손실", "법인세차감전순이익", "법인세차감전순이익(손실)",
                                                        "법인세비용차감전계속사업이익", "법인세비용차감전계속사업이익(손실)", "법인세비용차감전계속사업손익", "법인세비용차감전이익", "법인세비용차감전이익(손실)", "법인세차감전계속사업이익"]),   # 2026-11-19 관리종목 요건(법차손) 산출용
     "total_assets": (["ifrs-full_Assets"], ["자산총계", "자산합계", "자산총액", "총자산"]),
@@ -490,12 +491,12 @@ def _hybrid_disclosed(con, cc, y, rc, fs, k):
 def _pick(rows, ids, names, sj=None):
     """rows: fin_raw dict 목록. account_id 우선, 없으면 계정명 정확/포함 매칭."""
     for r in rows:                            # 행 순서(재무제표에 먼저 나온 줄) 우선 — 2026-11-19 ids 순서 우선으로 바꿨다가 되돌림: 이자비용은 ids를 하나로 줄여 해결했고, 다른 계정(매출·채권·매입채무 등)의 검증된 동작을 바꿀 이유가 없음
-        if r["account_id"] in ids and (sj is None or r["sj_div"] in sj):
+        if r["account_id"] in ids and (sj is None or r["sj_div"] in sj) and r["thstrm_amount"] is not None:   # 2026-11-23: 금액 빈 제목 행(클로봇 '당기순이익(손실)' 귀속 헤더)은 건너뜀
             return r["thstrm_amount"]
     for nm in names:
         for r in rows:
             an = _norm_nm(r["account_nm"])
-            if an == nm.replace(" ", "") and (sj is None or r["sj_div"] in sj):
+            if an == nm.replace(" ", "") and (sj is None or r["sj_div"] in sj) and r["thstrm_amount"] is not None:
                 return r["thstrm_amount"]
     pat = _FALLBACK_RE.get(tuple(ids))
     if pat:                                   # 감사보고서 표의 변형 계정명(2026-10-25: '영업활동으로인한순현금흐름' 등으로 영업CF 누락 6사)
@@ -505,13 +506,31 @@ def _pick(rows, ids, names, sj=None):
     return None
 
 
+def _ni_from_attrib(rows):
+    """당기순이익 합계 행이 없을 때 '지배기업소유주 귀속' + '비지배지분 귀속'(없으면 지배 귀속만). 주당순이익·포괄손익 귀속 행은 제외."""
+    own = nci = None
+    for r in rows:
+        if r["sj_div"] not in ("IS", "CIS") or r.get("thstrm_amount") is None:
+            continue
+        an = _norm_nm(r["account_nm"])
+        if "주당" in an or "포괄" in an or not _re.search(r"순(이익|손실|손익)", an):
+            continue
+        if own is None and _re.search(r"^(지배기업|지배주주|지배회사|모회사)", an) and "귀속" in an:
+            own = r["thstrm_amount"]
+        elif nci is None and an.startswith("비지배") and "귀속" in an:
+            nci = r["thstrm_amount"]
+    if own is None:
+        return None
+    return own + (nci or 0)
+
+
 import re as _re
 _FALLBACK_RE = {
     ("ifrs-full_CashFlowsFromUsedInOperatingActivities",): _re.compile(r"영업활동(으로|에서|으로부터|으로부터의)?(인한|의|발생한|창출된|조달된)?(순)?현금(흐름|유입|유출|유입\(유출\)|흐름합계)"),
     ("ifrs-full_CashFlowsFromUsedInInvestingActivities",): _re.compile(r"투자활동(으로|에서|으로부터)?(인한|의|발생한)?(순)?현금(흐름|유입|유출|유입\(유출\)|흐름합계)"),
     ("ifrs-full_CashFlowsFromUsedInFinancingActivities",): _re.compile(r"재무활동(으로|에서|으로부터)?(인한|의|발생한)?(순)?현금(흐름|유입|유출|유입\(유출\)|흐름합계)"),
     ("ifrs-full_Assets",): _re.compile(r"(자산|총자산)(총계|합계|총액|계)?(\(.*\))?"),
-    ("ifrs-full_ProfitLoss",): _re.compile(r"(연결)?(당기|당해연도|당기의|분기|반기|당분기|당반기|누적분기|누적반기|분기누적|반기누적)?순(이익|손실|손익)(\(.*\))?"),   # 2026-11-23 태림포장 26.3Q: 표준코드 없이 '분기순이익(손실)'로 올라와 N/A
+    ("ifrs-full_ProfitLoss",): _re.compile(r"(?:(연결)?(당기|당해연도|당기의|분기|반기|당분기|당반기|누적분기|누적반기|분기누적|반기누적)(연결)?순?|(연결)?순)(이익|손실|손익)(\(.*\))?"),   # 2026-11-23 '당기연결순이익'·'당기이익'(순 없음)도   # 2026-11-23 태림포장 26.3Q: 표준코드 없이 '분기순이익(손실)'로 올라와 N/A
 }
 
 
@@ -539,6 +558,8 @@ def build_kpi(con, corp_code, bsns_year, reprt_code="11011"):
             sj = ("BS",) if key in ("total_assets", "total_liab", "equity", "cash", "cur_assets", "cur_liab", "receivables", "inventory", "capital", "payables", "contract_assets", "contract_liab", "advances") else \
                  ("CF",) if key in ("cfo", "dep", "amort", "rou_dep", "cfi", "cff", "capex_ppe", "capex_int", "disp_ppe", "disp_int", "tax_paid", "int_paid") else ("IS", "CIS")
             k[key] = _pick(rows, ids, names, sj)
+        if k.get("net_income") is None:            # 2026-11-23 kpi진단: 합계 행 없이 귀속 행만 있는 연결(엔젯·펌텍코리아·라이온켐텍 등 56행) → 지배 귀속 + 비지배 귀속
+            k["net_income"] = _ni_from_attrib(rows)
         _int_fallback(rows, k)                     # 2026-11-19 이자비용 출처 체인 + 신종자본증권 분배금
         _hybrid_disclosed(con, corp_code, bsns_year, reprt_code, fs_div, k)
         if k.get("revenue") is None:              # 2026-10-28: 금융업(카드·캐피탈)·일부 비상장은 매출 합계 줄이 없음 → 영업이익+영업비용 또는 영업수익 구성 합
