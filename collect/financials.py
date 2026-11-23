@@ -507,21 +507,40 @@ def _pick(rows, ids, names, sj=None):
 
 
 def _ni_from_attrib(rows):
-    """당기순이익 합계 행이 없을 때 '지배기업소유주 귀속' + '비지배지분 귀속'(없으면 지배 귀속만). 주당순이익·포괄손익 귀속 행은 제외."""
-    own = nci = None
+    """당기순이익 합계 행이 없을 때 ① '지배기업소유주 귀속' + '비지배지분 귀속'(없으면 지배 귀속만) — 귀속 행이 「당기순이익(손실)의 귀속」 제목 아래 '지배기업의소유주지분'·'비지배지분'으로만 적힌 표(클로봇)도 처리,
+    ② 그것도 없으면 법인세비용차감전순이익 − 법인세비용(수익이면 +). 주당순이익·포괄손익 행은 제외. 2026-11-23 kpi진단 56행→38행 뒤 보강"""
+    own = nci = None; under = False
+    for r in rows:
+        if r["sj_div"] not in ("IS", "CIS"):
+            continue
+        an = _norm_nm(r["account_nm"]); v = r.get("thstrm_amount")
+        if "주당" in an or "포괄" in an:
+            under = False; continue
+        if _re.search(r"순(이익|손실|손익)", an) and (v is None or "귀속" in an) and not _re.search(r"^(지배|비지배|모회사)", an):
+            under = True            # 「당기순이익(손실)」 제목 행 또는 「…의 귀속」 행 → 아래 지배/비지배 행이 귀속분
+            continue
+        if v is None:
+            continue
+        if own is None and _re.search(r"^(지배기업|지배주주|지배회사|모회사)", an) and ("귀속" in an or under):
+            own = v
+        elif nci is None and an.startswith("비지배") and ("귀속" in an or under):
+            nci = v
+        elif under and not _re.search(r"^(지배|비지배)", an):
+            under = False
+    if own is not None:
+        return own + (nci or 0)
+    pre = tax = None; tax_sign = -1
     for r in rows:
         if r["sj_div"] not in ("IS", "CIS") or r.get("thstrm_amount") is None:
             continue
         an = _norm_nm(r["account_nm"])
-        if "주당" in an or "포괄" in an or not _re.search(r"순(이익|손실|손익)", an):
-            continue
-        if own is None and _re.search(r"^(지배기업|지배주주|지배회사|모회사)", an) and "귀속" in an:
-            own = r["thstrm_amount"]
-        elif nci is None and an.startswith("비지배") and "귀속" in an:
-            nci = r["thstrm_amount"]
-    if own is None:
-        return None
-    return own + (nci or 0)
+        if pre is None and _re.search(r"^법인세(비용)?차감전(순|계속사업|계속영업)?(이익|손실|손익)", an):
+            pre = r["thstrm_amount"]
+        elif tax is None and _re.fullmatch(r"법인세(비용|수익|비용\(수익\)|수익\(비용\)|비용\(이익\)|비용\(효익\))?(\(.*\))?", an) and an != "법인세":
+            tax = r["thstrm_amount"]; tax_sign = 1 if ("수익" in an and "비용" not in an) else -1
+    if pre is not None and tax is not None:
+        return pre + tax_sign * tax
+    return None
 
 
 import re as _re
