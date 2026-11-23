@@ -1272,7 +1272,7 @@ html,body{display:block;background:#fff;margin:0;padding:0;font-family:var(--fon
     xlsxLib().then(X_=>X_.writeFile(buildXlsx(X_,d),`${name()}_재무현황_당사양식_${today()}.xlsx`)).catch(e=>alert(e.message||e)); }
   function buildXlsx(X_,d){
     // 2026-11-19 사용자: 내려받기도 화면과 같은 배치(좌 재무상태표 · 우 손익계산서/재무비율, 같은 색 구분). 서식은 xlsx-js-style(SheetJS 0.18.5 포크), 못 불러오면 서식 없이 같은 배치로
-    { const wb=X_.utils.book_new(); const n=v=>v==null?null:Math.round(v/1e8*10)/10;
+    { const wb=X_.utils.book_new(); const n=v=>v==null?null:Math.round(v/1e8);   // 2026-11-23 사용자: 엑셀 금액은 화면과 같이 억원 정수로 반올림(소수점 없음). 비율(%·x)만 소수 유지
       const NAVY='1F4E79', NAVY2='0F2547', GREY='E7EAF0', CREAM='FFF6E0', LINE='B8C2D4';
       const bd={top:{style:'thin',color:{rgb:LINE}},bottom:{style:'thin',color:{rgb:LINE}},left:{style:'thin',color:{rgb:LINE}},right:{style:'thin',color:{rgb:LINE}}};
       const ST={ title:{font:{bold:true,sz:13,color:{rgb:NAVY2}}}, cap:{font:{bold:true,sz:11,color:{rgb:NAVY2}}},
@@ -1281,7 +1281,7 @@ html,body{display:block;background:#fff;margin:0;padding:0;font-family:var(--fon
         tot:{font:{bold:true,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:NAVY2}},border:bd}, sub:{font:{bold:true,color:{rgb:'16233D'}},fill:{fgColor:{rgb:GREY}},border:bd},
         item:{font:{color:{rgb:'16233D'}},border:bd,alignment:{indent:1}}, cream:{font:{bold:true,color:{rgb:'16233D'}},fill:{fgColor:{rgb:CREAM}},border:bd},
         sec:{font:{bold:true,color:{rgb:NAVY}},fill:{fgColor:{rgb:'EEF3FA'}},border:bd}, plain:{font:{color:{rgb:'16233D'}},border:bd}, src:{font:{sz:9,color:{rgb:'6B7488'}}} };
-      const NUM='#,##0.0;(#,##0.0);"-"', PCT='0.0;(0.0);"-"', XF='0.00"x";(0.00"x");"-"';
+      const NUM='#,##0;(#,##0);"-"', PCT='0.0;(0.0);"-"', XF='0.00"x";(0.00"x");"-"';
       for(const [fs,fl] of [['CFS','연결'],['OFS','별도']]){ const X=d.ibk_fin[fs]; if(!X) continue; const C=X.cols.map(c=>c.label+(c.kind!=='annual'?' 누적':'')), B=X.base, G=X.groups, nc=C.length;
         const ws={}, put=(r,c,v,st,z)=>{ if(v===undefined) return; const cell={v:v==null?'':v,t:typeof v==='number'?'n':'s'}; if(st) cell.s=st; if(z&&typeof v==='number') cell.z=z; ws[X_.utils.encode_cell({r,c})]=cell; };
         const RC=nc+2;   // 우측 표 시작 열(좌측 표 + 빈 열 1)
