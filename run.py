@@ -135,6 +135,15 @@ def main():
                     print(f"[kpi진단] {nm} {y} {fs} {sj} 누락 · 계정 {len(names)}개: {' | '.join(names)[:600]}", flush=True)
         except Exception as e:  # noqa
             print(f"[kpi진단] 오류: {e}", flush=True)
+        try:   # 진단(2026-11-23 표본 80사에서 엔젯 연결 순이익 N/A): 상장사 연간 KPI에 매출은 있는데 순이익이 빈 행 — 건수와 그 손익계산서의 '순' 들어간 계정명(매칭 목록 보강용)
+            rows = con.execute("""SELECT k.corp_code, c.corp_name, k.bsns_year, k.fs_div FROM fin_kpi k JOIN company c USING(corp_code)
+                                  WHERE c.market<>'UNLISTED' AND k.reprt_code='11011' AND k.revenue IS NOT NULL AND k.net_income IS NULL ORDER BY k.bsns_year DESC""").fetchall()
+            print(f"[kpi진단] 상장사 연간 순이익 누락(매출 있음) {len(rows)}행", flush=True)
+            for cc, nm, y, fs in rows[:25]:
+                names = [r[0] for r in con.execute("SELECT account_nm FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code='11011' AND fs_div=? AND sj_div IN ('IS','CIS') AND account_nm LIKE '%순%' ORDER BY ord LIMIT 12", (cc, y, fs)).fetchall()]
+                print(f"[kpi진단]   {nm} {y} {fs}: {' | '.join(names)[:300]}", flush=True)
+        except Exception as e:  # noqa
+            print(f"[kpi진단] 오류2: {e}", flush=True)
         try:   # 진단: 이자비용은 있는데 총차입금이 비는 연간 행 수와, 그 회사들의 재무상태표 부채 계정명 상위
             miss = con.execute("""SELECT COUNT(*) FROM fin_kpi WHERE reprt_code='11011' AND borrowings IS NULL AND COALESCE(int_exp,0)<>0""").fetchone()[0]
             tot = con.execute("SELECT COUNT(*) FROM fin_kpi WHERE reprt_code='11011'").fetchone()[0]
