@@ -337,9 +337,10 @@ def audit_opinion_from_text(xml):
     return adtor, op, emph
 
 
-def fetch_year(con, cc, year, dry=False, chain=None):
+def fetch_year(con, cc, year, dry=False, chain=None, only=None):
     """한 사업연도: 연결·별도 감사보고서 → fin_raw(당기 + 전기 보충) → KPI. 반환 {fs: 행수}.
-    chain: {(fs, year): 자산총계} — 연도 연쇄 검증(올해 보고서의 전기 = 전년 보고서의 당기)용"""
+    chain: {(fs, year): 자산총계} — 연도 연쇄 검증(올해 보고서의 전기 = 전년 보고서의 당기)용
+    only: ('CFS',) 등 — 지정한 재무제표만 적재(2026-11-23 verify 자동 보완 ③: 상장사 XBRL에 없는 연결만 원문에서 채울 때 별도(XBRL)는 건드리지 않음)"""
     reps = _src_find(cc, year)
     got = {}
     if dry and not any(reps.values()) and SOURCE == "api":
@@ -355,7 +356,7 @@ def fetch_year(con, cc, year, dry=False, chain=None):
             reps[fs] = reps["ANNUAL"]
     for fs in ("CFS", "OFS"):
         rc = reps.get(fs)
-        if not rc:
+        if not rc or (only and fs not in only):
             continue
         xml = ann.get(fs) or _src_doc(rc)
         st = parse_statements(xml)

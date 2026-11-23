@@ -141,7 +141,18 @@ def verify_one(con, cc, dry=False):
             res.append((fs, "원문", None, None, (db[0]["rcept_no"] if db else None), None, "원문 없음"))
             continue
         if not db:
-            res.append((fs, "DB", None, None, None, rc, "DB 없음"))
+            # 자동 보완 ③(2026-11-23): 원문(감사보고서)은 있는데 DB에 없음 — 상장사가 XBRL API에 연결을 안 올린 경우(한네트·세니젠 등 매일 2~4사 반복) → 원문 파싱으로 적재(별도 XBRL은 보존)
+            if dry:
+                res.append((fs, "DB", None, None, None, rc, "DB 없음")); actions.append(f"{fs} 원문 파싱 적재 예정({rc})")
+            else:
+                try:
+                    got = audit_fs.fetch_year(con, cc, int(y), only=(fs,))
+                    if got.get(fs):
+                        actions.append(f"{fs} 원문 파싱 적재({got[fs]}행, {rc})"); res.append((fs, "DB", None, None, None, rc, "DB 없음(원문 적재)"))
+                    else:
+                        res.append((fs, "DB", None, None, None, rc, "DB 없음")); actions.append(f"{fs} 원문 파싱 실패(표 없음)")
+                except Exception as e:  # noqa
+                    res.append((fs, "DB", None, None, None, rc, "DB 없음")); actions.append(f"{fs} 원문 파싱 실패 {str(e)[:40]}")
             continue
         try:
             xml = ann.get(fs) or fetch_document_xml(rc)
@@ -221,7 +232,7 @@ def run(con=None, n=20, codes=None, dry=False):
     return stat
 
 
-_ORDER = ["정정 미반영", "단위 불일치", "값 불일치", "파싱 실패", "DB 없음", "원문 없음", "실패", "항목 없음", "일치"]
+_ORDER = ["정정 미반영", "단위 불일치", "값 불일치", "파싱 실패", "DB 없음", "원문 없음", "실패", "항목 없음", "DB 없음(원문 적재)", "일치"]
 
 
 def _worst(vs):
