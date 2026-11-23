@@ -1027,7 +1027,7 @@ def _ibk_fin(con, cc, kpi):
             continue
         per = []
         for r in rows:
-            bs = [dict(x) for x in con.execute("SELECT account_nm, thstrm_amount AS v, ord FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND sj_div='BS' AND thstrm_amount IS NOT NULL ORDER BY ord",
+            bs = [dict(x) for x in con.execute("SELECT account_nm, thstrm_amount AS v, frmtrm_amount AS pv, ord FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=? AND sj_div='BS' AND thstrm_amount IS NOT NULL ORDER BY ord",
                                               (cc, r["bsns_year"], r["reprt_code"], fs))]
             for x in bs:
                 x["nm"] = _norm_nm(x["account_nm"])
@@ -1050,17 +1050,18 @@ def _ibk_fin(con, cc, kpi):
                     nxt = [k for o, k in hdrs if o > oo]
                     k = nxt[0] if nxt else None
                 return k if k in allow else None
-            items = {}
+            items, prev = {}, {}   # prev: 같은 보고서의 전기(frmtrm) 금액 — 연간 보고서면 전년말(2026-11-23: 전년 보고서와 계정명이 달라 N/A가 나던 것 보완)
             for x in bs:
                 g = grp(x)
                 if g and x["v"]:
                     items.setdefault(g, {})
                     if x["nm"] not in items[g]:
                         items[g][x["nm"]] = x["v"]
+                        if x.get("pv"): prev.setdefault(g, {})[x["nm"]] = x["pv"]
             tot = {"ca": r.get("cur_assets"), "nca": (r["total_assets"] - r["cur_assets"]) if r.get("total_assets") and r.get("cur_assets") else None,
                    "cl": r.get("cur_liab"), "ncl": (r["total_liab"] - r["cur_liab"]) if r.get("total_liab") and r.get("cur_liab") else None,
                    "ta": r.get("total_assets"), "tl": r.get("total_liab")}
-            per.append({"label": r.get("label"), "kind": r.get("kind"), "items": items, "tot": tot, "nocur": nocur})
+            per.append({"label": r.get("label"), "kind": r.get("kind"), "items": items, "prev": prev, "tot": tot, "nocur": nocur, "year": r.get("bsns_year")})
         if not per:
             continue
         last = per[-1]
@@ -1081,7 +1082,24 @@ def _ibk_fin(con, cc, kpi):
                 chosen.append(nm)
             pick[g] = chosen
         cols = [{"label": p["label"], "kind": p["kind"]} for p in per]
-        groups = {g: {"total": [p["tot"].get(g) for p in per], "items": [{"nm": nm, "v": [p["items"].get(g, {}).get(nm) for p in per]} for nm in pick.get(g, [])]} for g in ("ca", "nca", "cl", "ncl") + (("ta", "tl") if nocur else ())}
+        def _val(i, g, nm):
+            """기간 i의 그룹 g에서 계정 nm 값. 2026-11-23 사용자 'APS N/A가 왜 이렇게 많아': 보고서마다 계정명이 달라(매출채권↔유동매출채권, 무형자산↔무형자산및영업권) 같은 계정이 N/A로 나오던 것을
+            ① 정확히 같은 이름 → ② 유동/비유동 접두·순액 표기를 뗀 이름이 같거나 한쪽이 다른 쪽을 포함(그룹 안에서 유일할 때만) → ③ 연간 열이면 다음 연간 보고서의 전기(frmtrm) 금액 순으로 채움"""
+            p = per[i]; d = p["items"].get(g, {})
+            if nm in d: return d[nm]
+            rx = lambda t: re.sub(r"^(유동|비유동|당기|장기|단기)?|\(순액\)|\(순\)|순액|및기타", "", t)
+            key = rx(nm)
+            if len(key) >= 4:
+                hit = [k for k in d if rx(k) == key] or [k for k in d if len(rx(k)) >= 4 and not k.startswith("기타") and not nm.startswith("기타") and (key in rx(k) or rx(k) in key)]
+                if len(hit) == 1: return d[hit[0]]
+            if p["kind"] == "annual":
+                for q in per[i + 1:]:
+                    if q["kind"] == "annual" and q.get("year") and p.get("year") and int(q["year"]) == int(p["year"]) + 1:
+                        pv = q["prev"].get(g, {}).get(nm)
+                        if pv: return pv
+                        break
+            return None
+        groups = {g: {"total": [p["tot"].get(g) for p in per], "items": [{"nm": nm, "v": [_val(i, g, nm) for i in range(len(per))]} for nm in pick.get(g, [])]} for g in ("ca", "nca", "cl", "ncl") + (("ta", "tl") if nocur else ())}
         base = {k: [r.get(k) for r in rows] for k in ("total_assets", "total_liab", "equity", "capital", "borrowings", "cash", "revenue", "op_income", "ebitda", "int_exp", "int_src", "hybrid_dist", "hybrid_eq", "hybrid_src", "hybrid_note", "net_income", "cfo")}
         out[fs] = {"cols": cols, "groups": groups, "base": base, "nocur": nocur}   # nocur: 유동·비유동 구분 없는 표(금융사) → 자산·부채 주요 계정(ta/tl)
     return out or None
