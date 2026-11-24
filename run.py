@@ -1751,7 +1751,14 @@ def main():
             publish(f"{nm} 완료")
     if a.job == "rating_fix":                 # 신용등급 계열사 혼입 정정(완전일치 재조회, 등급 보유사만 ~10분)
         import fss_rating
-        fss_rating.fix_mismatch(con)
+        if a.new_only:                        # 2026-11-24: --new-only = 영문이 섞인 이름인데 등급 행이 없는 회사를 한글 음역으로 재조회(SGC에너지 → 에스지씨에너지)
+            import re as _re
+            ccs2 = [r[0] for r in con.execute("SELECT c.corp_code FROM company c LEFT JOIN credit_rating r USING(corp_code) WHERE r.corp_code IS NULL AND c.delisted_dt IS NULL GROUP BY c.corp_code")
+                    if _re.search(r"[A-Za-z&]", con.execute("SELECT corp_name FROM company WHERE corp_code=?", (r[0],)).fetchone()[0] or "")]
+            print(f"[rating_fix] 영문명·등급 없음 {len(ccs2)}사 재조회", flush=True)
+            fss_rating.run(set(ccs2), resume=False, con=con)
+        else:
+            fss_rating.fix_mismatch(con)
     if a.job in ("rating", "all"):
         import fss_rating
         fss_rating.run(set(ccs) if (a.limit or a.new_only) else None)
