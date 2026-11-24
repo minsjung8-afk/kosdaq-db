@@ -462,8 +462,16 @@ def main():
             _audit_add()
         # 2026-11-23 순서 변경(사용자 승인): 상장사 일일 핵심(mezz·biz·summarize·rating·fin·quarters·notes·invest) 먼저 → 재개 가능한 비상장 추가(audit_add)·과거 보강(da_*)은 남는 시간에.
         #   11-22 밤 실측: periodic 4분 → audit_add 90분 → da_backfill 70분 → … mezz 32분+에서 200분 상한 강제 종료, 뒤 단계 전부 미실행.
+        # 2026-11-24(사용자 승인): 정기보고서(XBRL)를 내지 않는 감사보고서-only 비상장사(약 2,900사)를 mezz·fin·quarters·notes·invest 대상에서 제외.
+        #   11-23 밤 실측: quarters가 4,007건(회사×연결/별도)을 건당 ~7콜로 전수 재조회(대부분 분기보고서가 없는 비상장) → 46분+에서 200분 상한 강제 종료, 비상장 추가·과거 보강 미실행.
+        #   상장사 + 사업보고서 제출 비상장(filer_candidate)만 XBRL 단계 대상. 감사보고서-only 회사는 audit_add/audit_fs 경로가 담당.
+        _xb_ok = {r[0] for r in con.execute("SELECT corp_code FROM company WHERE stock_code IS NOT NULL AND stock_code<>''")}
+        try: _xb_ok |= {r[0] for r in con.execute("SELECT corp_code FROM filer_candidate")}
+        except Exception: pass   # noqa
+        xcs = [c for c in ccs if c in _xb_ok]
+        print(f"[catchup] XBRL 단계 대상 {len(xcs)}사 / 전체 {len(ccs)}사 (감사보고서-only 비상장 {len(ccs) - len(xcs)}사 제외)", flush=True)
         steps = [("periodic", lambda: __import__("periodic_new").process(con)),
-                 ("mezz", lambda: mezz.run(ccs, new_only=True)),
+                 ("mezz", lambda: mezz.run(xcs, new_only=True)),
                  ("biz", lambda: business.run([c for c in ccs if c not in done("business") and c not in audit_only(con)], a.year - 1)),   # 감사보고서만 내는 비상장사는 사업보고서가 없어 매일 헛조회 → 제외(2026-10-25)
                  ("summarize", lambda: (__import__("summarize").run_all(None, model="haiku", force=False),
                                         __import__("summarize").run_unlisted(None, model="haiku", force=False))),   # 새로 받은 사업보고서만 Haiku 요약 + 사업보고서 없는 비상장사(감사보고서·신평서 기반)
@@ -473,13 +481,13 @@ def main():
                  ("rating_resume", lambda: __import__("fss_rating").run(resume=True, budget_min=25, only_if_running=True, con=con)),
                  ("rating_guar", lambda: __import__("rating_guar").scan(con)),   # 2026-11-18 사용자(NICE인프라): 새 CP·전단채 평가서 본문의 보증 표기 확인(금감원 PDF, 새 평가서만 — DART 0)   # 2026-11-15: 1·15일 전수 조회가 150분에 다 못 끝나면 남은 회사를 매일 밤 25분씩 이어서(금감원만, DART 0)
                  ("rating_valid", lambda: __import__("rating_valid").run(con=con)),   # 새 신용평가서의 등급 유효기간(미조회분만, 2026-10-26)
-                 ("fin", lambda: financials.run_annual_fast([c for c in ccs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
-                 ("fin_ofs", lambda: financials.run_ofs(ccs, a.year - 1, con=con)),
-                 ("fin_yoy", lambda: financials.run_yoy(ccs, con=con)),       # 전년동기 BS 보강   # 별도 재무 보강(연결만 있는 회사)
-                 ("quarters", lambda: quarters.run(ccs, con=con)),
+                 ("fin", lambda: financials.run_annual_fast([c for c in xcs if c not in done_annual(con)], a.year - 1, con=con)),   # 연간 재무가 아예 없는 회사만(코스피·코넥스 신규) — 분기·누적 보정은 quarters가 담당
+                 ("fin_ofs", lambda: financials.run_ofs(xcs, a.year - 1, con=con)),
+                 ("fin_yoy", lambda: financials.run_yoy(xcs, con=con)),       # 전년동기 BS 보강   # 별도 재무 보강(연결만 있는 회사)
+                 ("quarters", lambda: quarters.run(xcs, con=con)),
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
-                 ("notes", lambda: business.run_notes(con, [c for c in ccs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
-                 ("invest", lambda: business.refresh_other_investments(con, [c for c in ccs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
+                 ("notes", lambda: business.run_notes(con, [c for c in xcs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
+                 ("invest", lambda: business.refresh_other_investments(con, [c for c in xcs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
                  ("audit_add", lambda: _audit_add_guarded()),   # 2026-11-13: 새 정기보고서 처리(periodic)보다 뒤, 과거 보강(da_backfill)보다 앞 — 한도를 백필이 다 쓰기 전에. 2026-11-23: 일일 핵심 단계 뒤로
                  ("da_backfill", lambda: __import__("notes_v2").backfill(con, limit=4500, budget_sec=_budget(90 * 60))),   # 2026-10-29 사용자 지시 "EBITDA가 급선무": 지난 연도·분기 상각비 공백 보강을 야간 수집의 맨 앞에(한도 약 9,000콜) — 공백이 다 찰 때까지 다른 보강 단계보다 우선
                  ("da_direct", lambda: __import__("notes_v2").direct_backfill(con, years=4, limit=2000, budget_sec=_budget(50 * 60))),   # 2026-11-04 사용자 '알아서': 과거 보고서 주석의 성격별/현금흐름 조정 표로 상각비 보정(XBRL 일부 항목 누락·분기 3개월 열 오독) — 하루 2,000건씩, 약 2주
