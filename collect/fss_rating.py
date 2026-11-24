@@ -33,6 +33,25 @@ def search_name(c) -> str:
     return s or c["corp_name"]
 
 
+_LAT = {"A": "에이", "B": "비", "C": "씨", "D": "디", "E": "이", "F": "에프", "G": "지", "H": "에이치", "I": "아이", "J": "제이", "K": "케이", "L": "엘", "M": "엠",
+        "N": "엔", "O": "오", "P": "피", "Q": "큐", "R": "알", "S": "에스", "T": "티", "U": "유", "V": "브이", "W": "더블유", "X": "엑스", "Y": "와이", "Z": "지", "&": "앤"}
+
+
+def translit(name: str) -> str:
+    """영문 약칭을 금감원 표기(법인 등기 상호)의 한글 음역으로: 'SGC에너지'→'에스지씨에너지', 'SGC E&C'→'에스지씨이앤씨', 'AJ네트웍스'→'에이제이네트웍스'.
+    2026-11-24 사용자 'SGC에너지 왜 등급 안 보여? 영어라 그래?': 금감원은 등기 상호 '에스지씨에너지(주)'로 올려 DART 표시명과 완전일치가 안 됨"""
+    return "".join(_LAT.get(ch.upper(), ch) for ch in (name or ""))
+
+
+def name_keys(c) -> set:
+    """완전일치 비교용 정규화 키 집합: DART 정식명·약식명 + 영문이 섞인 이름은 한글 음역까지"""
+    ks = {norm(search_name(c)), norm(c.get("corp_name"))}
+    for nm in (search_name(c), c.get("corp_name") or ""):
+        if re.search(r"[A-Za-z&]", nm):
+            ks.add(norm(translit(nm)))
+    return ks - {""}
+
+
 def fetch(name: str, years=3, page=1, unit=100, sdate=None) -> str:
     today = date.today()
     params = {"menuNo": "200411", "pageIndex": page, "pageUnit": unit, "searchCompany": "", "searchAssGbn": "", "searchTargetCoNm": name,
@@ -78,15 +97,19 @@ def fetch_company_rows(c, years=3):
     금감원 검색은 부분일치라 '한화'로 찾으면 계열사 포함 수천 건 → 평가대상명 표기 그대로 '(주)한화'·'한화(주)'로 먼저 좁혀 찾고,
     둘 다 없을 때만 회사명 자체로 찾는다(최대 30페이지=3,000행). 최종 거르기는 store_rows의 완전일치."""
     name = search_name(c)
-    key = norm(name)
+    keys = name_keys(c)
     rows = []
-    for term in (f"(주){name}", f"{name}(주)"):
-        r, _ = _all_pages(term, years, 10)
-        rows += [x for x in r if norm(x["target"]) == key]
-        time.sleep(PAUSE)
+    names = [name] + ([translit(name)] if re.search(r"[A-Za-z&]", name) else [])   # 2026-11-24 영문명은 한글 음역으로도 검색
+    for nm in names:
+        for term in (f"(주){nm}", f"{nm}(주)"):
+            r, _ = _all_pages(term, years, 10)
+            rows += [x for x in r if norm(x["target"]) in keys]
+            time.sleep(PAUSE)
     if not rows:
-        r, _ = _all_pages(name, years, 30)
-        rows = r
+        for nm in names:
+            r, _ = _all_pages(nm, years, 30)
+            rows += r
+            time.sleep(PAUSE)
     seen, out = set(), []
     for x in rows:                                    # 두 검색어 결과 중복 제거
         k = (x["agency"], x["ttype"], x["disc_dt"], x["grade"], x["target"])
@@ -115,7 +138,7 @@ def homonym_owner(con):
     grp = {}
     for cc, nm, full, mkt, ta in con.execute("""SELECT c.corp_code, c.corp_name, c.corp_name_full, c.market,
                                                   (SELECT MAX(total_assets) FROM fin_kpi k WHERE k.corp_code=c.corp_code) FROM company c"""):
-        for k in {norm(search_name({"corp_name": nm, "corp_name_full": full})), norm(nm)} - {""}:
+        for k in name_keys({"corp_name": nm, "corp_name_full": full}):
             grp.setdefault(k, {})[cc] = ((mkt or "") in ("KOSPI", "KOSDAQ", "KONEX"), ta or 0)
     _AMB = {k: max(v, key=lambda cc: v[cc]) for k, v in grp.items() if len(v) > 1}
     return _AMB
@@ -126,7 +149,7 @@ def fix_homonyms(con, apply=True):
     _ensure_target(con)
     amb = homonym_owner(con)
     nm = {r[0]: (r[1], r[2]) for r in con.execute("SELECT corp_code, corp_name, market FROM company")}
-    keys = {r[0]: {norm(search_name({"corp_name": r[1], "corp_name_full": r[2]})), norm(r[1])} - {""}
+    keys = {r[0]: name_keys({"corp_name": r[1], "corp_name_full": r[2]})
             for r in con.execute("SELECT corp_code, corp_name, corp_name_full FROM company")}
     bad = []
     for cc, tgt, n in con.execute("SELECT corp_code, target, COUNT(*) FROM credit_rating GROUP BY corp_code, target").fetchall():
@@ -153,7 +176,7 @@ def store_rows(con, c, rows, replace=False):
     """평가대상회사명이 정확히 같은 행만(정규화 후). 예전 '부분일치' 허용 때문에 CJ ← CJ푸드빌·CJ대한통운, SK ← SK하이닉스 등
     계열사 등급이 섞이던 문제(2026-10-22) → 완전일치로 변경. replace=True면 그 회사의 기존 행을 지우고 다시 넣음."""
     _ensure_target(con)
-    keys = {norm(search_name(c)), norm(c.get("corp_name"))} - {""}
+    keys = name_keys(c)
     amb = homonym_owner(con)
     ok = [r for r in rows if norm(r["target"]) in keys and amb.get(norm(r["target"]), c["corp_code"]) == c["corp_code"]]   # 동명 회사면 주인에게만
     if replace:
@@ -294,7 +317,7 @@ def run_delta(con=None, days=3, max_pages=20):
     amb = homonym_owner(con)
     byc = {c["corp_code"]: c for c in cs}
     for c in cs:
-        for k in {norm(search_name(c)), norm(c.get("corp_name"))} - {""}:
+        for k in name_keys(c):
             by_key.setdefault(k, byc.get(amb.get(k)) or c)     # 동명 회사면 주인(상장사 > 자산 큰 회사)
     have = {(r[0], r[1], r[2], r[3], r[4]) for r in con.execute("SELECT corp_code, agency, target_type, disc_dt, grade FROM credit_rating WHERE disc_dt >= ?", (sdate,))}
     new, changed = 0, set()
