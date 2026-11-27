@@ -365,7 +365,7 @@ def company_detail(con, c):
         "major_reports": q(con, "SELECT rcept_no, rcept_dt, repror, report_resn, stkrt, stkrt_irds, ctr_stkqy, ctr_stkrt FROM major_report WHERE corp_code=? ORDER BY rcept_dt DESC LIMIT 12", cc),
         "price_summary": ps[0] if ps else None,
         "ibk_fin": _ibk_fin(con, cc, kpi),
-        "fn_ai": _safe(lambda: q(con, "SELECT fs, nm, label, reason, quote, rcept_no FROM fn_ai WHERE corp_code=? AND reason IS NOT NULL AND model LIKE '%|v2'", cc)),   # v2(숫자·방향 대조 통과)만 — v1 표본 20사 결과는 오류가 많아 표시하지 않음(fn_ai.VER와 맞출 것)   # 2026-11-19 사용자 승인 ②: 주석 인용이 있는 변동 사유(Haiku)
+        "fn_ai": _safe(lambda: q(con, "SELECT fs, nm, label, reason, quote, rcept_no FROM fn_ai WHERE corp_code=? AND reason IS NOT NULL AND (model LIKE '%|v2' OR model LIKE '%|v3')", cc)),   # v2(숫자·방향 대조 통과)만 — v1 표본 20사 결과는 오류가 많아 표시하지 않음(fn_ai.VER와 맞출 것)   # 2026-11-19 사용자 승인 ②: 주석 인용이 있는 변동 사유(Haiku)
         "notes_raw": _notes_raw(con, cc),
         "borrow_bd": _safe(lambda: _borrow_bd(con, cc)),
         "notes_struct": (lambda r: {"rcept_no": r[0]["rcept_no"], "report_nm": r[0]["report_nm"], **json.loads(r[0]["json"])} if r else None)(
