@@ -80,6 +80,10 @@ def _blocks(sec_xml, cap=True):
 # '재무제표 주석' 절 본문의 <P> 제목으로만 구분된다(2026-10-24 확인: SECTION 제목만 보면 주석 항목이 하나도 안 잡힘).
 _HEAD_RE = re.compile(r"^\s*(\d{1,2})\s*[.．]\s*(?![\d.)])(\S.{0,70}?)\s*$")
 _HEAD_FUSED = re.compile(r"^\s*(\d{1,2})\s*[.．]\s*((?:유형자산|무형자산|사용권자산|투자부동산|비용의\s*성격별\s*분류|현금흐름표?)(?:\s*(?:및|과|와)\s*[가-힣]{2,10})?)")
+# 2026-11-27 fn_ai 진단(동원건설산업·씨제이포디플렉스·동희산업 등 16사 발췌 0자): 감사보고서·구형 사업보고서는 'N. 차입금(1) 당기말 현재 …'처럼 제목과 본문이 한 <P>에 붙어 있어
+#   위 상각비 키워드 외(차입금·사채·매출채권·매입채무·관계기업·충당부채 …)는 영영 절로 안 잘리고 앞 절(리스 등)에 묻힘 → 각주 사유를 찾을 자료가 없었다.
+#   → 일반형: 'N. ' + 짧은 제목(한글·영문·중점, 2~30자) 뒤에 '(', 숫자, '당기/당반기/당분기/보고기간/전기/회사/연결/당사' 가 이어지면 제목으로 본다. 연번은 직전+1~3만 인정(본문 속 숫자 오인 방지)
+_HEAD_FUSED2 = re.compile(r"^\s*(\d{1,2})\s*[.．]\s*([가-힣A-Za-z][가-힣A-Za-z·,\s]{1,29}?)(?=\s*(?:\(|\d|당기|당반기|당분기|보고기간|전기|회사|연결|당사|종속|지배))")
 _NOTES_TITLE_RE = re.compile(r"((연결|별도)?재무제표(에대한)?주석|^(\d+\.)?주석)$")
 
 
@@ -117,7 +121,11 @@ def _split_notes(sec_xml, fs):
                 if mf and int(mf.group(1)) > last:
                     m, n, rest = mf, int(mf.group(1)), line[mf.end():].strip()
                 else:
-                    m = None
+                    mf2 = _HEAD_FUSED2.match(line)      # 2026-11-27 일반형 붙은 제목(연번 직전+1~3)
+                    if mf2 and last < int(mf2.group(1)) <= last + 3 and not re.search(r"(니다|습니다|음|함|임)\s*$", mf2.group(2)):
+                        m, n, rest = mf2, int(mf2.group(1)), line[mf2.end():].strip()
+                    else:
+                        m = None
             if m:
                 if cur is not None:
                     if buf:

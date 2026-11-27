@@ -20,7 +20,9 @@ from business import fetch_document_xml  # noqa: E402
 import notes_v2  # noqa: E402
 
 MODEL = os.environ.get("FN_AI_MODEL", "claude-haiku-4-5")
-VER = "v2"               # 2026-11-19 표본 20사(v1) 점검: 저장 20건 중 틀리거나 애매한 것이 절반(단위 환산 오류 3건 — 천원 표를 억으로 잘못 환산, 방향 모순 2건, 다른 계정 표 인용 1건, 현금 항목 0/11 유효)
+SRC_VER = 3              # 2026-11-27 주석 절 캐시 판(notes_v2 붙은 제목 분할·계정 매핑 보강) — 바뀌면 원문을 다시 받아 추출
+VER = "v3"               # 2026-11-27 v3: 발췌 자료 보강(아래 SRC_VER) — 저장 키가 바뀌어 전 회사를 다시 본다
+# (v2까지의 이력)        # 2026-11-19 표본 20사(v1) 점검: 저장 20건 중 틀리거나 애매한 것이 절반(단위 환산 오류 3건 — 천원 표를 억으로 잘못 환산, 방향 모순 2건, 다른 계정 표 인용 1건, 현금 항목 0/11 유효)
                          #   → v2: 금액 환산 금지 + 숫자 대조, 변동 방향 대조, 차입·리스 절 분리, 현금 항목 제외. 저장 행의 model에 '|v2'를 붙여 사이트는 v2만 표시(build_site.FN_AI_VER)
 PRICES = {"claude-haiku-4-5": (1.0, 5.0), "claude-sonnet-4-5": (3.0, 15.0)}
 BUDGET = float(os.environ.get("FN_AI_BUDGET", "35"))
@@ -45,6 +47,14 @@ _SEC = [
     (r"금융자산|금융상품|파생", r"금융자산|금융상품|파생|공정가치"),
     (r"이연법인세", r"법인세"),
     (r"충당부채|확정급여", r"충당|퇴직|확정급여"),
+    # 2026-11-27 진단: 금융사·건설사 계정명(신탁계정대·요구불예금·대손충당금·미수금·용지·지분법적용투자주식)이 위 표에 없어 관련 절을 못 찾던 것 보강
+    (r"신탁계정대|대출채권|대출금|여신", r"신탁계정|대출|여신|채권"),
+    (r"대손충당금|손상차손누계", r"대손|충당금|채권"),
+    (r"미수금|미수수익|미수", r"미수|기타채권|기타자산|기타금융자산"),
+    (r"예수|예금|예치", r"예수|예금|예치"),
+    (r"지분법|투자자산|투자주식|출자", r"관계기업|종속기업|공동기업|지분|투자|출자"),
+    (r"용지|미청구|초과청구|공사", r"재고|용지|계약자산|계약부채|미청구|초과청구|공사"),
+    (r"유동성장기", r"차입|사채|금융부채"),
     (r"기타", r"기타"),
 ]
 
@@ -109,12 +119,14 @@ def _secs_for_report(con, rcept_no, cc):
     r = con.execute("SELECT secs_z FROM fn_ai_src WHERE rcept_no=?", (rcept_no,)).fetchone()
     if r and r[0]:
         try:
-            return json.loads(ztext(r[0]) or "[]")
+            cached = json.loads(ztext(r[0]) or "[]")
+            if isinstance(cached, dict) and cached.get("v") == SRC_VER:      # 2026-11-27 추출기 수정(붙은 제목 분할) 전 캐시는 다시 받는다
+                return cached["secs"]
         except Exception:  # noqa
             pass
     xml = fetch_document_xml(rcept_no)
     secs = notes_v2.extract_notes_v2(xml, keys=WIDE_KEYS, max_sec=220)
-    con.execute("INSERT OR REPLACE INTO fn_ai_src VALUES (?,?,?)", (rcept_no, common.zpack(json.dumps(secs, ensure_ascii=False)), now()))
+    con.execute("INSERT OR REPLACE INTO fn_ai_src VALUES (?,?,?)", (rcept_no, common.zpack(json.dumps({"v": SRC_VER, "secs": secs}, ensure_ascii=False)), now()))
     con.commit()
     return secs
 
