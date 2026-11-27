@@ -787,7 +787,8 @@ async function open(code){
       h+=`<div class="flh"><span class="src">단위 ${UNIT()} · 최근 분기 열은 누적 · 연도 클릭 → DART 보고서 · 반기·분기 순차입금/EBITDA는 LTM EBITDA 기준${bases.length<2?` · ${bases[0][0]==='CFS'?'별도':'연결'} 재무 없음`:''}</span></div>${bases.length>1?`<div class="mseg fseg" role="group" aria-label="재무 기준">${order.map(([fs,nm],i)=>`<button type="button" data-mfs="${fs}" aria-pressed="${i?'false':'true'}">${nm}</button>`).join('')}</div>`:''}<div class="fin2col${bases.length<2?' one':' m2'}" data-m="${order[0][0]}">${order.map(([fs,nm])=>tbl(fs,nm)).join('')}</div>${daNote(order.map(o=>o[0]))}${hyNote(order)}${notes}`;
       {const RN={'11011':'사업보고서','11012':'반기보고서','11013':'1분기보고서','11014':'3분기보고서'}; const rows=d.kpi[FS0]||[];
        const srcs=rows.map(r=>`${r.label||r.bsns_year} ${RN[r.reprt_code]||''}${r.kind!=='annual'?'(누적)':''}${r.rcept_no?` <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept_no}" target="_blank" rel="noopener">${r.rcept_no}</a>`:''}`);
-       if(srcs.length) h+=`<div class="src fsrc" style="margin-top:4px;margin-bottom:2px"><b>기준 보고서</b> · ${srcs.join(' · ')}</div>`;}
+       if(srcs.length) h+=`<div class="src fsrc" style="margin-top:4px;margin-bottom:2px"><b>기준 보고서</b> · ${srcs.join(' · ')}</div>`;
+       if(d.company&&d.company.fy_months&&d.company.fy_months<12) h+=`<div class="src fsrc" style="margin-top:2px;margin-bottom:2px;color:#9a3412"><b>결산주기 ${d.company.fy_months}개월</b> · 사업보고서가 해마다 ${12/d.company.fy_months}번 나오는 회사입니다. 손익·현금흐름은 결산월(${d.company.acc_mt||'-'}월) 기준 12개월로 다시 묶어 1Q·반기·3Q 누적과 연간(12개월 합산)으로 표시하므로 12월 결산사와 비교할 수 있습니다. 재무상태표는 각 기간 말 기준 · 연도 표기는 사업연도 시작 연도(DART 관례)</div>`;}
     }
   }
   if(d.ibk_fin&&(d.ibk_fin.CFS||d.ibk_fin.OFS)){   // 2026-11-18 사용자: 체크리스트 ⑥ 당사 양식 재무현황(접어 둠) + 엑셀 내려받기 — 유동·비유동 자산·부채별 규모 큰 계정
