@@ -297,7 +297,8 @@ def kpi_periods(con, c):
 
     def plabel(year, rc):                       # 분기말 월 기준 라벨: 2025.06 (결산월 반영)
         mm = ((acc + 3 * Q.get(rc, 0) - 1) % 12) + 1
-        return f"{year}.{mm:02d}"
+        yy = int(year) + (1 if (acc != 12 and mm <= acc) else 0)   # 2026-11-27: 비12월 결산은 사업연도 표기(시작 연도)와 기간말 연도가 다름 (8월 결산 FY2025 반기 = 2026.02)
+        return f"{yy}.{mm:02d}"
     for fs in ("CFS", "OFS"):
         latest = q(con, "SELECT * FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code!='11011' ORDER BY bsns_year DESC, CASE reprt_code WHEN '11014' THEN 3 WHEN '11012' THEN 2 ELSE 1 END DESC LIMIT 1", cc, fs)   # 3Q>반기>1Q (코드 순서와 다름)
         # 분기·반기 재무가 없는 회사(감사보고서만 있는 비상장사 등)는 최근 감사보고서 연도 포함 3개년(2026-10-26), 그 외 연간 2개년 + 최근 분기
@@ -327,7 +328,8 @@ def company_detail(con, c):
 
     def plabel(year, rc):                       # 분기말 월 기준 라벨: 2025.06 (결산월 반영)
         mm = ((acc + 3 * Q.get(rc, 0) - 1) % 12) + 1
-        return f"{year}.{mm:02d}"
+        yy = int(year) + (1 if (acc != 12 and mm <= acc) else 0)   # 2026-11-27: 비12월 결산은 사업연도 표기(시작 연도)와 기간말 연도가 다름 (8월 결산 FY2025 반기 = 2026.02)
+        return f"{yy}.{mm:02d}"
     ann5 = {}                                    # 분기 재무가 없는 회사의 연간 손익 추이 그래프용 최근 5개년(2026-10-26, 가벼운 필드만)
     for fs in ("CFS", "OFS"):
         a5 = q(con, "SELECT bsns_year, revenue, op_income, net_borrowings, ebitda FROM fin_kpi WHERE corp_code=? AND fs_div=? AND reprt_code='11011' AND revenue IS NOT NULL ORDER BY bsns_year DESC LIMIT 5", cc, fs)
@@ -343,8 +345,12 @@ def company_detail(con, c):
             ps[0] = dict(ps[0]); ps[0]["subst_price"], ps[0]["subst_dd"] = sp[0], sp[1]
     except Exception:  # noqa
         pass
+    try:                                        # 2026-11-27: 3·6개월 결산 리츠 — 화면에 결산주기 안내(손익·현금흐름은 결산월 기준 12개월 누적으로 합산)
+        sf = con.execute("SELECT fy_months FROM short_fy WHERE corp_code=?", (cc,)).fetchone()
+    except Exception:  # noqa
+        sf = None
     d = {
-        "company": {**c, "adres": re.sub(r"&nbsp;?|\s+", " ", c.get("adres") or "").strip()},   # DART 주소의 &nbsp 제거
+        "company": {**c, "adres": re.sub(r"&nbsp;?|\s+", " ", c.get("adres") or "").strip(), "fy_months": (sf[0] if sf else None)},   # DART 주소의 &nbsp 제거
         "audit": q(con, "SELECT bsns_year, adtor, adt_opinion, emphs_matter, core_adt_matter FROM audit_opinion WHERE corp_code=? ORDER BY bsns_year DESC LIMIT 3", cc),
         "review": _review(con, cc),
         "shareholders": _shareholders(con, cc),
@@ -598,7 +604,8 @@ def _borrow_bd(con, cc):
         if rc == "11011":
             return year
         mm = ((acc + 3 * Q.get(rc, 0) - 1) % 12) + 1
-        return f"{year}.{mm:02d}"
+        yy = int(year) + (1 if (acc != 12 and mm <= acc) else 0)   # 2026-11-27: 비12월 결산은 사업연도 표기(시작 연도)와 기간말 연도가 다름 (8월 결산 FY2025 반기 = 2026.02)
+        return f"{yy}.{mm:02d}"
     for fs in ("CFS", "OFS"):
         per = con.execute("""SELECT bsns_year, reprt_code, MAX(rcept_no) rc FROM fin_raw WHERE corp_code=? AND fs_div=? AND sj_div='BS'
                              GROUP BY bsns_year, reprt_code""", (cc, fs)).fetchall()
