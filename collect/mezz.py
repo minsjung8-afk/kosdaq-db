@@ -145,7 +145,7 @@ def _classify(header_text):
 
 
 UNIT = {"원": 1, "천원": 1e3, "백만원": 1e6, "억원": 1e8}
-PARSER_VER = 5       # 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱 / v5(2026-10-28): 종속회사 발행분 제외(별도 기준 — KT&G 표의 [영진약품(주)] 전환사채)
+PARSER_VER = 6       # v6(2026-11-27): 2026 정기보고서 양식에서 '미상환 전환사채 발행현황' 표가 사라짐 → 증권 발행실적 표(상환여부)+발행결정 공시로 잔액 복원 / 파서 변경 시 올리면 mezz_checked가 무효화되어 재파싱 / v5(2026-10-28): 종속회사 발행분 제외(별도 기준 — KT&G 표의 [영진약품(주)] 전환사채)
 
 
 def _unit(text):
@@ -342,6 +342,87 @@ def extract_outstanding(xml_text, names=None):
     return out
 
 
+# ---------- 2-b) 2026 양식 폴백: 채무증권 발행실적 표(ACODE BSS_PIS_*) + 발행결정 공시 ----------
+_PIS_RE = re.compile(r'A(?:CODE|UNIT)="BSS_PIS_([A-Z]+)"', re.I)
+
+
+def issue_table_rows(xml_text):
+    """'7-1. 증권의 발행을 통한 자금조달 실적'의 채무증권 발행실적 표를 구조화. 셀의 ACODE/AUNIT(BSS_PIS_CMPY·KNN·STC·DAT·MON·RATE·LAS·REC·SUC)로 읽어 열 순서에 의존하지 않음.
+    2026년 정기보고서 양식부터 '미상환 전환사채 발행현황' 표가 없어져 CB·BW·EB가 이 표에 '회사채'로만 실리고 전환 조건은 없다(3S·영흥 진단 2026-11-27)."""
+    out = []
+    for tm in re.finditer(r"<TABLE[^>]*>(.*?)</TABLE>", xml_text, flags=re.S | re.I):
+        tbl = tm.group(1)
+        if "BSS_PIS_REC" not in tbl.upper():
+            continue
+        unit = _unit(_strip(xml_text[max(0, tm.start() - 1500):tm.start()]))
+        for tr in re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I):
+            v = {}
+            for tag, attrs, inner in CELL_RE.findall(tr):
+                m = _PIS_RE.search(attrs)
+                if m:
+                    v[m.group(1).upper()] = _strip(inner).replace("\n", " ").strip()
+            if "REC" not in v or "DAT" not in v:
+                continue
+            out.append({"cmpy": v.get("CMPY", ""), "knd": v.get("KNN", ""), "stc": v.get("STC", ""), "isu": _d(v.get("DAT")),
+                        "amt": (_num(v.get("MON")) or 0) * unit, "rate": v.get("RATE", ""), "mtd": _d(v.get("LAS")), "rec": v.get("REC", ""), "unit": unit})
+    return out
+
+
+def _dd(a, b):
+    try:
+        return abs((date.fromisoformat(a) - date.fromisoformat(b)).days)
+    except Exception:  # noqa
+        return 999
+
+
+def outstanding_from_issue_table(xml_text, issues, own=None, events=None, rcept_dt=None):
+    """발행실적 표의 '미상환' 행을 발행결정 공시(mezz_issue: 납입일·권면총액 일치)와 짝지어 미상환 행 생성.
+    잔액: 상환여부 '미상환' → 권면총액, '미상환(일부상환)' → 권면총액 − 보고서 접수일까지의 전환·행사·교환·조기상환 수시공시 합(없으면 NULL = 미확인).
+    전환가·청구기간은 발행결정 공시 값(리픽싱은 사이트에서 수시공시로 보정)."""
+    out = []
+    used = set()
+    for it in issue_table_rows(xml_text):
+        if "미상환" not in it["rec"].replace(" ", "") or not it["isu"]:
+            continue
+        if it["cmpy"] and own and not _is_own(it["cmpy"], own):
+            continue                                       # 종속회사 발행분 제외(별도 기준)
+        for iss in issues:
+            if iss["rcept_no"] in used or iss["kind"] not in ("CB", "BW", "EB") or not iss.get("pymd"):
+                continue
+            if _dd(iss["pymd"], it["isu"]) > 3:
+                continue
+            face = iss.get("face_amt") or 0
+            if face and it["amt"] and abs(face - it["amt"]) > max(it["unit"], face * 0.01):
+                continue
+            used.add(iss["rcept_no"])
+            partial = "일부" in it["rec"]
+            rem = face or None
+            if partial and face:
+                tm_ = str(iss.get("tm") or "")
+                paid = [e["amount"] for e in (events or []) if str(e.get("round") or "") == tm_ and e.get("kind") in ("전환", "행사", "교환", "상환") and e.get("amount")
+                        and (not rcept_dt or (e.get("rcept_dt") or "") <= rcept_dt)]
+                rem = max(0, face - sum(paid)) if paid else None
+            prc = iss.get("cv_prc")
+            nm = f"제{iss.get('tm')}회 {iss.get('bd_knd') or iss['kind']}" if iss.get("tm") else (iss.get("bd_knd") or iss["kind"])
+            if partial:
+                nm += " (일부상환)"
+            out.append({"kind": iss["kind"], "name": nm[:80], "isu_dd": iss["pymd"], "exprd_dd": it["mtd"] or iss.get("mtd"),
+                        "face_amt": face, "cv_rt": iss.get("cv_rt"), "cv_prc": prc,
+                        "remndr_amt": rem, "remndr_stock": (round(rem / prc) if rem and prc else None),
+                        "period": (f"{iss['cv_bgd']}~{iss.get('cv_edd') or ''}" if iss.get("cv_bgd") else None)})
+            break
+    return out
+
+
+def _issues_events(con, corp_code):
+    issues = [dict(r) for r in con.execute("SELECT * FROM mezz_issue WHERE corp_code=? AND kind IN ('CB','BW','EB')", (corp_code,))]
+    try:
+        events = [dict(r) for r in con.execute("SELECT rcept_dt, kind, round, amount FROM mezz_event WHERE corp_code=?", (corp_code,))]
+    except Exception:  # noqa
+        events = []
+    return issues, events
+
+
 def fetch_outstanding(con, corp_code):
     rcept, nm = latest_periodic_report(corp_code)
     if not rcept:
@@ -351,19 +432,28 @@ def fetch_outstanding(con, corp_code):
         return -1                                          # 이미 이 보고서를 현재 파서로 처리함
     xml = fetch_document_xml(rcept)
     nmr = con.execute("SELECT corp_name, corp_name_full FROM company WHERE corp_code=?", (corp_code,)).fetchone()
-    rows = extract_outstanding(xml, names=[x for x in (nmr or []) if x])
+    names = [x for x in (nmr or []) if x]
+    rows = extract_outstanding(xml, names=names)
+    src = nm
+    if not rows:                                           # v6: 2026 양식(미상환 CB 표 없음) → 발행실적 표 상환여부 + 발행결정 공시로 복원
+        issues, events = _issues_events(con, corp_code)
+        if issues:
+            rows = outstanding_from_issue_table(xml, issues, own={"names": [_norm_co(n) for n in names], "first": None}, events=events, rcept_dt=f"{rcept[:4]}-{rcept[4:6]}-{rcept[6:8]}")
+            if rows:
+                src = f"{nm} ※발행실적표 상환여부 기준"
     con.execute("DELETE FROM mezz_outstanding WHERE corp_code=?", (corp_code,))
     for r in rows:
         con.execute("""INSERT INTO mezz_outstanding (corp_code, rcept_no, report_nm, kind, name, isu_dd, exprd_dd, face_amt, cv_rt, cv_prc,
                        remndr_amt, remndr_stock, period, fetched_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (corp_code, rcept, nm, r["kind"], r["name"], r["isu_dd"], r["exprd_dd"], r["face_amt"], r["cv_rt"], r["cv_prc"],
+                    (corp_code, rcept, src, r["kind"], r["name"], r["isu_dd"], r["exprd_dd"], r["face_amt"], r["cv_rt"], r["cv_prc"],
                      r["remndr_amt"], r["remndr_stock"], r["period"], now()))
     con.execute("INSERT OR REPLACE INTO mezz_checked VALUES (?,?,?,?)", (corp_code, rcept, f"{nm}#v{PARSER_VER}", now()))
     con.commit()
     return len(rows)
 
 
-def run(corp_codes=None, years=3, new_only=False):
+def run(corp_codes=None, years=3, new_only=False, issues=True):
+    """issues=False: 발행결정 API(회사당 4~5회)를 건너뛰고 미상환 현황만(회사당 2회) 다시 읽는다 — v6 재파싱용."""
     con = connect()
     cs = [r[0] for r in con.execute("SELECT corp_code FROM company ORDER BY corp_name")]
     if corp_codes:
@@ -375,7 +465,7 @@ def run(corp_codes=None, years=3, new_only=False):
     iss = outs = 0
     recent = {r[0] for r in con.execute("SELECT corp_code FROM fetch_log WHERE job='mezz_issue' AND status='ok' AND at >= date('now','-7 days')")}
     for i, cc in enumerate(cs, 1):
-        if cc not in recent:                               # 발행결정 API 4종은 7일 내 조회했으면 생략(한도 절약)
+        if issues and cc not in recent:                    # 발행결정 API 4종은 7일 내 조회했으면 생략(한도 절약)
             try:
                 iss += fetch_issue_decisions(con, cc, years)
                 log(con, cc, "mezz_issue", "ok")
@@ -420,6 +510,12 @@ def debug(con, stock_codes):
             print(f"[mezz-debug]   '{kw}' 출현 {xml.count(kw)}회")
         rows = extract_outstanding(xml)
         print(f"[mezz-debug]   추출 행 {len(rows)}: {[(r['kind'], r['name'], r['remndr_amt']) for r in rows][:6]}")
+        tab = issue_table_rows(xml)
+        print(f"[mezz-debug]   발행실적표(BSS_PIS) {len(tab)}행: " + " | ".join(f"{t['cmpy']}/{t['knd']}/{t['isu']}/{t['amt']/1e8:,.1f}억/{t['rec']}" for t in tab[:12]), flush=True)
+        issues, events = _issues_events(con, cc)
+        print(f"[mezz-debug]   발행결정 {len(issues)}건: " + " | ".join(f"{i['kind']}{i.get('tm')}회 {i.get('pymd')} {(i.get('face_amt') or 0)/1e8:,.1f}억" for i in issues[:8]), flush=True)
+        fb = outstanding_from_issue_table(xml, issues, own={"names": [_norm_co(nm)], "first": None}, events=events, rcept_dt=f"{rcept[:4]}-{rcept[4:6]}-{rcept[6:8]}")
+        print(f"[mezz-debug]   v6 폴백 행 {len(fb)}: {[(r['kind'], r['name'], r['remndr_amt'], r['cv_prc']) for r in fb]}", flush=True)
         # 2026-11-27 진단: 2026년 정기보고서 양식에서 '미상환 전환사채 발행현황' 제목(TITLE)이 사라짐 → 전환·교환·신주인수권 문구가 나오는 자리(직전 제목·문단/표 머리)를 덤프
         tpos = [(m.start(), _strip(m.group(1)).replace("\n", " ").strip()) for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml, flags=re.S | re.I)]
         seen = 0
