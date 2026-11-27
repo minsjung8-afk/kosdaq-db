@@ -245,6 +245,19 @@ def run(con=None, limit=None, codes=None, dry=False, sample=False):
             parts.append(f"[항목 {i}] {nm}: {X['cols'][a]['label']} {p/1e8:,.0f}억 → {X['cols'][b]['label']} {cv/1e8:,.0f}억 ({'+' if r > 0 else '−'}{abs(r)*100:.0f}%)\n--- 주석 발췌 ---\n{ex or '(관련 절 없음)'}\n")
         if dry:
             print(f"[fn_ai] {c['corp_name']} {fs} 항목 {len(ch)}: " + " · ".join(f"{m[0]}@{m[1]}({len(m[3])}자)" for m in meta), flush=True)
+            for nm_, lb_, rc_, ex_, _r in meta:          # 2026-11-27 진단: 발췌 0자의 원인(접수번호 없음 / 주석 절 없음 / 계정-절 제목 불일치)
+                if ex_:
+                    continue
+                try:
+                    secs_ = _secs_for_report(con, rc_, cc) if rc_ else []
+                except Exception as e:  # noqa
+                    secs_ = []; print(f"[fn_ai]    진단 {nm_}@{lb_}: 주석 실패 {e}", flush=True)
+                nmr = None
+                try:
+                    nmr = con.execute("SELECT report_nm FROM disclosure_event WHERE rcept_no=?", (rc_,)).fetchone() if rc_ else None
+                except Exception:  # noqa
+                    nmr = None
+                print(f"[fn_ai]    진단 {nm_}@{lb_}: 접수 {rc_ or '없음'} {(nmr[0] if nmr else '')} · 절 {len(secs_)}개 · 제목 {[s['t'][:14] for s in secs_[:18]]}", flush=True)
             n_co += 1; continue
         if _spent(con) >= BUDGET:
             print("[fn_ai] 예산 도달 — 중단", flush=True); break
