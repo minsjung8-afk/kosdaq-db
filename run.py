@@ -164,6 +164,17 @@ def main():
         import mezz
         if a.debug:
             mezz.debug(con, a.debug)
+        elif a.type == "미확인재파싱":       # 2026-11-27 v6: CB·BW·EB 발행결정은 있는데 미상환 행이 없는 회사만 최신 정기보고서를 다시 읽기(발행결정 API 생략, 회사당 2회)
+            held = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM mezz_outstanding")}
+            cand = [r[0] for r in con.execute("""SELECT DISTINCT i.corp_code FROM mezz_issue i JOIN company c ON c.corp_code=i.corp_code
+                                                 WHERE i.kind IN ('CB','BW','EB') AND COALESCE(i.pymd, i.bddd, '') >= date('now','-4 years')""")]
+            cand = [c for c in cand if c not in held]
+            if a.limit:
+                cand = cand[:a.limit]
+            con.execute("DELETE FROM mezz_checked WHERE corp_code IN (%s)" % ",".join("?" * len(cand)), cand) if cand else None
+            con.commit()
+            print(f"[mezz] 발행결정 있으나 미상환 미확인 {len(cand)}사 재파싱(v6)", flush=True)
+            mezz.run(set(cand), new_only=True, issues=False)
         elif a.type == "보유재파싱":         # 2026-10-28: 미상환 메자닌이 있는 회사만 v5 파서(종속회사 발행분 제외)로 다시 읽기
             held = {r[0] for r in con.execute("SELECT DISTINCT corp_code FROM mezz_outstanding")}
             print(f"[mezz] 미상환 보유 {len(held)}사 재파싱", flush=True)
