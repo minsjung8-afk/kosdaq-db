@@ -190,7 +190,7 @@ def _check(reason, ex, r):
     return reason, ""
 
 
-def run(con=None, limit=None, codes=None, dry=False):
+def run(con=None, limit=None, codes=None, dry=False, sample=False):
     import build_site  # noqa — 사이트 빌드와 같은 규칙으로 변동 항목 산출
     if not dry and os.environ.get("FN_AI_ENABLED") != "1":     # 2026-11-19 사용자 '각주 관련 상세 주석은 일단 반영하지 말고': 표본 정밀도(20건 중 유효 9건)가 낮아 보류 — 켤 때만 실행
         print("[fn_ai] 보류 중 — 실행하지 않음(사용자 결정 2026-11-19). 다시 켜려면 FN_AI_ENABLED=1", flush=True)
@@ -201,7 +201,10 @@ def run(con=None, limit=None, codes=None, dry=False):
     print(f"[fn_ai] 모델 {MODEL} · 누적 비용 ${spent:.2f} / 예산 ${BUDGET}", flush=True)
     if spent >= BUDGET:
         print("[fn_ai] 예산 소진 — 중단", flush=True); return 0
-    cos = [dict(r) for r in con.execute("SELECT * FROM company ORDER BY CASE market WHEN 'KOSPI' THEN 0 WHEN 'KOSDAQ' THEN 1 WHEN 'KONEX' THEN 2 ELSE 3 END, corp_name")]
+    if sample:   # 2026-11-27 표본 점검용: 등급 보유사(심사 대상 성격) 중 상장·비상장 섞어 무작위
+        cos = [dict(r) for r in con.execute("SELECT c.* FROM company c WHERE c.corp_code IN (SELECT DISTINCT corp_code FROM credit_rating) ORDER BY RANDOM()")]
+    else:
+        cos = [dict(r) for r in con.execute("SELECT * FROM company ORDER BY CASE market WHEN 'KOSPI' THEN 0 WHEN 'KOSDAQ' THEN 1 WHEN 'KONEX' THEN 2 ELSE 3 END, corp_name")]
     if codes:
         cos = [c for c in cos if c["stock_code"] in codes or c["corp_code"] in codes]
     done = {r[0]: r[1] for r in con.execute("SELECT corp_code, key FROM fn_ai_log")}
