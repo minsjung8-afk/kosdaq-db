@@ -1289,10 +1289,12 @@ html,body{display:block;background:#fff;margin:0;padding:0;font-family:var(--fon
         put(0,0,name()+' 재무현황 · 당사 양식 (체크리스트 ⑥) · '+fl+' · 단위 억원 · 음수 ( )',ST.title);
         put(2,0,'재무상태표',ST.cap); put(2,RC,'손익계산서 · 재무비율',ST.cap);
         line(3,0,'구 분',C,ST.hd,null,ST.hdL); line(3,RC,'구 분',C,ST.hd,null,ST.hdL);
-        let r=4; const L=(label,vals,st,z)=>{ line(r++,0,label,vals.map(n),st,z||NUM); };
-        const NT=ibkNotes(X,fs,d), fl_=nm=>NT.mark[nm]?` (주${Object.values(NT.mark[nm]).join(',')})`:'';
-        const grp=(lb,g)=>{ L(lb,G[g].total,ST.sub); G[g].items.forEach(it=>L('   '+it.nm+fl_(it.nm),it.v,ST.item)); };
-        const its=g=>(G[g]?G[g].items:[]).forEach(it=>L('   '+it.nm+fl_(it.nm),it.v,ST.item));
+        const NT=ibkNotes(X,fs,d);
+        // 2026-11-27 사용자: 주석 번호는 계정명이 아니라 변동이 생긴 해의 금액 오른쪽에 각주(위첨자)로 — 값은 숫자 그대로 두고 표시형식에만 위첨자를 붙여 계산에 지장 없게
+        const SUP='⁰¹²³⁴⁵⁶⁷⁸⁹', sup=k=>String(k).replace(/\d/g,c=>SUP[+c]), zMark=k=>`#,##0"${sup(k)}";(#,##0)"${sup(k)}";"-"`;
+        let r=4; const L=(label,vals,st,z,mk)=>{ const rr=r++; put(rr,0,label,st); vals.map(n).forEach((v,i)=>put(rr,1+i,v==null?'':v,st,(mk&&mk[i])?zMark(mk[i]):(z||NUM))); };
+        const grp=(lb,g)=>{ L(lb,G[g].total,ST.sub); G[g].items.forEach(it=>L('   '+it.nm,it.v,ST.item,null,NT.mark[it.nm])); };
+        const its=g=>(G[g]?G[g].items:[]).forEach(it=>L('   '+it.nm,it.v,ST.item,null,NT.mark[it.nm]));
         if(X.nocur){ L('자산총계',B.total_assets,ST.tot); its('ta'); L('부채총계',B.total_liab,ST.tot); its('tl'); }
         else { L('자산총계',B.total_assets,ST.tot); grp('유동자산','ca'); grp('비유동자산','nca'); L('부채총계',B.total_liab,ST.tot); grp('유동부채','cl'); grp('비유동부채','ncl'); }
         L('총차입금 (차입금+사채+리스부채)',B.borrowings,ST.cream); const xhyEq=B.hybrid_eq||[],xhasHy=xhyEq.some(v=>v),xborHy=B.borrowings.map((v,i)=>xhyEq[i]?(v||0)+xhyEq[i]:null); if(xhasHy) L('총차입금(신종포함)',xborHy,ST.cream); L('자본총계',B.equity,ST.tot); L('자본금',B.capital,ST.item); { const xr=(B.hybrid_eq||B.total_assets.map(()=>null)).map((v,i)=>v!=null?n(v):hyLab((B.hybrid_note||[])[i])); if(xr.some(v=>v!=null)) line(r++,0,(B.hybrid_note||[]).some(t=>/잔액 공시/.test(t||''))?'신종자본증권(공시 미상환 잔액·액면)':'신종자본증권(자본 내 잔액)',xr,ST.item,NUM); } const rEnd=r;
@@ -1304,7 +1306,7 @@ html,body{display:block;background:#fff;margin:0;padding:0;font-family:var(--fon
         R('영업이익률',r1(B.op_income,B.revenue),ST.plain,PCT,1); R('EBITDA%',r1(B.ebitda,B.revenue),ST.plain,PCT,1); R('유동비율',r1(G.ca.total,G.cl.total),ST.plain,PCT,1); R('부채비율',r1(B.total_liab,B.equity),ST.plain,PCT,1); R('차입금의존도',r1(B.borrowings,B.total_assets),ST.plain,PCT,1); if(xhasHy) R('차입금의존도(신종포함)',r1(xborHy,B.total_assets),ST.plain,PCT,1); R('EBITDA/이자비용',r1(B.ebitda,B.int_exp,1),ST.plain,XF,1); if((B.hybrid_dist||[]).some(v=>v!=null)) R('EBITDA/이자비용(신종포함)',r1(B.ebitda,B.int_exp.map((v,i)=>(v==null&&(B.hybrid_dist||[])[i]==null)?null:(v||0)+((B.hybrid_dist||[])[i]||0)),1),ST.plain,XF,1);
         let last=Math.max(rEnd,q);
         { const xn=hyTxt(B.hybrid_note); if(xn){ put(last+1,0,'신종자본증권: '+xn,ST.src); last+=1; } }
-        if(NT.notes.length){ put(last+1,0,'주석 — 전년(분기 열은 전년 동기) 대비 큰 변동(±30% 이상·그룹 합계의 5% 이상) · 단위 억원',ST.cap); NT.notes.forEach((n,i)=>put(last+2+i,0,`(주${i+1}) ${n.t}${n.w.replace(/<[^>]+>/g,'')}`,ST.src)); last+=1+NT.notes.length; }
+        if(NT.notes.length){ put(last+1,0,'주석 — 전년(분기 열은 전년 동기) 대비 큰 변동(±30% 이상·그룹 합계의 5% 이상) · 번호는 변동이 생긴 기간의 금액 옆 위첨자 · 단위 억원',ST.cap); NT.notes.forEach((n,i)=>put(last+2+i,0,`${sup(i+1)} ${n.t}${n.w.replace(/<[^>]+>/g,'')}`,ST.src)); last+=1+NT.notes.length; }
         put(last+1,0,'출처 DART 정기보고서(XBRL) · 심사참고 DB kosdaq-db.pages.dev · '+today(),ST.src);
         ws['!ref']=X_.utils.encode_range({s:{r:0,c:0},e:{r:last+1,c:RC+nc}}); ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:RC+nc}}];
         ws['!cols']=[{wch:30},...C.map(()=>({wch:12})),{wch:3},{wch:24},...C.map(()=>({wch:12}))]; ws['!rows']=[{hpt:22},{hpt:6},{hpt:18},{hpt:20}];
