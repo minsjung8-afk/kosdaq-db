@@ -136,7 +136,7 @@ def run(days=456, out_path="unlisted_candidates.xlsx"):
         hits = list(hits.values())
         nm0 = _base(d["name"])
         web_listed = False
-        if not hits and not (nm0.endswith("지점") or SPC.search(d["name"]) or FIN.search(nm0) or PUB.search(nm0)):
+        if not hits and not (nm0.endswith("지점") or SPC.search(d["name"]) or PUB.search(nm0)):   # 2026-11-27 사용자 "등급 있는 금융기관도 전부": 금융도 DART 사명 조회·동명 선택을 일반기업과 같게
             try:                                # corpCode.xml에 없는 이름 = 대개 사명 변경(신평 공시는 옛 사명) → DART 웹 검색은 옛 사명도 찾는다
                 import dart_web
                 w = dart_web.corp_lookup(re.sub(r"\(주\)|주식회사", "", d["name"]).strip())
@@ -146,7 +146,7 @@ def run(days=456, out_path="unlisted_candidates.xlsx"):
                     web_listed = w[0][1] in ("유", "코", "넥")
             except Exception as e:  # noqa
                 print(f"[unlisted2] 웹 사명 조회 실패 {d['name']}: {e}", flush=True)
-        need = not (nm0.endswith("지점") or SPC.search(d["name"]) or FIN.search(nm0) or PUB.search(nm0))
+        need = not (nm0.endswith("지점") or SPC.search(d["name"]) or PUB.search(nm0))
         h = pick(hits, db) if (need or len(hits) <= 1) else (next((x for x in hits if x[0] in db), None))
         cc = h[0] if h else ""
         stock = h[2] if h else None
@@ -196,7 +196,7 @@ def run(days=456, out_path="unlisted_candidates.xlsx"):
         print(f"  {g} / {s}: {n}")
     print("[unlisted2] ===== TSV 시작 =====")
     for r in out:
-        if r["구분"] in ("일반기업", "상장사(DB 미수록)", "이미 수록"):
+        if r["구분"] in ("일반기업", "리츠", "금융", "상장사(DB 미수록)", "이미 수록"):
             print("TSV\t" + "\t".join(str(r[c]) for c in ("구분", "세부", "회사명", "대표등급", "ICR", "회사채", "CP", "평가사", "DART고유번호", "비고")))
     print("[unlisted2] ===== TSV 끝 =====", flush=True)
     return out
