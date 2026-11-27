@@ -433,7 +433,7 @@ def company_detail(con, c):
     ps0 = d["price_summary"] or {}
     if cb_tot and ps0.get("mcap") and cb_tot > ps0["mcap"] * 0.2:
         d["flags"].append(("CB·BW 잔액 > 시총 20%", "amber", f"잔액 {cb_tot/1e8:,.0f}억 / 시총 {ps0['mcap']/1e8:,.0f}억"))
-    if ps0.get("close") and any((r["cv_prc"] or 0) > ps0["close"] * 1.5 and (r["remndr_amt"] or 0) > 0 for r in d["mezz_out"]):
+    if ps0.get("close") and any((r["cv_prc"] or 0) > ps0["close"] * 1.5 and (r["remndr_amt"] or 0) > 0 and r["kind"] != "EB" for r in d["mezz_out"]):   # 2026-11-27 사용자: EB 교환가는 교환대상(타사 주식) 기준이라 발행사 주가와 비교하지 않음
         d["flags"].append(("전환가 > 주가×1.5 메자닌 보유", "amber", "전환 유인 낮음 → 조기상환(풋)·리픽싱 부담"))
     if ps0.get("close") and any((r["lw_prc"] or 0) and r["lw_prc"] < ps0["close"] * 0.8 and r["kind"] in ("CB", "BW") for r in d["mezz_issue"]):
         d["flags"].append(("리픽싱 최저가 < 주가×0.8", "amber", "하향 리픽싱 여지 → 희석 가능"))
