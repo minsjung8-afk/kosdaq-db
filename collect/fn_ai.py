@@ -225,8 +225,8 @@ def run(con=None, limit=None, codes=None, dry=False, sample=False):
         X = ib[fs]
         ch = _changes(X)
         key = VER + "|" + fs + "|" + "|".join(f"{nm}:{X['cols'][b]['label']}" for nm, a, b, *_ in ch)
-        if done.get(cc) == key:
-            continue                                    # 같은 변동 세트는 다시 묻지 않음(새 보고서가 들어오면 key가 바뀜)
+        if done.get(cc) == key and not dry:
+            continue                                    # 같은 변동 세트는 다시 묻지 않음(새 보고서가 들어오면 key가 바뀜) · dry(진단)는 다시 본다
         if not ch:
             prev = con.execute("SELECT tin, tout FROM fn_ai_log WHERE corp_code=? AND model=?", (cc, MODEL)).fetchone()
             con.execute("DELETE FROM fn_ai WHERE corp_code=? AND fs=?", (cc, fs))      # 예전 판(v1)에서 저장한 사유가 남지 않게
