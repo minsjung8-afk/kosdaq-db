@@ -124,8 +124,32 @@ def plan_for(con, cc, reports, fs="CFS"):
                                                     AND sj_div IN ('IS','CIS') AND rcept_no IS NULL""", (cc, fs))}
     have -= stale
     have -= reversal_stale(con, cc, fs)
-    empty = {(r[0], r[1]) for r in con.execute("SELECT bsns_year, reprt_code FROM quarters_done WHERE corp_code=? AND fs_div=? AND status='empty'", (cc, fs))}
+    # 2026-11-27 사용자 지적(대신밸류리츠 8월 결산: 분기 없음): needed_reports는 12월 결산 달력 기준이라 비12월 결산사는 아직 제출 전인 분기를 찔러 'empty'로 굳어
+    #   영구 미수집. → 결산월로 그 보고서의 제출기한(분기말+45일, 연간+90일)을 계산해 기한 전에 찍힌 'empty'는 무시(재시도). 기한 뒤에도 비면 그대로 empty.
+    acc_r = con.execute("SELECT acc_mt FROM company WHERE corp_code=?", (cc,)).fetchone()
+    acc = int(acc_r[0]) if acc_r and str(acc_r[0] or "").strip().isdigit() else 12
+    empty = set()
+    for y, rc, fa in con.execute("SELECT bsns_year, reprt_code, fetched_at FROM quarters_done WHERE corp_code=? AND fs_div=? AND status='empty'", (cc, fs)):
+        if _premature(y, rc, fa, acc):
+            continue
+        empty.add((y, rc))
     return [(y, rc) for (y, rc) in reports if (y, rc) not in have and (y, rc) not in empty]
+
+
+def _premature(year, rc, fetched_at, acc):
+    """'empty' 기록이 그 보고서의 제출기한 전에 찍힌 것이면 True(= 다시 시도). bsns_year는 DART 관례대로 사업연도 시작 연도(12월 결산은 당해 연도)."""
+    try:
+        from datetime import datetime, timedelta
+        qn = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}.get(rc, 4)
+        mm = ((acc + 3 * qn - 1) % 12) + 1
+        yy = int(year) + (1 if mm <= acc and acc != 12 else 0)
+        nxt = (yy + (1 if mm == 12 else 0), 1 if mm == 12 else mm + 1)
+        q_end = datetime(nxt[0], nxt[1], 1) - timedelta(days=1)
+        due = q_end + timedelta(days=90 if rc == "11011" else 45)
+        fa = datetime.fromisoformat(str(fetched_at)[:19]) if fetched_at else None
+        return bool(fa) and fa < due
+    except Exception:  # noqa
+        return False
 
 
 def priority(con, corp_codes):
