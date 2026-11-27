@@ -402,6 +402,10 @@ def outstanding_from_issue_table(xml_text, issues, own=None, events=None, rcept_
                 paid = [e["amount"] for e in (events or []) if str(e.get("round") or "") == tm_ and e.get("kind") in ("전환", "행사", "교환", "상환") and e.get("amount")
                         and (not rcept_dt or (e.get("rcept_dt") or "") <= rcept_dt)]
                 rem = max(0, face - sum(paid)) if paid else None
+                if rem is None:                            # 주석에서 액면 잔액이 확인되면 채움
+                    nr = outstanding_from_notes(xml_text, [iss], events, rcept_dt)
+                    if nr and nr[0]["remndr_amt"] is not None:
+                        rem = nr[0]["remndr_amt"]
             prc = iss.get("cv_prc")
             nm = f"제{iss.get('tm')}회 {iss.get('bd_knd') or iss['kind']}" if iss.get("tm") else (iss.get("bd_knd") or iss["kind"])
             if partial:
@@ -411,6 +415,104 @@ def outstanding_from_issue_table(xml_text, issues, own=None, events=None, rcept_
                         "remndr_amt": rem, "remndr_stock": (round(rem / prc) if rem and prc else None),
                         "period": (f"{iss['cv_bgd']}~{iss.get('cv_edd') or ''}" if iss.get("cv_bgd") else None)})
             break
+    return out
+
+
+# ---------- 2-c) 3차 폴백: 재무제표 주석의 '제N회 … 전환사채' 행(발행실적 표를 비워 둔 회사: 3S·올릭스 2026-11-27) ----------
+_NOTE_ROW_RE = re.compile(r"제?\s*(\d{1,3})\s*회.*?(전환사채|신주인수권부사채|교환사채)")
+_CUR_COL_RE = re.compile(r"당\S{0,3}기말|당기말|당반기|당분기|보고기간\s*종료일|당기$")
+
+
+def notes_segment(xml_text):
+    """별도 재무제표 주석 구간(없으면 연결 주석). (start, end) 문자 위치"""
+    titles = [(m.start(), m.end(), _strip(m.group(1)).replace(" ", "")) for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml_text, flags=re.S | re.I)]
+    cand = [i for i, t in enumerate(titles) if re.search(r"재무제표주석", t[2]) and "연결" not in t[2]] or \
+           [i for i, t in enumerate(titles) if re.search(r"재무제표주석", t[2])]
+    if not cand:
+        return None
+    i0 = cand[0]
+    end = len(xml_text)
+    for st, en, t in titles[i0 + 1:]:
+        if re.match(r"^\d+\.?(배당|증권의발행|기타재무|재무제표$|연결재무제표$)", t) or re.match(r"^(IV|Ⅳ|V|Ⅴ|VI|Ⅵ)\.", t):
+            end = st
+            break
+    return titles[i0][1], end
+
+
+def notes_mezz_rows(xml_text):
+    """주석 표에서 '제N회 … 전환사채/신주인수권부사채/교환사채' 행의 당기말 금액 → [{tm, kind, val(원), face_col(bool)}]
+    face_col: 그 열 머리글에 액면·권면·발행금액이 있어 액면 잔액으로 볼 수 있는지(없으면 장부가일 수 있음 → 호출 측에서 권면총액과 대조)."""
+    seg = notes_segment(xml_text)
+    if not seg:
+        return []
+    out = []
+    body = xml_text[seg[0]:seg[1]]
+    for tm in re.finditer(r"<TABLE[^>]*>(.*?)</TABLE>", body, flags=re.S | re.I):
+        tbl = tm.group(1)
+        if not re.search(r"전환사채|신주인수권부사채|교환사채", tbl):
+            continue
+        unit = _unit(_strip(body[max(0, tm.start() - 1500):tm.start()]))
+        trs = re.findall(r"<TR[^>]*>(.*?)</TR>", tbl, flags=re.S | re.I)
+        rows = [[_strip(c[2]).replace("\n", " ").strip() for c in CELL_RE.findall(tr)] for tr in trs]
+        if len(rows) < 2:
+            continue
+        hdr = rows[0]
+        cur_idx = next((i for i, h in enumerate(hdr) if _CUR_COL_RE.search(h.replace(" ", ""))), None)
+        face_col = bool(cur_idx is not None and re.search(r"액면|권면|발행금액|발행가액", hdr[cur_idx])) or \
+                   any(re.search(r"액면|권면", h) for h in hdr)
+        for cells in rows[1:]:
+            if not cells:
+                continue
+            m = next((_NOTE_ROW_RE.search(c) for c in cells[:2] if _NOTE_ROW_RE.search(c)), None)
+            if not m:
+                continue
+            kind = _classify(m.group(2))
+            val = None
+            if cur_idx is not None and cur_idx < len(cells):
+                val = _num(cells[cur_idx])
+            if val is None:
+                nums = [_num(c) for c in cells[1:] if _num(c) is not None and not DATE_RE.search(c)]
+                nums = [x for x in nums if x >= 1000]
+                val = nums[0] if nums else None
+            if val is None or val <= 0:
+                continue
+            out.append({"tm": m.group(1), "kind": kind, "val": val * unit, "face_col": face_col, "unit": unit})
+    return out
+
+
+def outstanding_from_notes(xml_text, issues, events=None, rcept_dt=None, notes=None):
+    """주석 행을 발행결정(회차·종류)과 짝지어 미상환 행 생성. 잔액 채택 기준(추정 금지):
+    ① 주석 금액 == 권면총액(미전환) ② 열 머리글이 액면·권면 ③ 권면총액 − 접수일까지의 전환·행사·교환·상환 수시공시 합 == 주석 금액. 그 외(장부가 가능성) → 잔액 NULL + 회차명에 주석 금액 표기."""
+    out = []
+    notes = notes_mezz_rows(xml_text) if notes is None else notes
+    if not notes:
+        return out
+    for iss in issues:
+        if iss["kind"] not in ("CB", "BW", "EB") or not iss.get("tm"):
+            continue
+        face = iss.get("face_amt") or 0
+        tm_ = str(iss["tm"])
+        cands = [n for n in notes if n["tm"] == tm_ and n["kind"] == iss["kind"] and (not face or n["val"] <= face * 1.001)]
+        if not cands:
+            continue
+        n = cands[0]
+        paid = sum(e["amount"] for e in (events or []) if str(e.get("round") or "") == tm_ and e.get("kind") in ("전환", "행사", "교환", "상환") and e.get("amount")
+                   and (not rcept_dt or (e.get("rcept_dt") or "") <= rcept_dt))
+        tol = max(n["unit"], face * 0.001)
+        if face and abs(n["val"] - face) <= tol:
+            rem, how = face, "주석 기준"
+        elif n["face_col"]:
+            rem, how = n["val"], "주석 액면 기준"
+        elif face and paid and abs(n["val"] - (face - paid)) <= tol:
+            rem, how = face - paid, "주석·수시공시 기준"
+        else:
+            rem, how = None, f"주석 금액 {n['val']/1e8:,.1f}억(액면·장부가 불명)"
+        prc = iss.get("cv_prc")
+        nm = f"제{tm_}회 {iss.get('bd_knd') or iss['kind']} ({how})"
+        out.append({"kind": iss["kind"], "name": nm[:80], "isu_dd": iss.get("pymd"), "exprd_dd": iss.get("mtd"),
+                    "face_amt": face or None, "cv_rt": iss.get("cv_rt"), "cv_prc": prc,
+                    "remndr_amt": rem, "remndr_stock": (round(rem / prc) if rem and prc else None),
+                    "period": (f"{iss['cv_bgd']}~{iss.get('cv_edd') or ''}" if iss.get("cv_bgd") else None)})
     return out
 
 
@@ -438,9 +540,14 @@ def fetch_outstanding(con, corp_code):
     if not rows:                                           # v6: 2026 양식(미상환 CB 표 없음) → 발행실적 표 상환여부 + 발행결정 공시로 복원
         issues, events = _issues_events(con, corp_code)
         if issues:
-            rows = outstanding_from_issue_table(xml, issues, own={"names": [_norm_co(n) for n in names], "first": None}, events=events, rcept_dt=f"{rcept[:4]}-{rcept[4:6]}-{rcept[6:8]}")
+            rd = f"{rcept[:4]}-{rcept[4:6]}-{rcept[6:8]}"
+            rows = outstanding_from_issue_table(xml, issues, own={"names": [_norm_co(n) for n in names], "first": None}, events=events, rcept_dt=rd)
             if rows:
                 src = f"{nm} ※발행실적표 상환여부 기준"
+            else:                                          # 발행실적 표를 비워 둔 회사(3S·올릭스) → 주석의 '제N회 전환사채' 행
+                rows = outstanding_from_notes(xml, issues, events, rd)
+                if rows:
+                    src = f"{nm} ※재무제표 주석 기준"
     con.execute("DELETE FROM mezz_outstanding WHERE corp_code=?", (corp_code,))
     for r in rows:
         con.execute("""INSERT INTO mezz_outstanding (corp_code, rcept_no, report_nm, kind, name, isu_dd, exprd_dd, face_amt, cv_rt, cv_prc,
@@ -516,6 +623,11 @@ def debug(con, stock_codes):
         print(f"[mezz-debug]   발행결정 {len(issues)}건: " + " | ".join(f"{i['kind']}{i.get('tm')}회 {i.get('pymd')} {(i.get('face_amt') or 0)/1e8:,.1f}억" for i in issues[:8]), flush=True)
         fb = outstanding_from_issue_table(xml, issues, own={"names": [_norm_co(nm)], "first": None}, events=events, rcept_dt=f"{rcept[:4]}-{rcept[4:6]}-{rcept[6:8]}")
         print(f"[mezz-debug]   v6 폴백 행 {len(fb)}: {[(r['kind'], r['name'], r['remndr_amt'], r['cv_prc']) for r in fb]}", flush=True)
+        nseg = notes_segment(xml)
+        nrows = notes_mezz_rows(xml)
+        print(f"[mezz-debug]   주석 구간 {nseg} · 주석 메자닌 행 {len(nrows)}: {[(n['tm'], n['kind'], round(n['val']/1e8,2), n['face_col']) for n in nrows[:10]]}", flush=True)
+        fb3 = outstanding_from_notes(xml, issues, events, f"{rcept[:4]}-{rcept[4:6]}-{rcept[6:8]}", notes=nrows)
+        print(f"[mezz-debug]   주석 폴백 행 {len(fb3)}: {[(r['kind'], r['name'], r['remndr_amt']) for r in fb3]}", flush=True)
         # 2026-11-27 진단: 2026년 정기보고서 양식에서 '미상환 전환사채 발행현황' 제목(TITLE)이 사라짐 → 전환·교환·신주인수권 문구가 나오는 자리(직전 제목·문단/표 머리)를 덤프
         tpos = [(m.start(), _strip(m.group(1)).replace("\n", " ").strip()) for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml, flags=re.S | re.I)]
         seen = 0
