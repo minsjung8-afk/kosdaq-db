@@ -76,7 +76,7 @@ def record_usage(con, job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill", "da_ai", "periodic_new", "verify"])
+    ap.add_argument("job", choices=["init", "fin", "kpi", "biz", "mezz", "price", "rating", "news", "kind", "hk", "analyze", "summarize", "profile", "site", "all", "delta", "daily", "catchup", "unlisted", "quarters", "subst", "fin_fast", "rating_fix", "da", "chain", "fin_ofs", "fin_yoy", "notes_struct", "newlist", "notes", "invest", "da_notes", "rawdump", "unlisted_add", "audit_fs", "coverage", "review", "rating_valid", "interim_doc", "filer_scan", "fin_ai", "audit_scan", "da_backfill", "da_ai", "periodic_new", "verify", "short_fy"])
     ap.add_argument("--limit", type=int)
     ap.add_argument("--min-equity", type=float, help="unlisted_add 감사보고서: 자본총계 하한(억원) — 2026-11-18 사용자 '3천억 이상부터 asap'")
     ap.add_argument("--year", type=int, default=__import__("datetime").date.today().year)
@@ -178,6 +178,9 @@ def main():
     if a.job == "subst":                     # 대용가(KRX 정보데이터시스템 MDCSTAT04001) 1콜
         import subst
         subst.run(start=a.start, con=con)
+    if a.job == "short_fy":                  # 2026-11-27 사용자 지적(대신밸류리츠): 3·6개월 결산 리츠 — 사업보고서별 원문 파싱 → 가상 12개월 사업연도 누적 칸. --codes/--force/--dry-run
+        import short_fy
+        short_fy.run(ccs if a.codes else None, con=con, force=a.force, dry=a.dry_run)
     if a.job == "quarters":                  # 8분기·LTM 분기 손익(등급사→코스피→코스닥 순, 한도까지)
         import quarters
         quarters.run([p[0] for p in corp_pairs(con)] if not a.codes else ccs, limit=a.limit, con=con)   # --limit = 미수집 회사 중 N사
@@ -468,7 +471,12 @@ def main():
         _xb_ok = {r[0] for r in con.execute("SELECT corp_code FROM company WHERE stock_code IS NOT NULL AND stock_code<>''")}
         try: _xb_ok |= {r[0] for r in con.execute("SELECT corp_code FROM filer_candidate")}
         except Exception: pass   # noqa
-        xcs = [c for c in ccs if c in _xb_ok]
+        try:                                  # 2026-11-27: 3·6개월 결산 리츠는 short_fy가 적재(fin·quarters가 3개월치를 '연간'으로 덮어쓰던 문제)
+            import short_fy as _sfy
+            _short = _sfy.short_codes(con)
+        except Exception:  # noqa
+            _short = set()
+        xcs = [c for c in ccs if c in _xb_ok and c not in _short]
         print(f"[catchup] XBRL 단계 대상 {len(xcs)}사 / 전체 {len(ccs)}사 (감사보고서-only 비상장 {len(ccs) - len(xcs)}사 제외)", flush=True)
         steps = [("periodic", lambda: __import__("periodic_new").process(con)),
                  ("mezz", lambda: mezz.run(xcs, new_only=True)),
@@ -485,6 +493,7 @@ def main():
                  ("fin_ofs", lambda: financials.run_ofs(xcs, a.year - 1, con=con)),
                  ("fin_yoy", lambda: financials.run_yoy(xcs, con=con)),       # 전년동기 BS 보강   # 별도 재무 보강(연결만 있는 회사)
                  ("quarters", lambda: quarters.run(xcs, con=con)),
+                 ("short_fy", lambda: __import__("short_fy").run(None, con=con)),              # 3·6개월 결산 리츠: 새 정기보고서만 파싱해 누적 칸 갱신
                  ("kpi", lambda: print("KPI 재계산:", financials.rebuild_kpi_all(con), "건")),                       # 8분기·LTM용 분기 손익(주요계정 1콜/보고서), 한도까지
                  ("notes", lambda: business.run_notes(con, [c for c in xcs if c not in done_notes(con)])),   # 주석(차입금·우발채무·특수관계자) — 최신 정기보고서(분기 우선) 원문만, 회사당 2콜, 한도까지
                  ("invest", lambda: business.refresh_other_investments(con, [c for c in xcs if c not in done_invest_latest(con)], a.year - 1)),   # 타법인 출자 — 최신 분기보고서 기준으로 갱신
