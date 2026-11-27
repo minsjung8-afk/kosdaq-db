@@ -420,6 +420,18 @@ def debug(con, stock_codes):
             print(f"[mezz-debug]   '{kw}' 출현 {xml.count(kw)}회")
         rows = extract_outstanding(xml)
         print(f"[mezz-debug]   추출 행 {len(rows)}: {[(r['kind'], r['name'], r['remndr_amt']) for r in rows][:6]}")
+        # 2026-11-27 진단: 2026년 정기보고서 양식에서 '미상환 전환사채 발행현황' 제목(TITLE)이 사라짐 → 전환·교환·신주인수권 문구가 나오는 자리(직전 제목·문단/표 머리)를 덤프
+        tpos = [(m.start(), _strip(m.group(1)).replace("\n", " ").strip()) for m in re.finditer(r"<TITLE[^>]*>(.*?)</TITLE>", xml, flags=re.S | re.I)]
+        seen = 0
+        for m in re.finditer(r"<(P|TH|TD|TE)[^>]*>(.*?)</\1>", xml, flags=re.S | re.I):
+            txt = _strip(m.group(2)).replace("\n", " ").strip()
+            if not re.search(r"전환사채|교환사채|신주인수권부사채", txt) or len(txt) > 160:
+                continue
+            prev_t = [t for pos, t in tpos if pos < m.start()]
+            print(f"[mezz-debug]   @{m.start()} <{m.group(1)}> 「{txt[:120]}」 ← 제목 {prev_t[-1][:40] if prev_t else '-'}", flush=True)
+            seen += 1
+            if seen >= 30:
+                break
         # 원문 구조 덤프: '미상환 전환사채 발행현황' 제목 뒤 첫 표의 원시 XML 2,500자 + 셀 파싱 결과 → 파서 보정용
         mpos = xml.find("미상환 전환사채")
         if mpos < 0:
