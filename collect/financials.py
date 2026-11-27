@@ -91,12 +91,24 @@ def _sce_pick(lst):
     return out + [r for _, r in best.values()]
 
 
+SHORT_FY_WRITER = False      # short_fy.rebuild()가 적재할 때만 True
+
+
+def _is_short_fy(con, corp_code):
+    try:
+        return con.execute("SELECT 1 FROM short_fy WHERE corp_code=?", (corp_code,)).fetchone() is not None
+    except Exception:  # noqa  (표 없음 = 등록 없음)
+        return False
+
+
 def store_raw(con, corp_code, bsns_year, reprt_code, fs_div, lst, prev=True):
     """받은 목록 저장(손익은 누적). prev=True면 같은 보고서의 '전기' 열로 전년 같은 기간도 채운다(이미 그 보고서를 받았으면 건드리지 않음).
     - 연간: 전기 = 전년 사업보고서와 같은 기준(BS 포함) → 전 계정 저장
     - 분기·반기: 전기 손익·현금흐름 = 전년 같은 기간 누적, BS 전기 = 전년 말(분기말 아님) → BS는 저장하지 않음(분기말 순차입금은 해당 보고서에서만)
     반환: (당기 저장 행 수, 전기 보충 여부)"""
     ensure_cum_table(con)
+    if not SHORT_FY_WRITER and _is_short_fy(con, corp_code):   # 2026-11-27: 3·6개월 결산사(리츠)는 short_fy가 기간 합산으로 적재 — API·감사보고서 경로가 덮어쓰지 않게
+        return 0, False
     y = str(bsns_year)
     lst = _sce_pick(lst)
     con.execute("DELETE FROM fin_raw WHERE corp_code=? AND bsns_year=? AND reprt_code=? AND fs_div=?", (corp_code, y, reprt_code, fs_div))
